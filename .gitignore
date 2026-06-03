@@ -1,0 +1,11 @@
+node_modules/
+scripts/node_modules/
+app/build/
+.env
+.env.local
+*.pem
+*.key
+.DS_Store
+app/Lemon.xcodeproj/project.xcworkspace/xcuserdata/
+app/Lemon/LemonWorker/
+*.profraw

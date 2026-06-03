@@ -1,0 +1,63 @@
+# Lemon — example configuration manifest
+# Copy this to your config repo and adapt it to your team's setup.
+# Lemon reads this file at container start; all Harpy-specific knowledge
+# lives here, not in the lemon image itself.
+
+repos:
+  # The config repo itself — role: context means it's already cloned as
+  # /agent/config-root and won't be re-cloned by clone-repos.js.
+  - url: git@github.com:yourorg/memory.git
+    path: memory
+    role: context
+    preview: none
+
+  # Repos Lemon can make changes to. Add or remove as needed.
+  - url: git@github.com:yourorg/docs.git
+    path: docs
+    tier: high
+    review: [docs]
+    preview: none          # or: vercel, mintlify
+
+  - url: git@github.com:yourorg/web.git
+    path: web
+    tier: medium
+    review: [code, design]
+    preview: vercel        # Lemon will fetch the Vercel preview URL after the PR opens
+
+# MCP servers available inside the container.
+# token_env: name of the env var holding the API token.
+# If the env var is unset, the Authorization header is omitted.
+mcp:
+  - name: linear-server
+    url: https://mcp.linear.app/mcp
+    token_env: LINEAR_API_KEY
+  - name: vercel
+    url: https://mcp.vercel.com
+    token_env: VERCEL_TOKEN
+
+# Shell script to run after all repos are cloned (npm install, etc.).
+# Path is relative to the config repo root. Omit if not needed.
+setup: lemon/setup.sh
+
+# Claude model for planning and execution agents.
+model: claude-sonnet-4-6
+# Claude model for review and eval agents (can be the same or different).
+review_model: claude-sonnet-4-6
+
+# Prompt file paths, relative to the config repo root.
+prompts:
+  plan: lemon/prompts/plan.md
+  execute: lemon/prompts/execute.md
+  review: lemon/prompts/review.md
+  eval: lemon/prompts/eval.md
+
+# Path to the issue classification criteria document.
+classification: lemon/classification.md
+
+# Linear config.
+linear:
+  user_id_env: LEMON_LINEAR_USER_ID   # env var holding the @lemon account's Linear user ID
+
+# Maximum issues processed concurrently.
+# Keep at 1 unless you've verified your repos handle concurrent worktrees safely.
+max_concurrent: 1

@@ -1,0 +1,728 @@
+import Foundation
+import os
+
+// Manages git worktrees and a claude --auto --remote-control session for one Linear issue.
+// Supports single-repo and multi-repo (all git repos in a folder) modes.
+final class WorktreeRunner: @unchecked Sendable {
+    private let linear = LinearClient()
+    private var pollTask: Task<Void, Never>?
+    private var stopped = false
+    private var pendingActionTask: Task<Void, Never>?
+
+    var onStatusChange: ((SessionStatus) -> Void)?
+    var onLogLine: ((String) -> Void)?
+    var onPRUrl: ((String) -> Void)?
+    var onAiSummary: ((String) -> Void)?
+    var onPendingAction: ((String?) -> Void)?
+
+    func cancelPendingAction() {
+        pendingActionTask?.cancel()
+        pendingActionTask = nil
+        onPendingAction?(nil)
+    }
+
+    // MARK: - Entry point
+
+    func run(issue: LinearIssue, workspace: WorkspaceRepo, retrigger: LemonMarker? = nil) async {
+        let apiKey = KeychainStore.shared.linearApiKey
+        let identifier = issue.identifier
+        let branch = retrigger?.branch ?? "lemon/\(identifier.lowercased())"
+        let sessionPath = "/tmp/lemon-\(identifier.lowercased())"
+        let homeRepo = workspace.homeRepo.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        log("[lemon] starting session for \(identifier)")
+        onStatusChange?(.planning)
+
+        // Resolve label IDs, creating any that don't exist yet.
+        var labelIds: [String: String] = [:]
+        for labelName in [LinearClient.labelTrigger, LinearClient.labelInProgress,
+                          LinearClient.labelWaiting, LinearClient.labelComplete] {
+            if let lid = try? await linear.ensureLabelId(name: labelName, teamId: issue.teamId, apiKey: apiKey) {
+                labelIds[labelName] = lid
+            }
+        }
+
+        // Discover repos to include in this session.
+        let repos: [(name: String, repoPath: String)]
+        if workspace.allReposInFolder {
+            repos = discoverRepos(in: workspace.path)
+            guard !repos.isEmpty else {
+                log("[lemon] no git repos found in \(workspace.path)", level: .error)
+                onStatusChange?(.failed)
+                return
+            }
+            log("[lemon] found repos: \(repos.map { $0.name }.joined(separator: ", "))")
+        } else {
+            let name = URL(fileURLWithPath: workspace.path).lastPathComponent
+            repos = [(name: name, repoPath: workspace.path)]
+        }
+
+        // Set up worktrees.
+        do {
+            try await setupWorktrees(
+                repos: repos,
+                sessionPath: sessionPath,
+                isMultiRepo: workspace.allReposInFolder,
+                branch: branch,
+                isRetrigger: retrigger != nil
+            )
+        } catch {
+            let msg = error.localizedDescription
+            log("[lemon] worktree setup failed: \(msg)", level: .error)
+            // Clean up Linear so the issue is in a neutral state.
+            // User can retry by re-adding the 🍋 label.
+            if let triggerId = labelIds[LinearClient.labelTrigger] {
+                try? await linear.removeLabel(issueId: issue.id, labelId: triggerId, apiKey: apiKey)
+            }
+            if let inProgressId = labelIds[LinearClient.labelInProgress] {
+                try? await linear.removeLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
+            }
+            _ = try? await linear.postComment(
+                issueId: issue.id,
+                body: "🍋 Session failed to start: \(msg)\n\nRe-add the 🍋 label to retry.",
+                apiKey: apiKey
+            )
+            onStatusChange?(.failed)
+            return
+        }
+
+        // Write issue context for Claude. Team instructions from {homeRepo}/LEMON.md come first.
+        let lemonMdPath = homeRepo.isEmpty ? nil : "\(workspace.path)/\(homeRepo)/LEMON.md"
+        let devPort = Self.devPort(for: identifier)
+        writeContext(
+            to: sessionPath,
+            issue: issue,
+            repos: workspace.allReposInFolder ? repos : [],
+            lemonMdPath: lemonMdPath,
+            devPort: devPort
+        )
+
+        // Update Linear labels.
+        if let triggerId = labelIds[LinearClient.labelTrigger] {
+            try? await linear.removeLabel(issueId: issue.id, labelId: triggerId, apiKey: apiKey)
+        }
+        if retrigger != nil, let completeId = labelIds[LinearClient.labelComplete] {
+            try? await linear.removeLabel(issueId: issue.id, labelId: completeId, apiKey: apiKey)
+        }
+        if let inProgressId = labelIds[LinearClient.labelInProgress] {
+            try? await linear.addLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
+        }
+
+        // Launch Claude inside a tmux session, starting in homeRepo if configured.
+        let launchPath = homeRepo.isEmpty ? sessionPath : "\(sessionPath)/\(homeRepo)"
+        let sentinelPath = "/tmp/lemon-exit-\(identifier.lowercased())"
+        // Remove any leftover sentinel and log from a prior run.
+        try? FileManager.default.removeItem(atPath: sentinelPath)
+        try? FileManager.default.removeItem(atPath: logPath(identifier))
+
+        // Pre-merge .mcp.json files so Claude skips the interactive MCP discovery prompt.
+        let mcpConfigPath = prepareMcpConfig(sessionPath: sessionPath, repos: repos,
+                                             isMultiRepo: workspace.allReposInFolder,
+                                             identifier: identifier)
+
+        guard launchTmux(sessionPath: launchPath, identifier: identifier,
+                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath) else {
+            log("[lemon] tmux launch failed — session aborted", level: .error)
+            if let triggerId = labelIds[LinearClient.labelTrigger] {
+                try? await linear.removeLabel(issueId: issue.id, labelId: triggerId, apiKey: apiKey)
+            }
+            if let inProgressId = labelIds[LinearClient.labelInProgress] {
+                try? await linear.removeLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
+            }
+            _ = try? await linear.postComment(
+                issueId: issue.id,
+                body: "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry.",
+                apiKey: apiKey
+            )
+            onStatusChange?(.failed)
+            return
+        }
+        onStatusChange?(.executing)
+        log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(identifier))")
+
+        await pollUntilDone(
+            issue: issue,
+            sessionPath: sessionPath,
+            repos: repos,
+            isMultiRepo: workspace.allReposInFolder,
+            branch: branch,
+            labelIds: labelIds,
+            retrigger: retrigger,
+            apiKey: apiKey,
+            workspacePath: workspace.path,
+            sentinelPath: sentinelPath
+        )
+    }
+
+    func stop() {
+        stopped = true
+        pollTask?.cancel()
+    }
+
+    // MARK: - Repo discovery
+
+    private func discoverRepos(in folderPath: String) -> [(name: String, repoPath: String)] {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: folderPath) else { return [] }
+        return contents.compactMap { name -> (name: String, repoPath: String)? in
+            let repoPath = "\(folderPath)/\(name)"
+            var isDir = ObjCBool(false)
+            guard fm.fileExists(atPath: "\(repoPath)/.git", isDirectory: &isDir) else { return nil }
+            return (name: name, repoPath: repoPath)
+        }.sorted { $0.name < $1.name }
+    }
+
+    // MARK: - Worktree setup
+
+    private func setupWorktrees(
+        repos: [(name: String, repoPath: String)],
+        sessionPath: String,
+        isMultiRepo: Bool,
+        branch: String,
+        isRetrigger: Bool
+    ) async throws {
+        if isMultiRepo {
+            // Create the session root directory (not a worktree itself).
+            try FileManager.default.createDirectory(atPath: sessionPath, withIntermediateDirectories: true)
+            for repo in repos {
+                let worktreePath = "\(sessionPath)/\(repo.name)"
+                try await setupSingleWorktree(repoPath: repo.repoPath, worktreePath: worktreePath, branch: branch, isRetrigger: isRetrigger)
+            }
+        } else {
+            // Single repo: worktree IS the session path.
+            try await setupSingleWorktree(repoPath: repos[0].repoPath, worktreePath: sessionPath, branch: branch, isRetrigger: isRetrigger)
+        }
+    }
+
+    private func setupSingleWorktree(
+        repoPath: String,
+        worktreePath: String,
+        branch: String,
+        isRetrigger: Bool
+    ) async throws {
+        // Remove any leftover worktree and orphaned branch from a previous failed run.
+        _ = try? await shell("git -C \(q(repoPath)) worktree remove \(q(worktreePath)) --force")
+        if !isRetrigger {
+            _ = try? await shell("git -C \(q(repoPath)) branch -D \(branch)")
+        }
+        try await shell("git -C \(q(repoPath)) fetch origin")
+
+        if isRetrigger {
+            try await shell("git -C \(q(repoPath)) worktree add \(q(worktreePath)) \(branch)")
+            try await shell("git -C \(q(worktreePath)) pull origin \(branch) --rebase || true")
+        } else {
+            let base = await defaultBranch(repoPath: repoPath)
+            try await shell("git -C \(q(repoPath)) worktree add -b \(branch) \(q(worktreePath)) origin/\(base)")
+        }
+    }
+
+    private func defaultBranch(repoPath: String) async -> String {
+        let result = try? await shell("git -C \(q(repoPath)) remote show origin | grep 'HEAD branch' | awk '{print $NF}'")
+        let trimmed = result?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "main" : trimmed
+    }
+
+    // MARK: - Worktree cleanup
+
+    private func cleanupWorktrees(
+        repos: [(name: String, repoPath: String)],
+        sessionPath: String,
+        isMultiRepo: Bool,
+        identifier: String
+    ) async {
+        if isMultiRepo {
+            for repo in repos {
+                let worktreePath = "\(sessionPath)/\(repo.name)"
+                do {
+                    try await shell("git -C \(q(repo.repoPath)) worktree remove \(q(worktreePath)) --force")
+                } catch {
+                    Logger.worktree.warning("Worktree remove failed for \(repo.name): \(error)")
+                }
+            }
+            do {
+                try FileManager.default.removeItem(atPath: sessionPath)
+            } catch {
+                Logger.worktree.warning("Session dir removal failed at \(sessionPath): \(error)")
+            }
+        } else {
+            do {
+                try await shell("git -C \(q(repos[0].repoPath)) worktree remove \(q(sessionPath)) --force")
+            } catch {
+                Logger.worktree.warning("Worktree remove failed at \(sessionPath): \(error)")
+            }
+        }
+        // Kill tmux session and remove session artefacts.
+        runSync("tmux kill-session -t '\(tmuxSessionName(identifier))' 2>/dev/null || true")
+        try? FileManager.default.removeItem(atPath: logPath(identifier))
+        log("[lemon] worktree(s) cleaned up")
+    }
+
+    // MARK: - Context file
+
+    // Returns true when the silence detector should fire Gemma.
+    // Extracted for unit testability — call sites pass `now` explicitly.
+    static func shouldInvokeGemma(
+        lastActivityAt: Date,
+        lastGemmaAt: Date?,
+        now: Date = Date(),
+        silenceThreshold: TimeInterval = 120,
+        cooldown: TimeInterval = 180
+    ) -> Bool {
+        let silence = now.timeIntervalSince(lastActivityAt)
+        let gemmaCooldown = lastGemmaAt.map { now.timeIntervalSince($0) } ?? .infinity
+        return silence > silenceThreshold && gemmaCooldown > cooldown
+    }
+
+    // Derives a stable dev server port from the issue number (e.g. HRP-42 → 3042).
+    // Keeps concurrent sessions on different ports without coordination.
+    static func devPort(for identifier: String) -> Int {
+        let n = Int(identifier.split(separator: "-").last.flatMap(String.init) ?? "0") ?? 0
+        return 3000 + (n % 1000)   // stays in 3000–3999, wraps for very large issue numbers
+    }
+
+    private func writeContext(
+        to sessionPath: String,
+        issue: LinearIssue,
+        repos: [(name: String, repoPath: String)],
+        lemonMdPath: String?,
+        devPort: Int
+    ) {
+        var content = ""
+
+        // Team operating instructions come first — Claude reads this before the issue.
+        if let path = lemonMdPath,
+           let instructions = try? String(contentsOfFile: path, encoding: .utf8),
+           !instructions.isEmpty {
+            content += instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+            content += "\n\n---\n\n"
+            log("[lemon] loaded team instructions from \(path)")
+        }
+
+        // Issue details.
+        content += "# Issue: \(issue.identifier) — \(issue.title)\n\n"
+        if let desc = issue.description, !desc.isEmpty {
+            content += desc.trimmingCharacters(in: .whitespacesAndNewlines)
+            content += "\n\n"
+        }
+
+        // Available repos (multi-repo mode).
+        if !repos.isEmpty {
+            content += "### Available Repos\n"
+            for repo in repos {
+                content += "- `\(repo.name)/`\n"
+            }
+            content += "\n"
+        }
+
+        // Dev environment.
+        content += "### Dev Environment\n"
+        content += "- **Dev server port for this session:** `\(devPort)` — use `next dev --port \(devPort)` (or equivalent). This keeps concurrent sessions from colliding.\n"
+        content += "- **Database:** Create a Neon branch named `lemon-\(issue.identifier.lowercased())` at session start; delete it when done. Use its `DATABASE_URL` in `.env.local` in the worktree.\n\n"
+
+        // Completion checklist.
+        content += """
+        ---
+        When you are done and the PR is open:
+        1. Apply the Linear label "🍋 Complete" to issue \(issue.identifier)
+        2. Write a brief summary of what you did to `.lemon-summary.md` in this session directory
+        3. Kill any dev servers you started and delete the Neon branch `lemon-\(issue.identifier.lowercased())`
+        4. If you need human input at any point, apply the label "🍋 Waiting" and pause
+        """
+        try? content.write(toFile: "\(sessionPath)/LEMON_CONTEXT.md", atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Session naming helpers
+
+    func tmuxSessionName(_ identifier: String) -> String {
+        "lemon-\(identifier.lowercased())"
+    }
+
+    func logPath(_ identifier: String) -> String {
+        "/tmp/lemon-log-\(identifier.lowercased()).txt"
+    }
+
+    // MARK: - MCP config preparation
+
+    // Merges .mcp.json files from all worktree repos into a single config file.
+    // Returns the path to the merged file, or nil if no MCP servers were found.
+    // Passing this via --mcp-config bypasses Claude's interactive MCP discovery prompt.
+    private func prepareMcpConfig(sessionPath: String, repos: [(name: String, repoPath: String)],
+                                  isMultiRepo: Bool, identifier: String) -> String? {
+        var mcpServers: [String: Any] = [:]
+        let searchPaths = isMultiRepo
+            ? repos.map { "\(sessionPath)/\($0.name)" }
+            : [sessionPath]
+        for path in searchPaths {
+            let mcpPath = "\(path)/.mcp.json"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: mcpPath)),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let servers = json["mcpServers"] as? [String: Any] else { continue }
+            mcpServers.merge(servers) { _, new in new }
+        }
+        guard !mcpServers.isEmpty else { return nil }
+        let configPath = "/tmp/lemon-mcp-\(identifier.lowercased()).json"
+        guard let data = try? JSONSerialization.data(withJSONObject: ["mcpServers": mcpServers],
+                                                     options: .prettyPrinted) else { return nil }
+        try? data.write(to: URL(fileURLWithPath: configPath))
+        return configPath
+    }
+
+    // MARK: - tmux launch
+
+    // Creates a named tmux session running Claude, pipes output to a log file,
+    // and opens the session in iTerm2 (tmux -CC for native tabs) if available.
+    // The launcher script writes sentinelPath when claude exits so pollUntilDone
+    // can detect early exits without waiting for the 8h deadline.
+    @discardableResult
+    private func launchTmux(sessionPath: String, identifier: String,
+                             sentinelPath: String, mcpConfigPath: String? = nil) -> Bool {
+        // Verify tmux is installed.
+        guard runSync("which tmux > /dev/null 2>&1") else {
+            log("[lemon] tmux not found — install with: brew install tmux", level: .error)
+            return false
+        }
+
+        let sessionName  = tmuxSessionName(identifier)
+        let launcherPath = "/tmp/lemon-launch-\(identifier.lowercased()).sh"
+        let mcpFlag      = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
+
+        let launcher = """
+        #!/bin/bash
+        cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control
+        echo $? > '\(sentinelPath)'
+        """
+        do {
+            try launcher.write(toFile: launcherPath, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcherPath)
+        } catch {
+            Logger.worktree.error("Failed to write launcher: \(error)")
+            return false
+        }
+
+        // Kill any leftover session from a prior run.
+        runSync("tmux kill-session -t '\(sessionName)' 2>/dev/null || true")
+
+        // Create detached tmux session.
+        guard runSync("tmux new-session -d -s '\(sessionName)' -x 220 -y 50 '\(launcherPath)'") else {
+            log("[lemon] Failed to create tmux session '\(sessionName)'", level: .error)
+            return false
+        }
+
+        // Pipe all pane output to the log file for Gemma to read.
+        runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(identifier))'")
+
+        // Open in iTerm2 using tmux control mode (native tabs) if available.
+        // Fall back gracefully — the user can always attach manually.
+        let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
+        if hasITerm {
+            runSync("""
+                osascript -e 'tell application "iTerm" to create window with default profile \
+                command "tmux -CC attach -t \(sessionName)"' 2>/dev/null || true
+                """)
+        }
+
+        return true
+    }
+
+    // MARK: - Gemma orchestration
+
+    private func invokeGemma(issue: LinearIssue) async {
+        guard LocalLLM.shared.isReady() else { return }
+        let lines = tailLog(issue.identifier, last: 100)
+        guard let response = try? await LocalLLM.shared.classify(issue: issue, logLines: lines) else { return }
+
+        onAiSummary?(response.summary)
+        log("[gemma] \(response.summary)")
+
+        guard let action = response.action else { return }
+        switch action.type {
+        case "send_keys":
+            handleSendKeys(keys: action.keys ?? "", identifier: issue.identifier,
+                           reason: response.summary)
+        case "notify_user":
+            // Route through the existing push-notification / 🍋 Waiting path via log line.
+            // A future iteration can wire this to a native notification.
+            log("[gemma] needs human: \(action.message ?? response.summary)", level: .error)
+        default:
+            break
+        }
+    }
+
+    // Shows a 5-second cancellable toast, then sends keys to the tmux pane.
+    private func handleSendKeys(keys: String, identifier: String, reason: String) {
+        onPendingAction?("Gemma: \(reason)…")
+        pendingActionTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            runSync("tmux send-keys -t '\(tmuxSessionName(identifier))' '\(keys)' Enter")
+            log("[gemma] resolved: \(reason)")
+            onPendingAction?(nil)
+        }
+    }
+
+    // MARK: - Log tail helper
+
+    private func tailLog(_ identifier: String, last n: Int) -> [String] {
+        guard let content = try? String(contentsOfFile: logPath(identifier), encoding: .utf8) else {
+            return []
+        }
+        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
+        return lines.count <= n ? lines : Array(lines[(lines.count - n)...])
+    }
+
+    // MARK: - Synchronous shell helper (used for setup/teardown, not in async hot paths)
+
+    @discardableResult
+    private func runSync(_ command: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-c", command]
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        try? p.run()
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+
+    // MARK: - Label polling
+
+    private func pollUntilDone(
+        issue: LinearIssue,
+        sessionPath: String,
+        repos: [(name: String, repoPath: String)],
+        isMultiRepo: Bool,
+        branch: String,
+        labelIds: [String: String],
+        retrigger: LemonMarker?,
+        apiKey: String,
+        workspacePath: String,
+        sentinelPath: String
+    ) async {
+        let deadline = Date().addingTimeInterval(8 * 3600)  // 8h max; prevents forever-stuck icon
+        var lastLogSize: Int64 = 0
+        var lastActivityAt = Date()
+        var lastGemmaAt: Date? = nil
+
+        while !stopped && Date() < deadline {
+            try? await Task.sleep(for: .seconds(10))
+            guard !stopped else { break }
+
+            // Poll PR URL from gh CLI (first match across all repos).
+            if let prUrl = await detectPR(branch: branch, repos: repos) {
+                onPRUrl?(prUrl)
+            }
+
+            // Check for 🍋 Complete label.
+            let userId = KeychainStore.shared.linearUserId
+            if let completes = try? await linear.fetchCompleteIssues(apiKey: apiKey, userId: userId),
+               completes.first(where: { $0.id == issue.id }) != nil {
+                await handleComplete(
+                    issue: issue,
+                    sessionPath: sessionPath,
+                    repos: repos,
+                    isMultiRepo: isMultiRepo,
+                    branch: branch,
+                    labelIds: labelIds,
+                    retrigger: retrigger,
+                    apiKey: apiKey,
+                    workspacePath: workspacePath
+                )
+                return
+            }
+
+            // If the launcher script wrote its exit sentinel, the claude process exited.
+            // Give it one extra poll interval to let Linear label changes propagate,
+            // then mark the session failed — it ended without completing.
+            if FileManager.default.fileExists(atPath: sentinelPath) {
+                let exitCode = (try? String(contentsOfFile: sentinelPath, encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
+                Logger.worktree.warning("claude exited (code \(exitCode)) without setting 🍋 Complete on \(issue.identifier)")
+                log("[lemon] session ended without completing (exit \(exitCode))", level: .error)
+                _ = try? await linear.postComment(
+                    issueId: issue.id,
+                    body: "🍋 Session exited without completing (exit \(exitCode)). Re-add the 🍋 label to retry.",
+                    apiKey: apiKey
+                )
+                if let inProgressId = labelIds[LinearClient.labelInProgress] {
+                    try? await linear.removeLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
+                }
+                if let waitingId = labelIds[LinearClient.labelWaiting] {
+                    try? await linear.removeLabel(issueId: issue.id, labelId: waitingId, apiKey: apiKey)
+                }
+                onStatusChange?(.failed)
+                return
+            }
+
+            // Infer waiting vs executing from queue labels.
+            if let queue = try? await linear.fetchLemonQueue(apiKey: apiKey, userId: userId),
+               let current = queue.first(where: { $0.id == issue.id }) {
+                if current.labelNames.contains(LinearClient.labelWaiting) {
+                    onStatusChange?(.waiting)
+                } else if current.labelNames.contains(LinearClient.labelInProgress) {
+                    onStatusChange?(.executing)
+                }
+            }
+
+            // Silence detection: track log file growth, invoke Gemma after 2-min quiet.
+            let attrs = try? FileManager.default.attributesOfItem(atPath: logPath(issue.identifier))
+            let currentSize = attrs?[.size] as? Int64 ?? 0
+            if currentSize > lastLogSize {
+                lastLogSize = currentSize
+                lastActivityAt = Date()
+            }
+            if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
+                lastGemmaAt = Date()
+                await invokeGemma(issue: issue)
+            }
+        }
+        // Loop exited without completing — either stopped externally or timed out.
+        if !stopped {
+            Logger.worktree.warning("Session for \(issue.identifier) timed out after 8h")
+            onStatusChange?(.failed)
+        }
+    }
+
+    // MARK: - Completion handler
+
+    private func handleComplete(
+        issue: LinearIssue,
+        sessionPath: String,
+        repos: [(name: String, repoPath: String)],
+        isMultiRepo: Bool,
+        branch: String,
+        labelIds: [String: String],
+        retrigger: LemonMarker?,
+        apiKey: String,
+        workspacePath: String
+    ) async {
+        onStatusChange?(.reviewing)
+        log("[lemon] 🍋 Complete detected for \(issue.identifier)")
+
+        // Final Gemma summary before posting the Linear comment.
+        await invokeGemma(issue: issue)
+
+        let prUrl = await detectPR(branch: branch, repos: repos)
+        let prNumber = prUrl.flatMap { URL(string: $0)?.lastPathComponent } ?? ""
+        let summary = (try? String(contentsOfFile: "\(sessionPath)/.lemon-summary.md", encoding: .utf8)) ?? ""
+
+        // The marker stores the workspace path so retrigger can rediscover repos.
+        let markerPath = workspacePath
+
+        let commentBody = buildLemonComment(
+            issue: issue,
+            prUrl: prUrl,
+            prNumber: prNumber,
+            branch: branch,
+            summary: summary,
+            repoPath: markerPath
+        )
+
+        if let existingCommentId = retrigger?.commentId {
+            let replyBody = buildReplyComment(prUrl: prUrl, summary: summary)
+            do {
+                try await linear.postComment(issueId: issue.id, body: replyBody, apiKey: apiKey)
+            } catch {
+                Logger.worktree.error("Failed to post reply comment for \(issue.identifier): \(error)")
+            }
+            _ = existingCommentId
+        } else {
+            if let commentId = try? await linear.postComment(issueId: issue.id, body: commentBody, apiKey: apiKey) {
+                log("[lemon] posted Lemon comment \(commentId)")
+            }
+        }
+
+        await cleanupWorktrees(repos: repos, sessionPath: sessionPath, isMultiRepo: isMultiRepo,
+                               identifier: issue.identifier)
+        onStatusChange?(.done)
+    }
+
+    // MARK: - Comment builders
+
+    private func buildLemonComment(
+        issue: LinearIssue,
+        prUrl: String?,
+        prNumber: String,
+        branch: String,
+        summary: String,
+        repoPath: String
+    ) -> String {
+        var md = "## 🍋 Lemon Report — \(issue.identifier)\n\n"
+        if let url = prUrl {
+            md += "**PR:** [#\(prNumber)](\(url))\n"
+        }
+        md += "**Branch:** `\(branch)`\n"
+        if !summary.isEmpty {
+            md += "\n### What was done\n\(summary)\n"
+        }
+        md += "\n---\n*Reply to this comment to ask Lemon to revise. Lemon will update the branch and PR.*\n\n"
+        md += "<!-- lemon\nbranch: \(branch)\npr: \(prNumber)\ncomment: PENDING\nrepo: \(repoPath)\n-->"
+        return md
+    }
+
+    private func buildReplyComment(prUrl: String?, summary: String) -> String {
+        var md = "## 🍋 Lemon Update\n\n"
+        if let url = prUrl { md += "**PR:** \(url)\n\n" }
+        if !summary.isEmpty { md += summary }
+        return md
+    }
+
+    // MARK: - PR detection
+
+    private func detectPR(branch: String, repos: [(name: String, repoPath: String)]) async -> String? {
+        for repo in repos {
+            if let url = await detectPRInRepo(branch: branch, repoPath: repo.repoPath) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func detectPRInRepo(branch: String, repoPath: String) async -> String? {
+        guard let output = try? await shell(
+            "cd \(q(repoPath)) && gh pr list --head \(branch) --json url --jq '.[0].url' 2>/dev/null"
+        ) else { return nil }
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "null" ? nil : trimmed
+    }
+
+    // MARK: - Shell helper
+
+    @discardableResult
+    private func shell(_ command: String) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            p.arguments = ["-c", command]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = pipe
+            p.terminationHandler = { proc in
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                if proc.terminationStatus == 0 {
+                    continuation.resume(returning: output)
+                } else {
+                    continuation.resume(throwing: ShellError(command: command, output: output, code: proc.terminationStatus))
+                }
+            }
+            do { try p.run() } catch { continuation.resume(throwing: error) }
+        }
+    }
+
+    private func log(_ line: String, level: OSLogType = .info) {
+        Logger.worktree.log(level: level, "\(line)")
+        onLogLine?(line)
+    }
+
+    private func q(_ s: String) -> String { "\"\(s)\"" }
+}
+
+struct ShellError: Error, LocalizedError {
+    let command: String
+    let output: String
+    let code: Int32
+    var errorDescription: String? {
+        let out = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.isEmpty ? "exit \(code)" : "exit \(code): \(out)"
+    }
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Unsandboxed: required so Process can invoke `container run` freely.
+         Direct download at lemon.living — not App Store. -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!-- Outbound network access for Linear API + MCP servers -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>
