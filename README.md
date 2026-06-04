@@ -35,7 +35,7 @@ I already have Claude Code, and I already do the interesting parts: answering Cl
 
 Lemon is a **menu-bar orchestrator** that decides when to start Claude Code. It's **Glue** between your Linear queue and your Claude Code CLI. Includes a **local Gemma 4 classifier** that auto-accepts obvious confirmations and gently nudges past routine prompts so the session keeps moving.  
 
-You are in the loop with Claude's **Remote Control** (or joining existing sessions) to answer the **critical things** need your attention. Built for **one developer** running it on their own silicon (❤️ Mac mini) on their own Liner inbox.
+You are in the loop with Claude's **Remote Control** (or joining existing sessions) to answer the **critical things** that need your attention. Built for **one developer** running it on their own silicon (❤️ Mac mini) on their own Linear inbox.
 
 > [!IMPORTANT]
 > **Lemon isn't an AI agent product.** The intelligence is Claude Code; the judgment is yours. Lemon handles the workflow bureaucracy around your session so you stay focused on the parts that need a person. Not an assignee-style agent meant to stand in for a developer on your team.
