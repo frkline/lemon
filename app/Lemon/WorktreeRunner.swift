@@ -251,9 +251,20 @@ final class WorktreeRunner: @unchecked Sendable {
                 Logger.worktree.warning("Worktree remove failed at \(sessionPath): \(error)")
             }
         }
-        // Kill tmux session and remove session artefacts.
+        // Kill tmux session and remove all per-session artefacts in /tmp so
+        // repeated runs don't leak launcher scripts, sentinel files, merged
+        // MCP configs, or pane logs.
         runSync("tmux kill-session -t '\(tmuxSessionName(identifier))' 2>/dev/null || true")
-        try? FileManager.default.removeItem(atPath: logPath(identifier))
+        let id = identifier.lowercased()
+        let leftovers = [
+            logPath(identifier),
+            "/tmp/lemon-launch-\(id).sh",
+            "/tmp/lemon-exit-\(id)",
+            "/tmp/lemon-mcp-\(id).json",
+        ]
+        for path in leftovers {
+            try? FileManager.default.removeItem(atPath: path)
+        }
         log("[lemon] worktree(s) cleaned up")
     }
 
@@ -368,8 +379,13 @@ final class WorktreeRunner: @unchecked Sendable {
         let configPath = "/tmp/lemon-mcp-\(identifier.lowercased()).json"
         guard let data = try? JSONSerialization.data(withJSONObject: ["mcpServers": mcpServers],
                                                      options: .prettyPrinted) else { return nil }
-        try? data.write(to: URL(fileURLWithPath: configPath))
-        return configPath
+        do {
+            try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
+            return configPath
+        } catch {
+            Logger.worktree.error("MCP config write failed at \(configPath): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: - tmux launch
