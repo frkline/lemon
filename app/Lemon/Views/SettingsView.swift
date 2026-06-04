@@ -11,6 +11,15 @@ struct SettingsView: View {
     @State private var saved = false
     @State private var editingWorkspace = false
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    @State private var aiTestState: AITestState = .idle
+
+    enum AITestState: Equatable {
+        case idle
+        case starting      // launching SwiftLM subprocess + waiting for /health
+        case classifying   // server up, running classify()
+        case passed(state: String, summary: String, elapsedSec: Int)
+        case failed(String)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +36,7 @@ struct SettingsView: View {
             Divider()
             settingsFooter
         }
-        .frame(minHeight: 600)
+        .frame(minHeight: 680)
         .onAppear { load() }
     }
 
@@ -192,8 +201,124 @@ struct SettingsView: View {
                 aiRow(icon: "terminal.fill", label: "SwiftLM runner",
                       path: swiftLMPath.isEmpty ? "Not configured" : swiftLMPath,
                       ready: swiftLMReady)
+                if modelReady && swiftLMReady {
+                    Divider().padding(.leading, 54)
+                    aiTestRow
+                }
             }
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        }
+    }
+
+    private var aiTestRow: some View {
+        HStack(spacing: 12) {
+            iconBox("wand.and.stars", tint: aiTestTint)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("Self-test").font(.system(size: 13))
+                    aiTestBadge
+                }
+                Text(aiTestDetail)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 8)
+            switch aiTestState {
+            case .starting, .classifying:
+                ProgressView().scaleEffect(0.6).frame(width: 18, height: 18)
+            default:
+                Button("Run", action: runAITest)
+                    .buttonStyle(LemonButtonStyle())
+                    .font(.system(size: 11, weight: .semibold))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var aiTestTint: Color {
+        switch aiTestState {
+        case .idle:                return .secondary
+        case .starting, .classifying: return LD.lemon
+        case .passed:              return LD.statusDone
+        case .failed:              return LD.coral
+        }
+    }
+
+    @ViewBuilder
+    private var aiTestBadge: some View {
+        switch aiTestState {
+        case .idle: EmptyView()
+        case .starting:
+            Text("BOOTING SWIFTLM").font(.system(size: 9, weight: .semibold)).foregroundStyle(LD.lemon)
+        case .classifying:
+            Text("CLASSIFYING").font(.system(size: 9, weight: .semibold)).foregroundStyle(LD.lemon)
+        case .passed:
+            HStack(spacing: 3) {
+                Circle().fill(LD.statusDone).frame(width: 5, height: 5)
+                Text("Passed").font(.system(size: 9, weight: .semibold)).foregroundStyle(LD.statusDone)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(LD.statusDone.opacity(0.10), in: Capsule())
+        case .failed:
+            HStack(spacing: 3) {
+                Circle().fill(LD.coral).frame(width: 5, height: 5)
+                Text("Failed").font(.system(size: 9, weight: .semibold)).foregroundStyle(LD.coral)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(LD.coral.opacity(0.10), in: Capsule())
+        }
+    }
+
+    private var aiTestDetail: String {
+        switch aiTestState {
+        case .idle: return "Boot SwiftLM + run one classify() call. ~60-90 s for first run."
+        case .starting: return "Loading model into GPU — first launch can take 60-90 s."
+        case .classifying: return "Sent test prompt; waiting for Gemma to respond…"
+        case .passed(let s, let summary, let secs): return "state=\(s) · summary=\(summary) · \(secs) s"
+        case .failed(let msg): return msg
+        }
+    }
+
+    private func runAITest() {
+        aiTestState = .starting
+        let startedAt = Date()
+        Task {
+            await LocalLLM.shared.start()
+            guard LocalLLM.shared.isReady() else {
+                await MainActor.run {
+                    aiTestState = .failed("SwiftLM didn't become healthy within 180 s — check Console.app under com.lemon.app/orchestrator for the launch error.")
+                }
+                return
+            }
+            await MainActor.run { aiTestState = .classifying }
+
+            let fixture = LinearIssue(
+                id: "test-id",
+                identifier: "TEST-1",
+                title: "Self-test",
+                description: "Lemon settings self-test — verifies SwiftLM + Gemma respond correctly.",
+                labelNames: [],
+                teamId: "test"
+            )
+            let logs = [
+                "$ claude --enable-auto-mode --remote-control",
+                "Trust this MCP server (linear)? [y/N]"
+            ]
+            do {
+                let resp = try await LocalLLM.shared.classify(issue: fixture, logLines: logs)
+                let elapsed = Int(Date().timeIntervalSince(startedAt))
+                await MainActor.run {
+                    aiTestState = .passed(state: resp.state, summary: resp.summary, elapsedSec: elapsed)
+                }
+            } catch {
+                await MainActor.run {
+                    aiTestState = .failed("classify error: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
