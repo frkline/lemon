@@ -365,15 +365,22 @@ final class WorktreeRunner: @unchecked Sendable {
     private func prepareMcpConfig(sessionPath: String, repos: [(name: String, repoPath: String)],
                                   isMultiRepo: Bool, identifier: String) -> String? {
         var mcpServers: [String: Any] = [:]
-        let searchPaths = isMultiRepo
-            ? repos.map { "\(sessionPath)/\($0.name)" }
-            : [sessionPath]
-        for path in searchPaths {
-            let mcpPath = "\(path)/.mcp.json"
+        var sourceOf: [String: String] = [:]   // server name → repo it came from (for conflict logging)
+        let searchPaths: [(label: String, path: String)] = isMultiRepo
+            ? repos.map { (label: $0.name, path: "\(sessionPath)/\($0.name)") }
+            : [(label: "session", path: sessionPath)]
+        for entry in searchPaths {
+            let mcpPath = "\(entry.path)/.mcp.json"
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: mcpPath)),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let servers = json["mcpServers"] as? [String: Any] else { continue }
-            mcpServers.merge(servers) { _, new in new }
+            for (name, config) in servers {
+                if let prior = sourceOf[name], prior != entry.label {
+                    Logger.worktree.warning("MCP server '\(name)' defined in both '\(prior)' and '\(entry.label)' — using '\(entry.label)'. Rename one if both should be active.")
+                }
+                mcpServers[name] = config
+                sourceOf[name] = entry.label
+            }
         }
         guard !mcpServers.isEmpty else { return nil }
         let configPath = "/tmp/lemon-mcp-\(identifier.lowercased()).json"
