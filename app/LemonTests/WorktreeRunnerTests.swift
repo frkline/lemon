@@ -131,6 +131,14 @@ final class WorktreeRunnerTests: XCTestCase {
         }
     }
 
+    func testIsSafeSendKeysAcceptsNavigationKeys() {
+        // Needed for Claude Code's MCP picker (Enter confirms pre-checked list)
+        // and similar interactive menus.
+        for nav in ["Enter", "Return", "Escape", "Space", "Tab"] {
+            XCTAssertTrue(WorktreeRunner.isSafeSendKeys(nav), "\(nav) must be allowed")
+        }
+    }
+
     func testIsSafeSendKeysRejectsArbitraryText() {
         for unsafe in ["rm -rf /", "git push --force", "delete", "yes please", "yY", "12", "y\nrm -rf /", "; ls", "$(whoami)"] {
             XCTAssertFalse(WorktreeRunner.isSafeSendKeys(unsafe), "\(unsafe) must be rejected")

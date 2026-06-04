@@ -1200,6 +1200,13 @@ private struct ReadyStep: View {
     @State private var claudeAccount: String? = nil
     @State private var claudeChecked = false
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    @State private var terminalAutomation: TerminalAutomationState = .checking
+
+    enum TerminalAutomationState: Equatable {
+        case checking
+        case granted
+        case denied(String)   // app name that was denied
+    }
 
     enum LabelState { case pending, creating, done(Int), failed(String) }
     @State private var labelState: LabelState = .pending
@@ -1246,6 +1253,10 @@ private struct ReadyStep: View {
                 // for a dedicated Mac, so this is the recommended default for
                 // anyone running it on a Mac mini.
                 launchAtLoginRow
+
+                // Surfaces if user clicked "Don't Allow" on the Terminal/iTerm
+                // automation prompt. Hidden in the happy path.
+                terminalAutomationRow
             }
         }
         .onAppear {
@@ -1258,25 +1269,77 @@ private struct ReadyStep: View {
     // Trigger the macOS Apple Events authorization dialog for Terminal.app
     // (and iTerm2 if installed) at onboarding time, so the user clicks Allow
     // while they're at their desk. Without this, the dialog fires the first
-    // time a 🍋 session tries to open a terminal window — which is exactly
-    // when the user is most likely AFK, and the session sits blocked forever.
+    // time a 🍋 session tries to open a terminal window — exactly when the
+    // user is most likely AFK, and the session sits blocked forever.
+    //
+    // Also detects "Don't Allow" so we can surface a fallback path
+    // (System Settings → Privacy & Security → Automation) instead of
+    // silently failing to open windows later.
     private func preauthorizeTerminalAutomation() {
         Task.detached {
             var apps = ["Terminal"]
             if FileManager.default.fileExists(atPath: "/Applications/iTerm.app") {
                 apps.append("iTerm")
             }
+            var deniedApp: String? = nil
             for app in apps {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                // `count windows` is a benign no-op that still trips the
-                // Apple Events permission gate the same way send-script does.
                 p.arguments = ["-e", "tell application \"\(app)\" to count windows"]
                 p.standardOutput = Pipe()
-                p.standardError = Pipe()
+                let errPipe = Pipe()
+                p.standardError = errPipe
                 try? p.run(); p.waitUntilExit()
                 Logger.onboarding.info("Pre-auth \(app) AppleEvents: exit=\(p.terminationStatus)")
+                // osascript returns non-zero AND stderr contains "Not authorized"
+                // when the user clicks Don't Allow (or has denied in Settings).
+                if p.terminationStatus != 0 {
+                    let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                    if err.contains("authorized") || err.contains("1743") {
+                        deniedApp = app
+                        break
+                    }
+                }
             }
+            await MainActor.run {
+                if let app = deniedApp {
+                    terminalAutomation = .denied(app)
+                } else {
+                    terminalAutomation = .granted
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var terminalAutomationRow: some View {
+        switch terminalAutomation {
+        case .checking, .granted:
+            EmptyView()
+        case .denied(let app):
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(LD.coral).font(.system(size: 16))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(app) automation denied")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Lemon needs to open \(app) to show running sessions. Without this, sessions still run (detached tmux) but no window appears.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Text("Open Privacy & Security → Automation")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.link)
+                    .padding(.top, 2)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(LD.coral.opacity(0.08), in: RoundedRectangle(cornerRadius: LD.r10))
         }
     }
 

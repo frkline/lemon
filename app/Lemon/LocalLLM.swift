@@ -135,8 +135,13 @@ final class LocalLLM: @unchecked Sendable {
             • An MCP server install/trust prompt that the user clearly opted into
             • A numbered menu where one option is plainly the intended path
             • A "Continue? [Y/n]" where context says yes
+            • A pre-checked multi-select list (e.g. Claude Code's "Select any MCP servers to enable" with all boxes ticked) — confirm with Enter
           DO NOT use send_keys for anything destructive, ambiguous, or open-ended.
-          DO NOT type free-form text — keys MUST be in the allowlist y/Y/n/N/yes/no/1-9.
+          DO NOT type free-form text — keys MUST be one of:
+              y / Y / n / N / yes / no / 1-9
+              Enter (confirm the default / pre-checked list)
+              Escape (reject / cancel)
+              Space (toggle a single highlighted item)
         - notify_user when the session needs a human (auth, design choice, error).
         - complete when a PR URL or "PR opened" appears in output.
         - stuck when no progress for many minutes with no question visible.
@@ -147,6 +152,10 @@ final class LocalLLM: @unchecked Sendable {
         Output: "Trust this MCP server (linear)? [y/N]"
         → {"state":"blocked_prompt","summary":"MCP server trust prompt for Linear",
             "action":{"type":"send_keys","keys":"y"}}
+
+        Output: "6 new MCP servers found in this project / Select any you wish to enable. / [✓] vercel [✓] neon [✓] linear-server / Space to select · Enter to confirm"
+        → {"state":"blocked_prompt","summary":"MCP server picker with all servers pre-checked",
+            "action":{"type":"send_keys","keys":"Enter"}}
 
         Output: "Which database should I migrate? 1) prod 2) staging"
         → {"state":"blocked_prompt","summary":"Asking which database to migrate",

@@ -546,22 +546,48 @@ final class WorktreeRunner: @unchecked Sendable {
         pendingActionTask = Task {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
-            // Shell-escape via single-quote wrapping with embedded single quotes broken out.
-            let escaped = trimmed.replacingOccurrences(of: "'", with: "'\\''")
-            runSync("tmux send-keys -t '\(tmuxSessionName(identifier))' '\(escaped)' Enter")
-            log("[gemma] resolved: \(reason)")
+            // Special tmux key names (Enter, Escape, Space, etc.) must be passed
+            // as separate UNQUOTED arguments — `tmux send-keys 'Enter'` types the
+            // literal string "Enter" rather than pressing the Enter key.
+            // Letter keys still get an auto-Enter suffix to confirm.
+            let cmd: String
+            if WorktreeRunner.specialKeys.contains(trimmed) {
+                cmd = "tmux send-keys -t '\(tmuxSessionName(identifier))' \(trimmed)"
+            } else {
+                let escaped = trimmed.replacingOccurrences(of: "'", with: "'\\''")
+                cmd = "tmux send-keys -t '\(tmuxSessionName(identifier))' '\(escaped)' Enter"
+            }
+            runSync(cmd)
+            log("[gemma] resolved: \(reason) (sent: \(trimmed.isEmpty ? "Enter" : trimmed))")
             onPendingAction?(nil)
         }
     }
 
-    // Safe confirmations: single keystrokes Claude / claude-code prompts accept,
-    // numeric menu selections (1-9), and the strings "yes"/"no".
+    // tmux special key names that don't need an Enter-suffix and must not be quoted.
+    static let specialKeys: Set<String> = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right"]
+
+    // Safe confirmations: single keystrokes Claude/claude-code prompts accept,
+    // numeric menu selections (1-9), yes/no, and the navigation/confirmation
+    // special keys an MCP-picker style menu needs (Enter to confirm a
+    // pre-checked list, Space to toggle, Escape to reject).
     static func isSafeSendKeys(_ keys: String) -> Bool {
-        let allowed: Set<String> = ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO", "", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-        return allowed.contains(keys)
+        let allowed: Set<String> = [
+            "", "y", "Y", "n", "N",
+            "yes", "Yes", "YES", "no", "No", "NO",
+            "1", "2", "3", "4", "5", "6", "7", "8", "9"
+        ]
+        return allowed.contains(keys) || specialKeys.contains(keys)
     }
 
     // MARK: - Log tail helper
+
+    // Counts non-empty lines in the pane log. Used by the silence detector
+    // instead of byte-count so ANSI cursor-redraw inflation doesn't reset the
+    // activity timer.
+    private func countLogLines(at path: String) -> Int {
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
+        return content.split(separator: "\n", omittingEmptySubsequences: true).count
+    }
 
     private func tailLog(_ identifier: String, last n: Int) -> [String] {
         guard let content = try? String(contentsOfFile: logPath(identifier), encoding: .utf8) else {
@@ -606,7 +632,7 @@ final class WorktreeRunner: @unchecked Sendable {
         sentinelPath: String
     ) async {
         let deadline = Date().addingTimeInterval(8 * 3600)  // 8h max; prevents forever-stuck icon
-        var lastLogSize: Int64 = 0
+        var lastLineCount: Int = 0
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
 
@@ -672,11 +698,14 @@ final class WorktreeRunner: @unchecked Sendable {
                 }
             }
 
-            // Silence detection: track log file growth, invoke Gemma after 2-min quiet.
-            let attrs = try? FileManager.default.attributesOfItem(atPath: logPath(issue.identifier))
-            let currentSize = attrs?[.size] as? Int64 ?? 0
-            if currentSize > lastLogSize {
-                lastLogSize = currentSize
+            // Silence detection: track LINE-count growth, not byte count.
+            // tmux pipe-pane streams ANSI cursor-redraw sequences continuously
+            // even when Claude is wedged on an interactive prompt — byte count
+            // keeps inflating and the silence timer never trips. Line count
+            // only grows when actual output arrives.
+            let currentLines = countLogLines(at: logPath(issue.identifier))
+            if currentLines > lastLineCount {
+                lastLineCount = currentLines
                 lastActivityAt = Date()
             }
             if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
