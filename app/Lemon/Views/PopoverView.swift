@@ -145,20 +145,25 @@ struct PopoverView: View {
 
     private var listPane: some View {
         VStack(spacing: 0) {
-            if orchestrator.sessions.active.isEmpty && orchestrator.sessions.recent.isEmpty {
+            if orchestrator.sessions.active.isEmpty {
+                // Always restore the "Original" empty state when there are no
+                // active sessions, even if recent has stopped/done sessions in
+                // it. Previously this only fired when BOTH active and recent
+                // were empty — stopping the only session left a collapsed
+                // single-row state in the popover with no clear "label
+                // something to start" guidance. Recent is still surfaced in
+                // the detail view if the user navigates back to it.
                 emptyState
             } else {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 0) {
-                        if !orchestrator.sessions.active.isEmpty {
-                            sectionLabel("Active")
-                            ForEach(orchestrator.sessions.active) { session in
-                                SessionRowView(session: session)
-                                    .accessibilityIdentifier("session-\(session.issue.identifier)")
-                                    .onTapGesture {
-                                        withAnimation(LD.slide) { nav.showDetail(session) }
-                                    }
-                            }
+                        sectionLabel("Active")
+                        ForEach(orchestrator.sessions.active) { session in
+                            SessionRowView(session: session)
+                                .accessibilityIdentifier("session-\(session.issue.identifier)")
+                                .onTapGesture {
+                                    withAnimation(LD.slide) { nav.showDetail(session) }
+                                }
                         }
                         if !orchestrator.sessions.recent.isEmpty {
                             sectionLabel("Recent")
