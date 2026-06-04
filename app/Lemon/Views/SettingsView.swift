@@ -289,9 +289,19 @@ struct SettingsView: View {
         Task {
             await LocalLLM.shared.start()
             guard LocalLLM.shared.isReady() else {
-                await MainActor.run {
-                    aiTestState = .failed("SwiftLM didn't become healthy within 180 s — check Console.app under com.lemon.app/orchestrator for the launch error.")
+                // Surface the actual failure reason from LocalLLM.AIState rather
+                // than the generic timeout message. SwiftLM commonly dies in
+                // ~2 s when the model files are missing or incompatible —
+                // saying "didn't become healthy within 180 s" lies about both
+                // the time elapsed and the actual cause.
+                let detail: String
+                switch LocalLLM.shared.state() {
+                case .failed(let msg):  detail = msg
+                case .starting:         detail = "Still loading after \(Int(Date().timeIntervalSince(startedAt))) s — Gemma 4 model may be unusually large or disk-bound."
+                case .notConfigured:    detail = "Local AI isn't configured. Re-run setup to download the model + SwiftLM binary."
+                case .ready:            detail = "Race: state went .ready but isReady() returned false. Re-run."
                 }
+                await MainActor.run { aiTestState = .failed(detail) }
                 return
             }
             await MainActor.run { aiTestState = .classifying }
