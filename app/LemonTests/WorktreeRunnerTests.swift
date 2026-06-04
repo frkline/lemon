@@ -116,4 +116,24 @@ final class WorktreeRunnerTests: XCTestCase {
         )
         XCTAssertTrue(result)
     }
+
+    // MARK: - isSafeSendKeys allowlist
+
+    func testIsSafeSendKeysAcceptsConfirmations() {
+        for safe in ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO"] {
+            XCTAssertTrue(WorktreeRunner.isSafeSendKeys(safe), "\(safe) should be allowed")
+        }
+    }
+
+    func testIsSafeSendKeysAcceptsNumericMenu() {
+        for digit in 1...9 {
+            XCTAssertTrue(WorktreeRunner.isSafeSendKeys("\(digit)"))
+        }
+    }
+
+    func testIsSafeSendKeysRejectsArbitraryText() {
+        for unsafe in ["rm -rf /", "git push --force", "delete", "yes please", "yY", "12", "y\nrm -rf /", "; ls", "$(whoami)"] {
+            XCTAssertFalse(WorktreeRunner.isSafeSendKeys(unsafe), "\(unsafe) must be rejected")
+        }
+    }
 }

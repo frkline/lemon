@@ -33,9 +33,10 @@ final class LocalLLM: @unchecked Sendable {
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: store.swiftLMPath)
-        // SwiftLM CLI: --model-path <dir> --port <n>
-        // Adjust if your SwiftLM build uses different flags.
-        p.arguments = ["--model-path", store.modelPath, "--port", "\(port)"]
+        // SwiftLM b648 CLI: --model <hf-id-or-local-path> --port <n>
+        // Verified against `SwiftLM --help`; do not use --model-path.
+        p.arguments = ["--model", store.modelPath, "--port", "\(port)"]
+        Logger.orchestrator.info("SwiftLM launching: \(store.swiftLMPath) --model \(store.modelPath) --port \(self.port)")
         p.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
         p.standardOutput = Pipe()
         p.standardError = Pipe()
@@ -84,16 +85,45 @@ final class LocalLLM: @unchecked Sendable {
 
     func classify(issue: LinearIssue, logLines: [String]) async throws -> GemmaResponse {
         let systemPrompt = """
-        You are a session monitor for Lemon, an AI coding agent orchestrator. \
-        A Claude coding session is running on the user's machine. \
-        Classify the current state and decide if action is needed. \
-        Respond ONLY with valid JSON: \
-        { "state": "running|blocked_prompt|stuck|waiting|complete", \
-          "summary": "<one sentence>", \
-          "action": null | { "type": "send_keys", "keys": "<keys>" } \
-                          | { "type": "notify_user", "message": "<msg>" } } \
-        Use send_keys ONLY for unambiguous low-risk confirmations (e.g. accept a pre-selected list). \
-        When in doubt, use notify_user or return null.
+        You monitor a running Claude Code coding session for Lemon. Given the last \
+        terminal output, classify the session and decide whether to act.
+
+        Respond with ONLY valid JSON, no prose:
+        {
+          "state": "running" | "blocked_prompt" | "stuck" | "waiting" | "complete",
+          "summary": "<one short sentence>",
+          "action": null
+            | { "type": "send_keys", "keys": "<one of: y, n, yes, no, 1-9, or empty>" }
+            | { "type": "notify_user", "message": "<short msg>" }
+        }
+
+        Rules:
+        - send_keys is ONLY for unambiguous confirmation prompts where the safe answer is obvious:
+            • An MCP server install/trust prompt that the user clearly opted into
+            • A numbered menu where one option is plainly the intended path
+            • A "Continue? [Y/n]" where context says yes
+          DO NOT use send_keys for anything destructive, ambiguous, or open-ended.
+          DO NOT type free-form text — keys MUST be in the allowlist y/Y/n/N/yes/no/1-9.
+        - notify_user when the session needs a human (auth, design choice, error).
+        - complete when a PR URL or "PR opened" appears in output.
+        - stuck when no progress for many minutes with no question visible.
+        - When in doubt return action: null.
+
+        Examples:
+
+        Output: "Trust this MCP server (linear)? [y/N]"
+        → {"state":"blocked_prompt","summary":"MCP server trust prompt for Linear",
+            "action":{"type":"send_keys","keys":"y"}}
+
+        Output: "Which database should I migrate? 1) prod 2) staging"
+        → {"state":"blocked_prompt","summary":"Asking which database to migrate",
+            "action":{"type":"notify_user","message":"Choose database: prod vs staging"}}
+
+        Output: "Opened https://github.com/x/y/pull/42"
+        → {"state":"complete","summary":"PR opened","action":null}
+
+        Output: "$" (idle prompt for 5 minutes, no question)
+        → {"state":"stuck","summary":"No progress for several minutes","action":null}
         """
 
         let issueCtx = "Issue: \(issue.identifier) — \(issue.title)\n" +

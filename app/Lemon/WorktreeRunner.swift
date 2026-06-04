@@ -314,19 +314,24 @@ final class WorktreeRunner: @unchecked Sendable {
             content += "\n"
         }
 
-        // Dev environment.
-        content += "### Dev Environment\n"
-        content += "- **Dev server port for this session:** `\(devPort)` — use `next dev --port \(devPort)` (or equivalent). This keeps concurrent sessions from colliding.\n"
-        content += "- **Database:** Create a Neon branch named `lemon-\(issue.identifier.lowercased())` at session start; delete it when done. Use its `DATABASE_URL` in `.env.local` in the worktree.\n\n"
+        // Dev environment — only the project-agnostic bits. Anything stack-specific
+        // (Next.js, databases, deploy targets) belongs in the team's LEMON.md.
+        content += "### Session Environment\n"
+        content += "- **Reserved dev-server port:** `\(devPort)` — use this if you launch a dev server so concurrent Lemon sessions don't collide.\n"
+        content += "- **Worktree:** you're in a fresh git worktree on branch `lemon/\(issue.identifier)`. Don't switch branches.\n\n"
 
-        // Completion checklist.
+        // Completion checklist — universal across stacks.
         content += """
         ---
-        When you are done and the PR is open:
-        1. Apply the Linear label "🍋 Complete" to issue \(issue.identifier)
-        2. Write a brief summary of what you did to `.lemon-summary.md` in this session directory
-        3. Kill any dev servers you started and delete the Neon branch `lemon-\(issue.identifier.lowercased())`
-        4. If you need human input at any point, apply the label "🍋 Waiting" and pause
+        ## Completion checklist
+
+        When the PR is open and ready for review:
+        1. Apply the Linear label **🍋 Complete** to issue \(issue.identifier) via `gh` or the Linear MCP.
+        2. Write a brief summary of what you did to `.lemon-summary.md` in this worktree (referenced by the Lemon Report comment).
+        3. Kill any dev servers, background tasks, or external resources you started.
+
+        If you need human input at any point, apply the label **🍋 Waiting** and pause.
+        If the issue's team LEMON.md above gave you extra steps, do those too.
         """
         try? content.write(toFile: "\(sessionPath)/LEMON_CONTEXT.md", atomically: true, encoding: .utf8)
     }
@@ -427,37 +432,65 @@ final class WorktreeRunner: @unchecked Sendable {
     // MARK: - Gemma orchestration
 
     private func invokeGemma(issue: LinearIssue) async {
-        guard LocalLLM.shared.isReady() else { return }
+        guard LocalLLM.shared.isReady() else {
+            Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(issue.identifier)")
+            return
+        }
         let lines = tailLog(issue.identifier, last: 100)
-        guard let response = try? await LocalLLM.shared.classify(issue: issue, logLines: lines) else { return }
+        Logger.worktree.info("[gemma] classifying \(issue.identifier) with \(lines.count) log lines")
+        do {
+            let response = try await LocalLLM.shared.classify(issue: issue, logLines: lines)
+            Logger.worktree.info("[gemma] state=\(response.state) action=\(response.action?.type ?? "nil") summary=\(response.summary, privacy: .public)")
 
-        onAiSummary?(response.summary)
-        log("[gemma] \(response.summary)")
+            onAiSummary?(response.summary)
+            log("[gemma] \(response.summary)")
 
-        guard let action = response.action else { return }
-        switch action.type {
-        case "send_keys":
-            handleSendKeys(keys: action.keys ?? "", identifier: issue.identifier,
-                           reason: response.summary)
-        case "notify_user":
-            // Route through the existing push-notification / 🍋 Waiting path via log line.
-            // A future iteration can wire this to a native notification.
-            log("[gemma] needs human: \(action.message ?? response.summary)", level: .error)
-        default:
-            break
+            guard let action = response.action else { return }
+            switch action.type {
+            case "send_keys":
+                handleSendKeys(keys: action.keys ?? "", identifier: issue.identifier,
+                               reason: response.summary)
+            case "notify_user":
+                // Route through the existing push-notification / 🍋 Waiting path via log line.
+                // A future iteration can wire this to a native notification.
+                log("[gemma] needs human: \(action.message ?? response.summary)", level: .error)
+            default:
+                Logger.worktree.error("[gemma] unknown action type=\(action.type)")
+            }
+        } catch {
+            Logger.worktree.error("[gemma] classify failed for \(issue.identifier): \(error.localizedDescription)")
         }
     }
 
     // Shows a 5-second cancellable toast, then sends keys to the tmux pane.
+    // Safety: only an allowlist of low-risk confirmations is permitted. Anything
+    // outside the list is logged and dropped — we'd rather miss a prompt than
+    // type arbitrary text into a running Claude session.
     private func handleSendKeys(keys: String, identifier: String, reason: String) {
+        let trimmed = keys.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard WorktreeRunner.isSafeSendKeys(trimmed) else {
+            Logger.worktree.error("[gemma] dropping unsafe send_keys=\(trimmed, privacy: .public) reason=\(reason, privacy: .public)")
+            log("[gemma] dropped unsafe keystroke (\(trimmed)); needs human review", level: .error)
+            onPendingAction?(nil)
+            return
+        }
         onPendingAction?("Gemma: \(reason)…")
         pendingActionTask = Task {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
-            runSync("tmux send-keys -t '\(tmuxSessionName(identifier))' '\(keys)' Enter")
+            // Shell-escape via single-quote wrapping with embedded single quotes broken out.
+            let escaped = trimmed.replacingOccurrences(of: "'", with: "'\\''")
+            runSync("tmux send-keys -t '\(tmuxSessionName(identifier))' '\(escaped)' Enter")
             log("[gemma] resolved: \(reason)")
             onPendingAction?(nil)
         }
+    }
+
+    // Safe confirmations: single keystrokes Claude / claude-code prompts accept,
+    // numeric menu selections (1-9), and the strings "yes"/"no".
+    static func isSafeSendKeys(_ keys: String) -> Bool {
+        let allowed: Set<String> = ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO", "", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        return allowed.contains(keys)
     }
 
     // MARK: - Log tail helper
