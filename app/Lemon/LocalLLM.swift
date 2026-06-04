@@ -211,7 +211,13 @@ final class LocalLLM: @unchecked Sendable {
     }
 
     private func healthCheck() async -> Bool {
-        guard let url = URL(string: "http://localhost:\(port)/health") else { return false }
+        // 127.0.0.1, not "localhost". SwiftLM binds IPv4-only on 127.0.0.1, but
+        // macOS resolves "localhost" to ::1 (IPv6) first. URLSession's Happy-
+        // Eyeballs eventually falls back to IPv4 — fine for the small /health
+        // response, but the first /v1/chat/completions POST sometimes races
+        // and surfaces NSURLErrorNetworkConnectionLost (-1005). Pinning IPv4
+        // here and below skips the dual-stack dance entirely.
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return false }
         guard let (_, resp) = try? await session.data(from: url),
               let http = resp as? HTTPURLResponse,
               http.statusCode == 200 else { return false }
@@ -288,7 +294,8 @@ final class LocalLLM: @unchecked Sendable {
             "temperature": 0.1
         ]
 
-        guard let url  = URL(string: "http://localhost:\(port)/v1/chat/completions"),
+        // 127.0.0.1 (not localhost) — see comment in healthCheck() for why.
+        guard let url  = URL(string: "http://127.0.0.1:\(port)/v1/chat/completions"),
               let data = try? JSONSerialization.data(withJSONObject: body) else {
             throw LocalLLMError.invalidRequest
         }
