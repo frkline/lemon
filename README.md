@@ -33,24 +33,18 @@ I already have Claude Code, and I already do the interesting parts: answering Cl
 
 <br/>
 
-Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier so you don't have to click through every "Trust this MCP server?" prompt yourself, and routes the result back to Linear.
+Lemon is a **menu-bar orchestrator** that decides when to start Claude Code. It's **Glue** between your Linear queue and your Claude Code CLI. Includes a **local Gemma 4 classifier** that auto-accepts obvious confirmations and gently nudges past routine prompts so the session keeps moving.  
+
+You are in the loop with Claude's **Remote Control** (or joining existing sessions) to answer the **critical things** need your attention. Built for **one developer** running it on their own silicon (❤️ Mac mini) on their own Liner inbox.
 
 > [!IMPORTANT]
-> **Lemon isn't an AI agent product.** The intelligence is Claude Code; the judgment is yours. Lemon handles the workflow bureaucracy around your session so you stay focused on the parts that need a person.
-
-## What Lemon is
-
-A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** between your Linear queue and your Claude Code CLI. A **local Gemma 4 classifier** that auto-accepts obvious confirmations and gently nudges past routine prompts so the session keeps moving. Built for **one developer** running it on their own silicon (❤️ Mac mini).
+> **Lemon isn't an AI agent product.** The intelligence is Claude Code; the judgment is yours. Lemon handles the workflow bureaucracy around your session so you stay focused on the parts that need a person. Not an assignee-style agent meant to stand in for a developer on your team.
 
 <div align="center">
 <img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="300">
 </div>
 
 <br/>
-
-## What Lemon isn't
-
-Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a substitute for Anthropic, Linear, or anything else in your stack. Not an assignee-style agent meant to stand in for a developer on your team.
 
 ## Install
 
