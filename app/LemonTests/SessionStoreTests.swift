@@ -3,7 +3,7 @@ import XCTest
 
 final class SessionStoreTests: XCTestCase {
     private func issue(id: String = "i1") -> LinearIssue {
-        LinearIssue(id: id, identifier: "HRP-1", title: "Test", description: nil, labelNames: [], teamId: "team1")
+        LinearIssue(id: id, identifier: "DEMO-1", title: "Test", description: nil, labelNames: [], teamId: "team1")
     }
 
     func testAddAppendsToActive() {

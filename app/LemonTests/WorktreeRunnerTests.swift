@@ -6,7 +6,7 @@ final class WorktreeRunnerTests: XCTestCase {
     // MARK: - devPort
 
     func testDevPortBasicIssue() {
-        XCTAssertEqual(WorktreeRunner.devPort(for: "HRP-42"), 3042)
+        XCTAssertEqual(WorktreeRunner.devPort(for: "DEMO-42"), 3042)
     }
 
     func testDevPortZeroSuffix() {
@@ -19,20 +19,20 @@ final class WorktreeRunnerTests: XCTestCase {
 
     func testDevPortLargeNumberWraps() {
         // 3000 + (1500 % 1000) = 3500
-        XCTAssertEqual(WorktreeRunner.devPort(for: "HRP-1500"), 3500)
+        XCTAssertEqual(WorktreeRunner.devPort(for: "DEMO-1500"), 3500)
     }
 
     func testDevPortStaysBelow4000() {
         for n in [999, 1000, 1001, 9999] {
-            let port = WorktreeRunner.devPort(for: "HRP-\(n)")
+            let port = WorktreeRunner.devPort(for: "DEMO-\(n)")
             XCTAssertGreaterThanOrEqual(port, 3000)
-            XCTAssertLessThan(port, 4000, "Port out of range for HRP-\(n)")
+            XCTAssertLessThan(port, 4000, "Port out of range for DEMO-\(n)")
         }
     }
 
     func testDevPortMalformedIdentifierReturns3000() {
         // Identifier with no numeric suffix → treated as 0
-        XCTAssertEqual(WorktreeRunner.devPort(for: "HRP-"), 3000)
+        XCTAssertEqual(WorktreeRunner.devPort(for: "DEMO-"), 3000)
         XCTAssertEqual(WorktreeRunner.devPort(for: "nonum"), 3000)
     }
 
@@ -40,7 +40,7 @@ final class WorktreeRunnerTests: XCTestCase {
 
     func testTmuxSessionNameLowercases() {
         let runner = WorktreeRunner()
-        XCTAssertEqual(runner.tmuxSessionName("HRP-42"),  "lemon-hrp-42")
+        XCTAssertEqual(runner.tmuxSessionName("DEMO-42"),  "lemon-demo-42")
         XCTAssertEqual(runner.tmuxSessionName("LEM-100"), "lemon-lem-100")
     }
 
@@ -48,7 +48,7 @@ final class WorktreeRunnerTests: XCTestCase {
 
     func testLogPathFormat() {
         let runner = WorktreeRunner()
-        XCTAssertEqual(runner.logPath("HRP-42"), "/tmp/lemon-log-hrp-42.txt")
+        XCTAssertEqual(runner.logPath("DEMO-42"), "/tmp/lemon-log-demo-42.txt")
     }
 
     // MARK: - shouldInvokeGemma (silence detector)

@@ -16,7 +16,7 @@ final class LinearClientTests: XCTestCase {
     // Minimal valid node JSON shared across tests
     private func node(
         id: String = "abc",
-        identifier: String = "HRP-42",
+        identifier: String = "DEMO-42",
         title: String = "Fix it",
         description: String? = "Details",
         labels: [String] = [],
@@ -40,7 +40,7 @@ final class LinearClientTests: XCTestCase {
         let issues = try await client().fetchLemonQueue(apiKey: "k", userId: "u")
         XCTAssertEqual(issues.count, 1)
         XCTAssertEqual(issues[0].id, "abc")
-        XCTAssertEqual(issues[0].identifier, "HRP-42")
+        XCTAssertEqual(issues[0].identifier, "DEMO-42")
         XCTAssertEqual(issues[0].description, "Details")
         XCTAssertEqual(issues[0].teamId, "team1")
     }
@@ -87,12 +87,12 @@ final class LinearClientTests: XCTestCase {
         // Lemon Report comments don't know their own ID at write time, so the
         // marker omits `comment:` and the parser falls back to the host comment.
         let body = """
-        ## 🍋 Lemon Report — HRP-42
+        ## 🍋 Lemon Report — DEMO-42
 
         **PR:** [#101](https://github.com/x/y/pull/101)
 
         <!-- lemon
-        branch: lemon/HRP-42
+        branch: lemon/DEMO-42
         pr: 101
         repo: /tmp/repo
         -->
@@ -101,7 +101,7 @@ final class LinearClientTests: XCTestCase {
         XCTAssertNotNil(marker)
         XCTAssertEqual(marker?.commentId, "host-comment-real-id",
                        "Must use the host comment id when `comment:` is absent — re-trigger detection depends on it.")
-        XCTAssertEqual(marker?.branch, "lemon/HRP-42")
+        XCTAssertEqual(marker?.branch, "lemon/DEMO-42")
         XCTAssertEqual(marker?.prNumber, "101")
         XCTAssertEqual(marker?.repoPath, "/tmp/repo")
     }
@@ -110,7 +110,7 @@ final class LinearClientTests: XCTestCase {
         // If a future code path does fill in the real comment id, honor it.
         let body = """
         <!-- lemon
-        branch: lemon/HRP-7
+        branch: lemon/DEMO-7
         pr: 22
         comment: explicit-id
         repo: /tmp/r
@@ -126,7 +126,7 @@ final class LinearClientTests: XCTestCase {
         // not emit `comment: PENDING`.
         let body = """
         <!-- lemon
-        branch: lemon/HRP-1
+        branch: lemon/DEMO-1
         pr: 99
         comment: PENDING
         repo: /tmp/r
@@ -140,7 +140,7 @@ final class LinearClientTests: XCTestCase {
     func testParseLemonMarkerMissingFieldsReturnsNil() {
         let body = """
         <!-- lemon
-        branch: lemon/HRP-1
+        branch: lemon/DEMO-1
         -->
         """
         XCTAssertNil(client().parseLemonMarker(from: body, commentId: "x"),

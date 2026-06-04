@@ -38,14 +38,41 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertFalse(s.isConfigured, "Local AI is required")
     }
 
-    func testIsConfiguredTrueWithKeyAndRepoAndAI() {
+    func testIsConfiguredTrueWithKeyAndRepoAndAI() throws {
+        // isConfigured also verifies the model + binary files exist on disk now,
+        // so the test fixtures need to live somewhere real.
+        let fm = FileManager.default
+        let modelDir = NSTemporaryDirectory() + "kc-test-model-\(UUID().uuidString)"
+        let swiftLM  = NSTemporaryDirectory() + "kc-test-swiftlm-\(UUID().uuidString)"
+        try fm.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
+        try "{}".write(toFile: modelDir + "/config.json", atomically: true, encoding: .utf8)
+        try Data().write(to: URL(fileURLWithPath: swiftLM))
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swiftLM)
+        defer {
+            try? fm.removeItem(atPath: modelDir)
+            try? fm.removeItem(atPath: swiftLM)
+        }
+
         let s = store()
         s.linearApiKey = "lin_api_test"
         s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "ABC", path: "/tmp/repo")])
-        s.modelPath = "/tmp/gemma"
-        s.swiftLMPath = "/tmp/swiftlm"
+        s.modelPath = modelDir
+        s.swiftLMPath = swiftLM
         s.aiEnabled = true
         XCTAssertTrue(s.isConfigured)
+    }
+
+    func testIsConfiguredFalseWhenModelMissingOnDisk() {
+        // Locks the bug fix: stale modelPath pointing at a deleted dir must
+        // NOT count as configured. Otherwise users who upgrade past a dirName
+        // change get dropped into the main app with a broken Gemma.
+        let s = store()
+        s.linearApiKey = "lin_api_test"
+        s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "ABC", path: "/tmp/repo")])
+        s.modelPath = "/tmp/this-path-does-not-exist-\(UUID().uuidString)"
+        s.swiftLMPath = "/tmp/also-fake-\(UUID().uuidString)"
+        s.aiEnabled = true
+        XCTAssertFalse(s.isConfigured)
     }
 
     func testRepoRoundTrip() {

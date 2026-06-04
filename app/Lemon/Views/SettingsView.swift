@@ -127,7 +127,7 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $editingWorkspace) {
-            WorkspaceEditorView(repos: $repos)
+            WorkspaceEditorView(repos: $repos, onDone: { editingWorkspace = false })
         }
     }
 
@@ -449,7 +449,7 @@ struct SettingsView: View {
 
 struct WorkspaceEditorView: View {
     @Binding var repos: [WorkspaceRepo]
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -457,7 +457,11 @@ struct WorkspaceEditorView: View {
                 Text("Workspace Repos")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                 Spacer()
-                Button("Done") { dismiss() }
+                // Calling \\.dismiss on a sheet inside a MenuBarExtra .window
+                // closes the parent popover, not just the sheet. Use an
+                // explicit owner-passed callback to toggle the @State flag
+                // back home — that closes only the sheet.
+                Button("Done") { onDone() }
                     .buttonStyle(LemonButtonStyle())
             }
             .padding(20)

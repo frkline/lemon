@@ -193,7 +193,7 @@ final class Orchestrator {
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
         let active1 = Session(issue: LinearIssue(
-            id: "mock-1", identifier: "HRP-42",
+            id: "mock-1", identifier: "DEMO-42",
             title: "Add dark mode to dashboard cards",
             description: "All card components need a dark variant matching the system appearance.",
             labelNames: ["🍋 In Progress"], teamId: "mock-team"
@@ -201,9 +201,9 @@ final class Orchestrator {
         active1.status = .executing
         active1.aiSummary = "Updating ColorScheme tokens in CardView and running snapshot tests"
         for line in [
-            "[lemon] Starting session for HRP-42",
-            "[lemon] Worktree ready at /tmp/lemon-hrp-42",
-            "[lemon] Claude session launched in tmux: lemon-hrp-42",
+            "[lemon] Starting session for DEMO-42",
+            "[lemon] Worktree ready at /tmp/lemon-demo-42",
+            "[lemon] Claude session launched in tmux: lemon-demo-42",
             "Reading CardView.swift...",
             "Checking existing color tokens in DesignSystem.swift...",
             "✓ Snapshot tests passed successfully",
@@ -211,7 +211,7 @@ final class Orchestrator {
         ] { active1.appendLog(line) }
 
         let active2 = Session(issue: LinearIssue(
-            id: "mock-2", identifier: "HRP-39",
+            id: "mock-2", identifier: "DEMO-39",
             title: "Fix auth redirect loop on token expiry",
             description: "Users are stuck in a redirect loop when their JWT expires mid-session.",
             labelNames: ["🍋 In Progress"], teamId: "mock-team"
@@ -220,8 +220,8 @@ final class Orchestrator {
         active2.aiSummary = "Needs decision: refresh token silently or redirect to login?"
         active2.pendingAction = "Accepting MCP servers… (Cancel to abort)"
         for line in [
-            "[lemon] Starting session for HRP-39",
-            "[lemon] Worktree ready at /tmp/lemon-hrp-39",
+            "[lemon] Starting session for DEMO-39",
+            "[lemon] Worktree ready at /tmp/lemon-demo-39",
             "Reviewing AuthMiddleware.swift...",
             "Found expired token handling at line 84",
             "[error] Multiple redirect paths detected — needs clarification",
@@ -229,7 +229,7 @@ final class Orchestrator {
         ] { active2.appendLog(line) }
 
         let recent = Session(issue: LinearIssue(
-            id: "mock-3", identifier: "HRP-31",
+            id: "mock-3", identifier: "DEMO-31",
             title: "Migrate user table to UUID primary keys",
             description: nil,
             labelNames: ["🍋 Complete"], teamId: "mock-team"

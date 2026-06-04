@@ -70,8 +70,16 @@ final class KeychainStore: @unchecked Sendable {
         // when there's no user to click it. In-memory stores (makeForTesting) are unaffected.
         if memory == nil && Self.isTestRun { return false }
         guard !linearApiKey.isEmpty, !workspaceRepos.isEmpty else { return false }
-        // Local AI is required — onboarding flips aiEnabled only after both downloads land.
-        return aiEnabled && !modelPath.isEmpty && !swiftLMPath.isEmpty
+        // Local AI is required AND its files must still exist on disk. Without
+        // the disk-existence check, a user who upgraded across a dirName
+        // change (or deleted ~/Library/Application Support/Lemon/Models) would
+        // keep aiEnabled=true and slip into the main app with a broken model.
+        let fm = FileManager.default
+        return aiEnabled
+            && !modelPath.isEmpty
+            && fm.fileExists(atPath: modelPath + "/config.json")
+            && !swiftLMPath.isEmpty
+            && fm.isExecutableFile(atPath: swiftLMPath)
     }
 
     // MARK: - Workspace repos helpers
