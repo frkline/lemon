@@ -31,10 +31,20 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertFalse(s.isConfigured)
     }
 
-    func testIsConfiguredTrueWithKeyAndRepo() {
+    func testIsConfiguredFalseWithoutAI() {
         let s = store()
         s.linearApiKey = "lin_api_test"
         s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "ABC", path: "/tmp/repo")])
+        XCTAssertFalse(s.isConfigured, "Local AI is required")
+    }
+
+    func testIsConfiguredTrueWithKeyAndRepoAndAI() {
+        let s = store()
+        s.linearApiKey = "lin_api_test"
+        s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "ABC", path: "/tmp/repo")])
+        s.modelPath = "/tmp/gemma"
+        s.swiftLMPath = "/tmp/swiftlm"
+        s.aiEnabled = true
         XCTAssertTrue(s.isConfigured)
     }
 

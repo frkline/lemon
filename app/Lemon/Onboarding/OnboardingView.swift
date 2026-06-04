@@ -588,6 +588,13 @@ private struct OnboardingRepoRow: View {
 
 // MARK: - Step 4: Local AI
 
+enum LocalAI {
+    static let swiftLMBuild = "b648"
+    static let swiftLMReleaseURL =
+        "https://github.com/SharpAI/SwiftLM/releases/download/\(swiftLMBuild)/SwiftLM-\(swiftLMBuild)-macos-arm64.tar.gz"
+    static let installCommand = "brew install hf tmux gh claude-code"
+}
+
 private struct LocalAIStep: View {
     let onNext: () -> Void
     let onBack: () -> Void
@@ -598,49 +605,104 @@ private struct LocalAIStep: View {
     @State private var checkTimer: Timer?
 
     // Model download
+    @State private var modelSize: ModelSize = .e4b
     @State private var downloadState: DownloadState = .idle
     @State private var downloadProcess: Process?
     @State private var downloadedMB: Int64 = 0
     @State private var downloadTimer: Timer?
 
-    // SwiftLM binary path (user-provided)
+    // SwiftLM binary (auto-downloaded from GitHub release)
     @State private var swiftLMPath = KeychainStore.shared.swiftLMPath
+    @State private var swiftLMState: SwiftLMState = .idle
+    @State private var swiftLMProcess: Process?
 
     enum HFLoginStatus { case unknown, loggedIn(String), notLoggedIn }
     enum DownloadState: Equatable { case idle, running, done, failed(String) }
+    enum SwiftLMState: Equatable { case idle, running, done, failed(String) }
+
+    enum ModelSize: String, CaseIterable, Identifiable {
+        case e4b, e2b
+        var id: String { rawValue }
+        var hfId: String {
+            switch self {
+            case .e4b: return "mlx-community/gemma-4-e4b-it-OptiQ-4bit"
+            case .e2b: return "mlx-community/gemma-4-e2b-it-OptiQ-4bit"
+            }
+        }
+        var dirName: String {
+            switch self {
+            case .e4b: return "gemma-4-e4b"
+            case .e2b: return "gemma-4-e2b"
+            }
+        }
+        var label: String {
+            switch self {
+            case .e4b: return "4B  (~2.5 GB)"
+            case .e2b: return "2B  (~1.4 GB)"
+            }
+        }
+        var approxMB: Int { self == .e4b ? 2500 : 1400 }
+    }
 
     private var modelDir: String {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Lemon/Models/gemma-4-e4b")
+            .appendingPathComponent("Library/Application Support/Lemon/Models/\(modelSize.dirName)")
+            .path
+    }
+
+    private var binDir: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Lemon/Bin")
             .path
     }
 
     private var tmuxOK: Bool { toolStatus["tmux"] == true }
-    private var hfOK: Bool { toolStatus["huggingface-cli"] == true }
+    private var hfOK: Bool { toolStatus["hf"] == true }
     private var modelReady: Bool {
         if case .done = downloadState { return true }
         return FileManager.default.fileExists(atPath: modelDir + "/config.json")
     }
-    private var canEnable: Bool { tmuxOK && modelReady && !swiftLMPath.isEmpty }
+    private var swiftLMReady: Bool {
+        !swiftLMPath.isEmpty && FileManager.default.isExecutableFile(atPath: swiftLMPath)
+    }
+    private var canEnable: Bool { tmuxOK && modelReady && swiftLMReady }
 
     var body: some View {
         StepShell(
             emoji: "🤖",
-            title: "Local AI (optional)",
-            subtitle: "Gemma 4B watches sessions and resolves obvious\nprompts — like accepting MCP servers — without interrupting you.",
+            title: "Local AI",
+            subtitle: "A small on-device model resolves obvious session prompts\nwithout interrupting you.",
             backAction: onBack,
-            nextLabel: canEnable ? "Enable AI" : "Skip for now",
-            nextEnabled: true,
+            nextLabel: "Continue",
+            nextEnabled: canEnable,
             nextAction: { save(); onNext() }
         ) {
-            VStack(spacing: 14) {
+            VStack(spacing: 10) {
                 prereqBar
                 modelSection
                 swiftLMSection
             }
         }
         .onAppear {
-            if modelReady { downloadState = .done }
+            Logger.onboarding.info("LocalAI appeared — modelDir=\(modelDir) swiftLMPath=\(swiftLMPath, privacy: .public) binDir=\(binDir)")
+            Logger.onboarding.info("LocalAI state — modelReady=\(modelReady) swiftLMReady=\(swiftLMReady) tmuxOK=\(tmuxOK) hfOK=\(hfOK) canEnable=\(canEnable)")
+
+            if modelReady {
+                downloadState = .done
+                Logger.onboarding.info("LocalAI: model already on disk at \(modelDir)")
+            }
+            if swiftLMReady {
+                swiftLMState = .done
+                Logger.onboarding.info("LocalAI: SwiftLM already configured at \(swiftLMPath, privacy: .public)")
+            } else if let recovered = findSwiftLMBinary(in: binDir) {
+                // Recover from a prior download where binary discovery failed —
+                // the file is on disk but swiftLMPath was never saved.
+                Logger.onboarding.info("LocalAI: recovered SwiftLM binary at \(recovered, privacy: .public) — no download needed")
+                swiftLMPath = recovered
+                swiftLMState = .done
+            } else {
+                Logger.onboarding.info("LocalAI: no SwiftLM binary on disk at \(binDir) — download required")
+            }
             runChecks()
             checkTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
                 Task { @MainActor in runChecks() }
@@ -655,50 +717,56 @@ private struct LocalAIStep: View {
     // MARK: - Prereq bar
 
     private var prereqBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("PREREQUISITES")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(0.8)
-                .foregroundStyle(.tertiary)
-
-            HStack(spacing: 8) {
-                prereqPill("tmux", present: toolStatus["tmux"], hint: "brew install tmux")
-                prereqPill("huggingface-cli", present: toolStatus["huggingface-cli"], hint: "pip install huggingface_hub")
-                Spacer()
-            }
-
-            // HF login advisory — not blocking
-            switch hfLoginStatus {
-            case .unknown:
-                EmptyView()
-            case .loggedIn(let user):
-                HStack(spacing: 5) {
-                    Image(systemName: "person.circle.fill").foregroundStyle(LD.statusDone).font(.system(size: 11))
-                    Text("HuggingFace: \(user)").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-            case .notLoggedIn:
-                HStack(spacing: 5) {
-                    Image(systemName: "info.circle").foregroundStyle(.secondary).font(.system(size: 11))
-                    Text("Not logged in to HuggingFace — run `huggingface-cli login` if model access requires it")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-            }
-
-            // Show hint for first missing required tool
+        HStack(spacing: 6) {
+            prereqPill("tmux", present: toolStatus["tmux"], hint: LocalAI.installCommand)
+            prereqPill("hf", present: toolStatus["hf"], hint: LocalAI.installCommand)
+            hfLoginPill
+            Spacer(minLength: 0)
             if let hint = missingHint {
                 Text(hint)
                     .font(.system(size: 10))
                     .foregroundStyle(LD.coral)
+                    .lineLimit(1).truncationMode(.middle)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
     }
 
+    @ViewBuilder
+    private var hfLoginPill: some View {
+        switch hfLoginStatus {
+        case .unknown:
+            EmptyView()
+        case .loggedIn(let user):
+            HStack(spacing: 4) {
+                Image(systemName: "person.circle.fill")
+                    .foregroundStyle(LD.statusDone).font(.system(size: 10))
+                Text("hf: \(user)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.primary.opacity(0.04), in: Capsule())
+        case .notLoggedIn:
+            HStack(spacing: 4) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .foregroundStyle(.secondary).font(.system(size: 10))
+                Text("hf: signed out")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.primary.opacity(0.04), in: Capsule())
+            .help(Text(verbatim: "Run 'hf auth login' if model access requires it."))
+        }
+    }
+
     private var missingHint: String? {
-        if toolStatus["tmux"] == false { return "Install tmux: brew install tmux" }
-        if toolStatus["huggingface-cli"] == false { return "Install HuggingFace CLI: pip install huggingface_hub" }
-        return nil
+        guard toolStatus["tmux"] == false || toolStatus["hf"] == false else { return nil }
+        return LocalAI.installCommand
     }
 
     private func prereqPill(_ name: String, present: Bool?, hint: String) -> some View {
@@ -723,133 +791,196 @@ private struct LocalAIStep: View {
 
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("GEMMA 4B MODEL")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(0.8)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+                Text("GEMMA MODEL")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                if case .done = downloadState {
+                    statusDot(.done, "ready")
+                } else if case .running = downloadState {
+                    statusDot(.running, "\(downloadedMB) / \(modelSize.approxMB) MB")
+                } else if case .failed = downloadState {
+                    statusDot(.failed, "error")
+                }
+            }
 
             switch downloadState {
             case .idle:
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("mlx-community/gemma-4-e4b-it-OptiQ-4bit  (~2.5 GB)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Picker("", selection: $modelSize) {
+                        ForEach(ModelSize.allCases) { size in
+                            Text(size.label).tag(size)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
+
+                    Spacer(minLength: 4)
 
                     Button {
                         startDownload()
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle")
-                            Text("Download Gemma 4B")
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.down.circle").font(.system(size: 11))
+                            Text("Download").font(.system(size: 11, weight: .semibold))
                         }
-                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(LemonButtonStyle())
                     .disabled(!hfOK)
                 }
+                Text(modelSize.hfId)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1).truncationMode(.middle)
 
             case .running:
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        ProgressView().scaleEffect(0.75)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Downloading…").font(.system(size: 12, weight: .semibold))
-                            Text("\(downloadedMB) MB of ~2,500 MB")
-                                .font(.system(size: 10)).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Cancel") { cancelDownload() }
-                            .buttonStyle(GhostButtonStyle())
-                    }
-                    ProgressView(value: Double(downloadedMB), total: 2500)
+                HStack(spacing: 10) {
+                    ProgressView(value: Double(downloadedMB), total: Double(modelSize.approxMB))
                         .tint(LD.lemon)
+                    Button("Cancel") { cancelDownload() }
+                        .buttonStyle(GhostButtonStyle())
+                        .font(.system(size: 10))
                 }
-                .padding(12)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
 
             case .done:
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(LD.statusDone).font(.system(size: 13))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Model ready").font(.system(size: 11, weight: .semibold))
-                        Text(modelDir)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                    }
-                    Spacer()
-                }
-                .padding(12)
-                .background(LD.statusDone.opacity(0.08), in: RoundedRectangle(cornerRadius: LD.r10))
+                Text(modelDir)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
 
             case .failed(let err):
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LD.coral)
-                        Text("Download failed").font(.system(size: 12, weight: .semibold))
+                VStack(alignment: .leading, spacing: 6) {
+                    ScrollView {
+                        Text(err)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Text(err).font(.system(size: 10)).foregroundStyle(.secondary)
-                    Button("Try Again") { startDownload() }.buttonStyle(GhostButtonStyle())
+                    .frame(maxHeight: 56)
+                    Button("Try Again") { startDownload() }
+                        .buttonStyle(GhostButtonStyle())
+                        .font(.system(size: 11))
                 }
-                .padding(12)
-                .background(LD.coral.opacity(0.06), in: RoundedRectangle(cornerRadius: LD.r10))
             }
         }
-        .padding(12)
+        .padding(10)
         .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+    }
+
+    private enum DotState { case running, done, failed }
+
+    @ViewBuilder
+    private func statusDot(_ state: DotState, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            switch state {
+            case .running:
+                Circle().fill(LD.lemon).frame(width: 6, height: 6)
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(LD.statusDone).font(.system(size: 10))
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LD.coral).font(.system(size: 10))
+            }
+            Text(label)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - SwiftLM section
 
     private var swiftLMSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("SWIFTLM BINARY")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(0.8)
-                .foregroundStyle(.tertiary)
-
             HStack(spacing: 8) {
-                TextField("/path/to/swiftlm", text: $swiftLMPath)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
-
-                Button {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = true
-                    panel.canChooseDirectories = false
-                    panel.allowsMultipleSelection = false
-                    panel.title = "Select SwiftLM binary"
-                    if panel.runModal() == .OK, let url = panel.url {
-                        swiftLMPath = url.path
-                    }
-                } label: {
-                    Image(systemName: "folder")
-                        .font(.system(size: 12))
+                Text("SWIFTLM RUNNER")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                switch swiftLMState {
+                case .done: statusDot(.done, "ready")
+                case .running: statusDot(.running, "downloading")
+                case .failed: statusDot(.failed, "error")
+                case .idle: EmptyView()
                 }
-                .buttonStyle(GhostButtonStyle())
             }
 
-            Text("Build SwiftLM from github.com/jkrukowski/SwiftLM (swift build -c release). Point here to the binary.")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            switch swiftLMState {
+            case .idle:
+                HStack(spacing: 8) {
+                    Text("SharpAI/SwiftLM b648 · macOS arm64")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Button {
+                        startSwiftLMDownload()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.down.circle").font(.system(size: 11))
+                            Text("Download").font(.system(size: 11, weight: .semibold))
+                        }
+                    }
+                    .buttonStyle(LemonButtonStyle())
+                }
+
+            case .running:
+                HStack(spacing: 10) {
+                    ProgressView().scaleEffect(0.6).frame(height: 10)
+                    Text("github.com/SharpAI/SwiftLM")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") { cancelSwiftLMDownload() }
+                        .buttonStyle(GhostButtonStyle())
+                        .font(.system(size: 10))
+                }
+
+            case .done:
+                Text(swiftLMPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+
+            case .failed(let err):
+                VStack(alignment: .leading, spacing: 6) {
+                    ScrollView {
+                        Text(err)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 56)
+                    Button("Try Again") { startSwiftLMDownload() }
+                        .buttonStyle(GhostButtonStyle())
+                        .font(.system(size: 11))
+                }
+            }
         }
-        .padding(12)
+        .padding(10)
         .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
     }
 
     // MARK: - Actions
 
     private func runChecks() {
-        for tool in ["tmux", "huggingface-cli"] {
+        for tool in ["tmux", "hf"] {
             Task.detached {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/bin/zsh")
                 p.arguments = ["-l", "-c", "cd /tmp && which \(tool)"]
-                p.standardOutput = Pipe()
+                let outPipe = Pipe()
+                p.standardOutput = outPipe
                 p.standardError = Pipe()
                 try? p.run(); p.waitUntilExit()
                 let present = p.terminationStatus == 0
+                let path = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                Logger.onboarding.info("LocalAI prereq \(tool): present=\(present) path=\(path, privacy: .public)")
                 await MainActor.run { toolStatus[tool] = present }
             }
         }
@@ -857,7 +988,7 @@ private struct LocalAIStep: View {
         Task.detached {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-l", "-c", "cd /tmp && huggingface-cli whoami 2>/dev/null | head -1"]
+            p.arguments = ["-l", "-c", "cd /tmp && hf auth whoami 2>/dev/null | head -1"]
             let pipe = Pipe()
             p.standardOutput = pipe
             p.standardError = Pipe()
@@ -865,22 +996,26 @@ private struct LocalAIStep: View {
             let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let status: HFLoginStatus = raw.isEmpty ? .notLoggedIn : .loggedIn(raw)
+            Logger.onboarding.info("LocalAI hf auth whoami: exit=\(p.terminationStatus) raw=\(raw, privacy: .public)")
             await MainActor.run { hfLoginStatus = status }
         }
     }
 
     private func startDownload() {
+        let dir = modelDir
+        let hfId = modelSize.hfId
+        Logger.onboarding.info("startDownload: hfId=\(hfId) dir=\(dir) modelSize=\(modelSize.rawValue)")
         downloadState = .running
 
-        let dir = modelDir
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-l", "-c",
-            "cd /tmp && huggingface-cli download mlx-community/gemma-4-e4b-it-OptiQ-4bit" +
-            " --local-dir '\(dir)'"
+            "cd /tmp && hf download \(hfId)" +
+            " --local-dir '\(dir)' 2>&1"
         ]
-        p.standardOutput = Pipe()
-        p.standardError = Pipe()
+        let outPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = outPipe
 
         downloadProcess = p
 
@@ -899,12 +1034,19 @@ private struct LocalAIStep: View {
             do {
                 try p.run()
                 p.waitUntilExit()
+                let output = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                Logger.onboarding.info("hf download exit \(p.terminationStatus), output=\(trimmed.suffix(800))")
                 await MainActor.run {
                     downloadTimer?.invalidate()
-                    if p.terminationStatus == 0 {
+                    if p.terminationStatus == 0 || modelReady {
                         downloadState = .done
                     } else {
-                        downloadState = .failed("huggingface-cli exited \(p.terminationStatus) — check that it's installed and the model is accessible")
+                        let tail = String(trimmed.suffix(400))
+                        let detail = tail.isEmpty
+                            ? "exit \(p.terminationStatus) — try 'hf auth login' if the model is gated"
+                            : tail
+                        downloadState = .failed(detail)
                     }
                 }
             } catch {
@@ -937,12 +1079,101 @@ private struct LocalAIStep: View {
         return total / 1_048_576
     }
 
+    private func startSwiftLMDownload() {
+        let dir = binDir
+        let url = LocalAI.swiftLMReleaseURL
+
+        // Short-circuit: if the binary is already on disk (from a prior partial run
+        // where path persistence didn't land), just use it.
+        if let existing = findSwiftLMBinary(in: dir) {
+            Logger.onboarding.info("startSwiftLMDownload: binary already present at \(existing, privacy: .public), skipping download")
+            swiftLMPath = existing
+            swiftLMState = .done
+            return
+        }
+
+        Logger.onboarding.info("startSwiftLMDownload: url=\(url) dir=\(dir)")
+        swiftLMState = .running
+
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        // -sS makes curl silent except errors → avoids the progress-bar firehose
+        // that overflows the Pipe buffer and deadlocks the process.
+        p.arguments = ["-l", "-c", """
+            cd /tmp && \
+            mkdir -p '\(dir)' && \
+            curl -fLsS '\(url)' -o '\(dir)/swiftlm.tar.gz' 2>&1 && \
+            tar -xzf '\(dir)/swiftlm.tar.gz' -C '\(dir)' 2>&1 && \
+            rm -f '\(dir)/swiftlm.tar.gz' && \
+            echo "extract-ok"
+            """]
+        let outPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = outPipe
+        swiftLMProcess = p
+
+        Task.detached {
+            do {
+                try p.run()
+                p.waitUntilExit()
+                let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                Logger.onboarding.info("startSwiftLMDownload exit=\(p.terminationStatus) bytes=\(out.utf8.count) tail=\(out.suffix(400), privacy: .public)")
+
+                let foundPath = findSwiftLMBinary(in: dir)
+                Logger.onboarding.info("startSwiftLMDownload findBinary in \(dir): \(foundPath ?? "nil", privacy: .public)")
+
+                if p.terminationStatus == 0, let found = foundPath {
+                    await MainActor.run {
+                        swiftLMPath = found
+                        swiftLMState = .done
+                    }
+                } else {
+                    let tail = out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(400)
+                    let listing = (try? FileManager.default.contentsOfDirectory(atPath: dir).joined(separator: "\n")) ?? "(unreadable)"
+                    Logger.onboarding.error("startSwiftLMDownload failed — dir listing:\n\(listing, privacy: .public)")
+                    let detail = tail.isEmpty
+                        ? "Couldn't locate the SwiftLM binary in \(dir) after extraction.\nContents:\n\(listing)"
+                        : "\(String(tail))\n\nContents of \(dir):\n\(listing)"
+                    await MainActor.run { swiftLMState = .failed(detail) }
+                }
+            } catch {
+                Logger.onboarding.error("startSwiftLMDownload threw: \(error.localizedDescription)")
+                await MainActor.run { swiftLMState = .failed(error.localizedDescription) }
+            }
+        }
+    }
+
+    private func cancelSwiftLMDownload() {
+        swiftLMProcess?.terminate()
+        swiftLMProcess = nil
+        swiftLMState = .idle
+    }
+
+    nonisolated private func findSwiftLMBinary(in dir: String) -> String? {
+        let fm = FileManager.default
+        let candidateNames: Set<String> = ["SwiftLM", "swiftlm", "swift-lm", "SwiftLM-cli"]
+        guard let enumerator = fm.enumerator(atPath: dir) else { return nil }
+        for case let rel as String in enumerator {
+            let name = (rel as NSString).lastPathComponent
+            guard candidateNames.contains(name) else { continue }
+            let full = (dir as NSString).appendingPathComponent(rel)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: full, isDirectory: &isDir), !isDir.boolValue else { continue }
+            if fm.isExecutableFile(atPath: full) { return full }
+        }
+        return nil
+    }
+
     private func save() {
-        guard canEnable else { return }
+        guard canEnable else {
+            Logger.onboarding.info("LocalAI save skipped — canEnable=false (tmuxOK=\(tmuxOK) modelReady=\(modelReady) swiftLMReady=\(swiftLMReady))")
+            return
+        }
         let k = KeychainStore.shared
         k.modelPath = modelDir
         k.swiftLMPath = swiftLMPath
         k.aiEnabled = true
+        Logger.onboarding.info("LocalAI save: aiEnabled=true modelPath=\(modelDir) swiftLMPath=\(swiftLMPath, privacy: .public)")
     }
 }
 
@@ -1201,7 +1432,12 @@ private struct LemonMdStep: View {
 
     @State private var proposalState: ProposalState = .idle
     @State private var editedContent = ""
-    @State private var saved = false
+    @State private var savedContent: String?
+
+    private var saved: Bool {
+        guard let savedContent else { return false }
+        return savedContent == editedContent
+    }
 
     private var primaryRepo: WorkspaceRepo? {
         repos.first { !$0.path.isEmpty }
@@ -1350,6 +1586,7 @@ private struct LemonMdStep: View {
               let existing = try? String(contentsOfFile: path, encoding: .utf8),
               !existing.isEmpty else { return }
         editedContent = existing
+        savedContent = existing
         proposalState = .ready
     }
 
@@ -1436,7 +1673,7 @@ private struct LemonMdStep: View {
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             try editedContent.write(toFile: path, atomically: true, encoding: .utf8)
             Logger.onboarding.info("Saved LEMON.md to \(path)")
-            withAnimation(LD.smooth) { saved = true }
+            withAnimation(LD.smooth) { savedContent = editedContent }
         } catch {
             Logger.onboarding.error("Failed to save LEMON.md: \(error)")
         }

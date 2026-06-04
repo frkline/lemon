@@ -19,6 +19,7 @@ struct SettingsView: View {
                     generalSection
                     linearSection
                     workspaceSection
+                    localAISection
                 }
                 .padding(24)
                 .padding(.bottom, 4)
@@ -26,6 +27,7 @@ struct SettingsView: View {
             Divider()
             settingsFooter
         }
+        .frame(minHeight: 600)
         .onAppear { load() }
     }
 
@@ -158,6 +160,82 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Local AI
+
+    private var localAISection: some View {
+        let k = KeychainStore.shared
+        let modelPath = k.modelPath
+        let swiftLMPath = k.swiftLMPath
+        let modelReady = !modelPath.isEmpty &&
+            FileManager.default.fileExists(atPath: modelPath + "/config.json")
+        let swiftLMReady = !swiftLMPath.isEmpty &&
+            FileManager.default.isExecutableFile(atPath: swiftLMPath)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                sectionLabel("Local AI")
+                Spacer()
+                Text("SwiftLM \(LocalAI.swiftLMBuild)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(LD.citrus)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(LD.lemon.opacity(0.18), in: RoundedRectangle(cornerRadius: LD.r3))
+            }
+
+            VStack(spacing: 0) {
+                aiRow(icon: "cpu", label: "Gemma model",
+                      path: modelPath.isEmpty ? "Not configured" : modelPath,
+                      ready: modelReady)
+                Divider().padding(.leading, 54)
+                aiRow(icon: "terminal.fill", label: "SwiftLM runner",
+                      path: swiftLMPath.isEmpty ? "Not configured" : swiftLMPath,
+                      ready: swiftLMReady)
+            }
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        }
+    }
+
+    private func aiRow(icon: String, label: String, path: String, ready: Bool) -> some View {
+        HStack(spacing: 12) {
+            iconBox(icon, tint: ready ? LD.lemon : .secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(label).font(.system(size: 13))
+                    if ready {
+                        readyBadge
+                    } else {
+                        missingBadge
+                    }
+                }
+                Text(path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var readyBadge: some View {
+        HStack(spacing: 3) {
+            Circle().fill(LD.statusDone).frame(width: 5, height: 5)
+            Text("Ready").font(.system(size: 9, weight: .semibold)).foregroundStyle(LD.statusDone)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(LD.statusDone.opacity(0.10), in: Capsule())
+    }
+
+    private var missingBadge: some View {
+        HStack(spacing: 3) {
+            Circle().fill(LD.coral).frame(width: 5, height: 5)
+            Text("Missing").font(.system(size: 9, weight: .semibold)).foregroundStyle(LD.coral)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(LD.coral.opacity(0.10), in: Capsule())
     }
 
     // MARK: - Footer

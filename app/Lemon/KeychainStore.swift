@@ -69,7 +69,9 @@ final class KeychainStore: @unchecked Sendable {
         // Real Keychain store in test mode: always false to prevent the Keychain dialog
         // when there's no user to click it. In-memory stores (makeForTesting) are unaffected.
         if memory == nil && Self.isTestRun { return false }
-        return !linearApiKey.isEmpty && !workspaceRepos.isEmpty
+        guard !linearApiKey.isEmpty, !workspaceRepos.isEmpty else { return false }
+        // Local AI is required — onboarding flips aiEnabled only after both downloads land.
+        return aiEnabled && !modelPath.isEmpty && !swiftLMPath.isEmpty
     }
 
     // MARK: - Workspace repos helpers
@@ -92,18 +94,36 @@ final class KeychainStore: @unchecked Sendable {
     // MARK: - Local AI config (UserDefaults, non-sensitive)
 
     var swiftLMPath: String {
-        get { UserDefaults.standard.string(forKey: "lemon-swiftlm-path") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "lemon-swiftlm-path") }
+        get {
+            if memory != nil { return memory?["swiftLMPath"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-swiftlm-path") ?? ""
+        }
+        set {
+            if memory != nil { memory?["swiftLMPath"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-swiftlm-path")
+        }
     }
 
     var modelPath: String {
-        get { UserDefaults.standard.string(forKey: "lemon-gemma-model-path") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "lemon-gemma-model-path") }
+        get {
+            if memory != nil { return memory?["modelPath"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-gemma-model-path") ?? ""
+        }
+        set {
+            if memory != nil { memory?["modelPath"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-gemma-model-path")
+        }
     }
 
     var aiEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "lemon-ai-enabled") }
-        set { UserDefaults.standard.set(newValue, forKey: "lemon-ai-enabled") }
+        get {
+            if memory != nil { return memory?["aiEnabled"] == "1" }
+            return UserDefaults.standard.bool(forKey: "lemon-ai-enabled")
+        }
+        set {
+            if memory != nil { memory?["aiEnabled"] = newValue ? "1" : "0"; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-ai-enabled")
+        }
     }
 
     // MARK: - Legacy write shim (called from onboarding finish())
@@ -130,6 +150,9 @@ final class KeychainStore: @unchecked Sendable {
                        kSecAttrService: "lemon-linear-key"] as CFDictionary)
         UserDefaults.standard.removeObject(forKey: "lemon-linear-user-id")
         UserDefaults.standard.removeObject(forKey: "lemon-workspace-config")
+        UserDefaults.standard.removeObject(forKey: "lemon-swiftlm-path")
+        UserDefaults.standard.removeObject(forKey: "lemon-gemma-model-path")
+        UserDefaults.standard.removeObject(forKey: "lemon-ai-enabled")
     }
 
     private func readKeychain(_ service: String) -> String? {
