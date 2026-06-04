@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="420">
+
 # 🍋 Lemon
 
 **A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device.**
@@ -16,9 +18,9 @@
 
 ---
 
-Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer." I already have Claude Code. I just wanted the boring orchestration done for me: tag a Linear ticket I don't want to do by hand, get a PR back, skip the routine parts.
+Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer." I already have Claude Code, and I already do the interesting parts: answering Claude's clarifying questions, shaping the plan, reviewing the diff. What I *didn't* want to keep doing by hand was the workflow bureaucracy around it — scanning Linear for what's next, spinning up worktrees, dropping in the right context, transitioning labels, posting the PR comment back.
 
-Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier, and routes the result back to Linear. **Lemon isn't an AI agent product — the intelligence is Claude Code.** Lemon's job is starting it, watching it, and getting the result back where work already lives.
+Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier so you don't have to babysit every "Trust this MCP server?" prompt, and routes the result back to Linear. You stay in the loop where it matters; Lemon handles the parts you'd otherwise click-through. **Lemon isn't an AI agent product — the intelligence is Claude Code, and the judgment is yours.**
 
 ## What Lemon is, and isn't
 
@@ -55,6 +57,10 @@ Build target **Lemon** in Xcode. The app drops itself in the menu bar; first lau
 
 ## How it works
 
+<div align="center">
+<img src="docs/img/live-list.png" alt="The Lemon popover with one active session" width="640">
+</div>
+
 ```
 ┌──────────────┐ poll  ┌──────────────┐ launch  ┌──────────────┐
 │   Linear     │──────▶│  Lemon.app   │────────▶│ tmux + claude │
@@ -79,6 +85,11 @@ Build target **Lemon** in Xcode. The app drops itself in the menu bar; first lau
 
 ## The 🍋 workflow
 
+<div align="center">
+<img src="docs/img/lemon-linear.png" alt="Lemon loves Linear" width="260">
+<p><sub><i>For Linear, who already knows what work needs doing.</i></sub></p>
+</div>
+
 Lemon's entire surface in your Linear workspace is **four labels** and **one comment**.
 
 | Label | Set by | Meaning |
@@ -91,6 +102,10 @@ Lemon's entire surface in your Linear workspace is **four labels** and **one com
 Labels are auto-provisioned in every team you have access to on first launch — if your Linear admin already created custom 🍋 labels with the same names, Lemon adopts them (fetch-or-create).
 
 ## Local AI is not optional
+
+<div align="center">
+<img src="docs/img/setup-3-localai.png" alt="Local AI onboarding step with Gemma model and SwiftLM runner both ready" width="380">
+</div>
 
 The whole point of Lemon is the silence detector + auto-accept + unstick-dumb-prompts trio. Without a local model running, the 🍋 Waiting auto-pause and confirmation auto-accept paths don't fire. So onboarding gates Continue on:
 
