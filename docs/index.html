@@ -372,12 +372,12 @@
 
   .spread {
     display: grid;
-    grid-template-columns: 5fr 7fr;
-    gap: 56px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 40px;
     align-items: start;
     margin-top: 36px;
   }
-  .spread.flip { grid-template-columns: 7fr 5fr; }
+  .spread.flip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .spread-text h2 {
     font-family: var(--display);
     font-weight: 700;

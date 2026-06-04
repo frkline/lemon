@@ -1,8 +1,32 @@
 # 🍋 Lemon
 
-A Mac-native AI developer agent. Label a Linear issue with 🍋 — Lemon spins up a git worktree, launches a Claude session in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready. Before you're ever interrupted.
+A personal workflow orchestration menu-bar app for **Claude Code + Linear**, leveraging **Gemma 4 on device**. Made for the Mac mini sitting on your desk. Tag a Linear issue with 🍋 — Lemon spins up a git worktree, launches your `claude` CLI in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready.
+
+The intelligence is Claude Code (your login) and a small local Gemma 4 classifier watching the pane. Lemon itself is glue.
 
 **lemon.living** — direct download, not App Store.
+
+### What Lemon is (and isn't)
+
+| ✅ It is | ❌ It isn't |
+|---|---|
+| A **menu-bar orchestrator** that decides when to start Claude Code | An AI agent product — the agent is Claude Code |
+| Glue between **your Linear queue** and **your Claude Code CLI** | A Claude reseller — Lemon never proxies your API traffic |
+| A **local Gemma 4 classifier** for obvious-confirmation auto-accept and unstick-dumb-prompts | A multi-tenant SaaS |
+| Built for **one developer** running it | A competitor to Anthropic, Linear, or anything else |
+
+### Bonus: nest `/loop` inside
+
+Lemon is itself a hand-coded `/loop` — `goal = ship a PR for this Linear issue`. The Orchestrator polls, Gemma watches the pane, the session keeps going until 🍋 Complete fires. That same pattern is broadly useful inside a session too, especially for work that benefits from iteration over one-shot:
+
+- **Polish** — UI / docs / a tricky code path: try, look, refine
+- **Reviews** — diffs, PRs, modules: one finding per tick
+- **Refactors** — when you can't enumerate every call site upfront
+- **Bug-hunting sweeps** — fix one, run tests, find the next
+- **Test backfill** — write one, watch it pass, find the next gap
+- **Exploration** — when the next move depends on what the last move just told you
+
+Each tick is small, scoped, verifiable. Same reason Lemon's outer loop works. Write your team's `LEMON.md` to tell Claude to lean on `/loop` whenever the issue calls for it — you get nested iteration: Lemon iterates the Linear queue, Claude iterates inside each ticket. (This README, the docs site, and most of the bug fixes in this repo were built by running `/loop` against an open-ended "drive Lemon to fully baked" goal for an hour.)
 
 ---
 

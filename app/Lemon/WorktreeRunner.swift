@@ -343,6 +343,27 @@ final class WorktreeRunner: @unchecked Sendable {
 
         If you need human input at any point, apply the label **🍋 Waiting** and pause.
         If the issue's team LEMON.md above gave you extra steps, do those too.
+
+        ---
+        ## Use `/loop` for iterative work
+
+        Lemon itself is a hand-coded `/loop` — Orchestrator polls, Gemma
+        watches the pane, the session keeps going until 🍋 Complete fires.
+        For your work inside this session, prefer `/loop` whenever the
+        task benefits from iteration rather than one pass:
+
+        - **Polish** a UI / a doc / a code path (try, look, refine)
+        - **Reviews** of a diff, a PR, a module — one finding per tick
+        - **Refactors** where you can't enumerate every site upfront
+        - **Bug-hunting sweeps** — fix one, run tests, find the next
+        - **Test backfill** — write one, watch it pass, find the next gap
+        - **Exploration** where the next move depends on the last result
+
+        Each tick: make one concrete change, validate it, commit if it
+        landed, decide what's next, repeat. Stop when the completion
+        checklist above is satisfied. The pattern works because each
+        loop iteration is small, scoped, and verifiable — same reason
+        Lemon's outer loop works.
         """
         try? content.write(toFile: "\(sessionPath)/LEMON_CONTEXT.md", atomically: true, encoding: .utf8)
     }
