@@ -94,6 +94,12 @@
     align-items: baseline;
     gap: 14px;
   }
+  .nameplate-emoji {
+    font-size: 30px;
+    line-height: 1;
+    transform: translateY(2px);
+    filter: drop-shadow(0 4px 6px rgba(247, 200, 66, 0.45));
+  }
   .nameplate .glyph {
     font-family: var(--display);
     font-weight: 900;
@@ -857,6 +863,7 @@
 <header class="masthead wrap">
   <div class="masthead-row">
     <div class="nameplate">
+      <span class="nameplate-emoji" aria-hidden="true">🍋</span>
       <span class="glyph">Lemon</span><span class="dot" aria-hidden="true"></span>
       <span class="tagline">Made for the Mac mini sitting on your desk</span>
     </div>
