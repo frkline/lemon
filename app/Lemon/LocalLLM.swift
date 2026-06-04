@@ -48,6 +48,12 @@ final class LocalLLM: @unchecked Sendable {
         }
         guard process == nil else { return }
 
+        // Kill any zombie SwiftLM holding port \(port) from a previous launch.
+        // Otherwise the new SwiftLM binds(), gets EADDRINUSE, dies — while our
+        // /health probe is satisfied by the OLD instance and we briefly report
+        // ready before the new pid disappears. Saw this exact pattern in logs.
+        Self.killProcessHoldingPort(port)
+
         let p = Process()
         p.executableURL = URL(fileURLWithPath: store.swiftLMPath)
         // SwiftLM b648 CLI: --model <hf-id-or-local-path> --port <n>
@@ -152,6 +158,34 @@ final class LocalLLM: @unchecked Sendable {
             return false
         }
         return _ready && stillUp
+    }
+
+    // Find anything bound to our port (typically a zombie SwiftLM from a
+    // previous Lemon launch) and SIGTERM it. Synchronous + best-effort;
+    // we don't care if it fails (no process to kill is the same as success).
+    static func killProcessHoldingPort(_ port: Int) {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-tiTCP:\(port)", "-sTCP:LISTEN"]
+        let outPipe = Pipe()
+        lsof.standardOutput = outPipe
+        lsof.standardError = Pipe()
+        do {
+            try lsof.run(); lsof.waitUntilExit()
+            let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let pids = out.split(whereSeparator: { $0.isNewline })
+                          .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            for pid in pids {
+                Logger.orchestrator.info("Killing zombie process pid=\(pid) on port \(port)")
+                kill(Int32(pid), SIGTERM)
+            }
+            // Brief grace period so the kernel releases the socket before we bind.
+            if !pids.isEmpty {
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+        } catch {
+            Logger.orchestrator.warning("lsof probe failed (ok if first launch): \(error.localizedDescription)")
+        }
     }
 
     // Reads the last ~80 lines (truncated to 1.5 KB) of the SwiftLM stream
