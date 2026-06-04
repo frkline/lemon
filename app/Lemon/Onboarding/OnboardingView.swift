@@ -1251,6 +1251,32 @@ private struct ReadyStep: View {
         .onAppear {
             detectClaudeAuth()
             createLinearLabels()
+            preauthorizeTerminalAutomation()
+        }
+    }
+
+    // Trigger the macOS Apple Events authorization dialog for Terminal.app
+    // (and iTerm2 if installed) at onboarding time, so the user clicks Allow
+    // while they're at their desk. Without this, the dialog fires the first
+    // time a 🍋 session tries to open a terminal window — which is exactly
+    // when the user is most likely AFK, and the session sits blocked forever.
+    private func preauthorizeTerminalAutomation() {
+        Task.detached {
+            var apps = ["Terminal"]
+            if FileManager.default.fileExists(atPath: "/Applications/iTerm.app") {
+                apps.append("iTerm")
+            }
+            for app in apps {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                // `count windows` is a benign no-op that still trips the
+                // Apple Events permission gate the same way send-script does.
+                p.arguments = ["-e", "tell application \"\(app)\" to count windows"]
+                p.standardOutput = Pipe()
+                p.standardError = Pipe()
+                try? p.run(); p.waitUntilExit()
+                Logger.onboarding.info("Pre-auth \(app) AppleEvents: exit=\(p.terminationStatus)")
+            }
         }
     }
 
