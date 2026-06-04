@@ -104,7 +104,23 @@ final class LocalLLM: @unchecked Sendable {
     }
 
     // In tests there is no process — treat nil process as "externally managed, assume running".
-    func isReady() -> Bool { _ready && (process?.isRunning ?? true) }
+    // Also detects a post-ready process death: SwiftLM crashed or got SIGKILLed
+    // after start() returned successfully. Without this detection, _state stays
+    // .ready forever even though the runner is gone, and runAITest's "Race"
+    // path keeps re-tripping with no escape — the next start() bails on
+    // `guard process == nil` because the dead Process is still parked there.
+    // Transition to .failed + clear process so a Re-run actually re-boots.
+    func isReady() -> Bool {
+        let stillUp = process?.isRunning ?? true
+        if _ready && !stillUp {
+            Logger.orchestrator.error("SwiftLM process exited after reporting ready — clearing state for re-launch")
+            _ready = false
+            _state = .failed("SwiftLM process exited unexpectedly after startup. Click Run again to relaunch.")
+            process = nil
+            return false
+        }
+        return _ready && stillUp
+    }
 
     private func healthCheck() async -> Bool {
         guard let url = URL(string: "http://localhost:\(port)/health") else { return false }

@@ -424,19 +424,43 @@ struct PopoverView: View {
 
     private func joinSession(_ session: Session) {
         let name = "lemon-\(session.issue.identifier.lowercased())"
+        // The user explicitly clicked Join — they want the window to appear AND
+        // come to the front. Try iTerm2 first (tmux -CC native tabs), then
+        // Terminal.app (always present), and only fall back to clipboard if
+        // both osascript calls error out.
         let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
-        if hasITerm {
-            let script = "tell application \"iTerm\" to create window with default profile command \"tmux -CC attach -t \(name)\""
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            p.arguments = ["-e", script]
-            try? p.run()
-        } else {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("tmux attach -t \(name)", forType: .string)
-            joinCopied = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { joinCopied = false }
+        if hasITerm, runOsascript("""
+            tell application "iTerm"
+                activate
+                create window with default profile command "tmux -CC attach -t \(name)"
+            end tell
+            """) {
+            return
         }
+        if runOsascript("""
+            tell application "Terminal"
+                activate
+                do script "tmux attach -t \(name)"
+            end tell
+            """) {
+            return
+        }
+        // Last resort — copy the command for the user to paste themselves.
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("tmux attach -t \(name)", forType: .string)
+        joinCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { joinCopied = false }
+    }
+
+    @discardableResult
+    private func runOsascript(_ script: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", script]
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 }
+        catch { return false }
     }
 }
 

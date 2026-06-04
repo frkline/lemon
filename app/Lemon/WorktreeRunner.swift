@@ -490,10 +490,15 @@ final class WorktreeRunner: @unchecked Sendable {
         return true
     }
 
+    // Auto-launch path: the user didn't ask for this window — Lemon decided to
+    // open it. So we deliberately omit `activate` to avoid stealing focus from
+    // whatever they were typing in. Terminal.app's window still appears in the
+    // window list and Mission Control; the user can switch to it when ready.
+    // The Join button (PopoverView) uses an activate-ing variant for the case
+    // where the user explicitly clicked Join.
     private func openInTerminalApp(sessionName: String) {
         runSync("""
-            osascript -e 'tell application "Terminal" to do script "tmux attach -t \(sessionName)"' \
-            -e 'tell application "Terminal" to activate' 2>/dev/null || true
+            osascript -e 'tell application "Terminal" to do script "tmux attach -t \(sessionName)"' 2>/dev/null || true
             """)
     }
 
