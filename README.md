@@ -89,12 +89,15 @@ flowchart LR
     O[Lemon.app<br/><sub>menu bar</sub>]
     T[claude in tmux<br/><sub>your CLI</sub>]
     G[Gemma 4<br/><sub>SwiftLM + MLX</sub>]
+    U([You])
 
     L -->|🍋 polled| O
     O -->|launch| T
     T -->|pane log| G
     G -->|JSON| O
     O -->|🍋 Complete + PR comment| L
+
+    T <-.->|"📱 Claude iOS push<br/>💻 or Join the tmux"| U
 ```
 
 1. **You label** a Linear issue with 🍋.
