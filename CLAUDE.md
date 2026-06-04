@@ -1,6 +1,6 @@
 # Lemon
 
-A Mac-native AI developer agent. Label a Linear issue with 🍋 — Lemon spins up a git worktree, launches a Claude session in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready.
+A personal workflow tool for Claude Code + Linear. Lemon is a menu-bar orchestrator: tag a Linear issue with 🍋 and it spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a tiny local Gemma classifier — Lemon itself is glue.
 
 ## Repo layout
 
