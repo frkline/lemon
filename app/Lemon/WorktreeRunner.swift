@@ -617,12 +617,14 @@ final class WorktreeRunner: @unchecked Sendable {
                 return
             }
 
-            // Infer waiting vs executing from queue labels.
-            if let queue = try? await linear.fetchLemonQueue(apiKey: apiKey, userId: userId),
-               let current = queue.first(where: { $0.id == issue.id }) {
-                if current.labelNames.contains(LinearClient.labelWaiting) {
+            // Infer waiting vs executing from the issue's current labels.
+            // fetchLemonQueue filters by the 🍋 trigger label, which we removed
+            // when the session started — so it won't see the issue mid-session.
+            // fetchIssueLabels targets the single issue and works after handoff.
+            if let labels = try? await linear.fetchIssueLabels(issueId: issue.id, apiKey: apiKey) {
+                if labels.contains(LinearClient.labelWaiting) {
                     onStatusChange?(.waiting)
-                } else if current.labelNames.contains(LinearClient.labelInProgress) {
+                } else if labels.contains(LinearClient.labelInProgress) {
                     onStatusChange?(.executing)
                 }
             }

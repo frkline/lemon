@@ -116,6 +116,25 @@ final class LinearClient: Sendable {
         return issueNodes(from: json, key: "issues").compactMap { parseIssue($0) }
     }
 
+    // Returns the current label names for one issue, or nil if the issue is
+    // unreachable. Used by WorktreeRunner.pollUntilDone to track waiting /
+    // in-progress transitions during an active session, where the trigger
+    // label has already been removed (so fetchLemonQueue can't see the issue).
+    func fetchIssueLabels(issueId: String, apiKey: String) async throws -> [String]? {
+        let query = """
+        query IssueLabels($id: String!) {
+          issue(id: $id) {
+            labels { nodes { name } }
+          }
+        }
+        """
+        let json = try await graphql(query: query, variables: ["id": issueId], apiKey: apiKey)
+        guard let issue = (json["data"] as? [String: Any])?["issue"] as? [String: Any],
+              let labels = (issue["labels"] as? [String: Any])?["nodes"] as? [[String: Any]]
+        else { return nil }
+        return labels.compactMap { $0["name"] as? String }
+    }
+
     // MARK: - Comments
 
     struct Comment {
