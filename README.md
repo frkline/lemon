@@ -1,23 +1,109 @@
+<div align="center">
+
 # 🍋 Lemon
 
-A personal workflow orchestration menu-bar app for **Claude Code + Linear**, leveraging **Gemma 4 on device**. Made for the Mac mini sitting on your desk. Tag a Linear issue with 🍋 — Lemon spins up a git worktree, launches your `claude` CLI in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready.
+**A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device.**
+*Made for the Mac mini sitting on your desk.*
 
-The intelligence is Claude Code (your login) and a small local Gemma 4 classifier watching the pane. Lemon itself is glue.
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F7C842?style=flat-square&labelColor=1a1714)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS_26+-1a1714?style=flat-square)]()
+[![Silicon](https://img.shields.io/badge/silicon-Apple-1a1714?style=flat-square)]()
+[![SwiftLM](https://img.shields.io/badge/SwiftLM-b648-EF6A48?style=flat-square)](https://github.com/SharpAI/SwiftLM)
 
-**lemon.living** — direct download, not App Store.
+[**Install**](#install) · [**How it works**](#how-it-works) · [**The 🍋 workflow**](#the--workflow) · [**Stack**](#stack--gratitude) · [**Releases**](https://github.com/frkline/lemon/releases)
 
-### What Lemon is (and isn't)
+</div>
+
+---
+
+Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer." I already have Claude Code. I just wanted the boring orchestration done for me: tag a Linear ticket I don't want to do by hand, get a PR back, skip the routine parts.
+
+Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier, and routes the result back to Linear. **Lemon isn't an AI agent product — the intelligence is Claude Code.** Lemon's job is starting it, watching it, and getting the result back where work already lives.
+
+## What Lemon is, and isn't
 
 | ✅ It is | ❌ It isn't |
 |---|---|
-| A **menu-bar orchestrator** that decides when to start Claude Code | An AI agent product — the agent is Claude Code |
-| Glue between **your Linear queue** and **your Claude Code CLI** | A Claude reseller — Lemon never proxies your API traffic |
+| A menu-bar **orchestrator** that decides when to start Claude Code | An AI agent product — the agent is Claude Code |
+| **Glue** between your Linear queue and your Claude Code CLI | A Claude reseller — Lemon never proxies your API traffic |
 | A **local Gemma 4 classifier** for obvious-confirmation auto-accept and unstick-dumb-prompts | A multi-tenant SaaS |
 | Built for **one developer** running it | A competitor to Anthropic, Linear, or anything else |
 
-### Bonus: nest `/loop` inside
+## Install
 
-Lemon is itself a hand-coded `/loop` — `goal = ship a PR for this Linear issue`. The Orchestrator polls, Gemma watches the pane, the session keeps going until 🍋 Complete fires. That same pattern is broadly useful inside a session too, especially for work that benefits from iteration over one-shot:
+```sh
+brew install hf tmux gh claude-code             # Runtime prereqs
+```
+
+**Direct download** — signed `.app` from [GitHub Releases](https://github.com/frkline/lemon/releases). Drag to `/Applications`.
+
+**From source** *(macOS 26 · Apple Silicon · Xcode 26)*:
+
+```sh
+git clone https://github.com/frkline/lemon
+cd lemon && open app/Lemon.xcodeproj
+```
+
+Build target **Lemon** in Xcode. The app drops itself in the menu bar; first launch runs the onboarding wizard, which gates Continue on a downloaded Gemma 4 (E2B or E4B) and a SwiftLM binary.
+
+| | Requirement |
+|---|---|
+| **OS** | macOS 26 · Apple Silicon |
+| **Gemma 4 E2B** | ~4 GB on disk · runs on 16 GB Macs |
+| **Gemma 4 E4B** *(recommended)* | ~6 GB on disk · 24 GB+ RAM |
+| **Other** | `tmux`, `hf` CLI, `gh`, authenticated `claude` |
+
+## How it works
+
+```
+┌──────────────┐ poll  ┌──────────────┐ launch  ┌──────────────┐
+│   Linear     │──────▶│  Lemon.app   │────────▶│ tmux + claude │
+│    queue     │◀──────│ (menu bar)   │◀────────│  (your CLI)   │
+└──────────────┘ label └──────┬───────┘  pane   └──────┬───────┘
+                              │ log                    │
+                              ▼                        ▼
+                       ┌──────────────┐         ┌──────────────┐
+                       │ Gemma 4 on   │ JSON    │ git worktree │
+                       │ Apple Silicon│◀────────│ /tmp/lemon-* │
+                       │   (SwiftLM)  │         └──────────────┘
+                       └──────────────┘
+```
+
+1. **Label** a Linear issue with 🍋.
+2. **Orchestrator** picks it up on the next poll (15 s active, 45 s idle).
+3. A **git worktree** spins up at `/tmp/lemon-{id}`; `LEMON_CONTEXT.md` is written with the issue body, your team's `LEMON.md`, and the completion checklist.
+4. A **terminal window** opens running `claude --enable-auto-mode --remote-control`. Lemon prefers iTerm2, falls back to Terminal.app.
+5. **Gemma 4** runs locally via SwiftLM + MLX. After 2 minutes of pane silence, Lemon hands it the tail of the log and asks "what's happening?" — the classifier answers obvious confirmation prompts (`y/n/yes/no/1-9/Enter/Escape`) through a hard allowlist and raises 🍋 Waiting for anything ambiguous.
+6. When Claude sets **🍋 Complete**, Lemon posts a Linear comment with the PR link and a summary, then cleans up the worktree.
+7. **Reply** to the Lemon comment to re-trigger a revision pass — Lemon reuses the branch.
+
+## The 🍋 workflow
+
+Lemon's entire surface in your Linear workspace is **four labels** and **one comment**.
+
+| Label | Set by | Meaning |
+|---|---|---|
+| `🍋` | You | Trigger — Lemon picks this up |
+| `🍋 In Progress` | Lemon | Worktree active, Claude running |
+| `🍋 Waiting` | Claude / Gemma | Paused, needs your input |
+| `🍋 Complete` | Claude | PR open, Lemon report posted |
+
+Labels are auto-provisioned in every team you have access to on first launch — if your Linear admin already created custom 🍋 labels with the same names, Lemon adopts them (fetch-or-create).
+
+## Local AI is not optional
+
+The whole point of Lemon is the silence detector + auto-accept + unstick-dumb-prompts trio. Without a local model running, the 🍋 Waiting auto-pause and confirmation auto-accept paths don't fire. So onboarding gates Continue on:
+
+- A downloaded **Gemma 4** quant from [`mlx-community`](https://huggingface.co/mlx-community) (E2B at ~4 GB or E4B at ~6 GB)
+- A signed **SwiftLM** binary from [`SharpAI/SwiftLM`](https://github.com/SharpAI/SwiftLM) (currently pinned to build `b648`)
+
+Both are pulled inside the wizard. Nothing is built from source.
+
+A **Self-test** button in Settings boots the runner, fires one `classify()` call, and reports the actual response. If anything fails, the error tooltip carries the `log stream` predicate ready to paste into Console.app.
+
+## Bonus: nest `/loop` inside
+
+Lemon is itself a hand-coded `/loop` — `goal = ship a PR for this Linear issue`. The Orchestrator polls, Gemma watches the pane, the session keeps going until 🍋 Complete fires. That same pattern is broadly useful inside a session, especially for work that benefits from iteration over one-shot:
 
 - **Polish** — UI / docs / a tricky code path: try, look, refine
 - **Reviews** — diffs, PRs, modules: one finding per tick
@@ -26,74 +112,56 @@ Lemon is itself a hand-coded `/loop` — `goal = ship a PR for this Linear issue
 - **Test backfill** — write one, watch it pass, find the next gap
 - **Exploration** — when the next move depends on what the last move just told you
 
-Each tick is small, scoped, verifiable. Same reason Lemon's outer loop works. Write your team's `LEMON.md` to tell Claude to lean on `/loop` whenever the issue calls for it — you get nested iteration: Lemon iterates the Linear queue, Claude iterates inside each ticket. (This README, the docs site, and most of the bug fixes in this repo were built by running `/loop` against an open-ended "drive Lemon to fully baked" goal for an hour.)
+Tell Claude to lean on `/loop` in your team's `LEMON.md` when the issue calls for it. You get nested iteration: Lemon iterates the Linear queue, Claude iterates inside each ticket. *(This README, the docs site, and most of the bug fixes in this repo were built by running `/loop` against an open-ended "drive Lemon to fully baked" goal.)*
 
----
+## Privacy & egress
 
-## How it works
+**Lemon-the-binary** only ever talks to **Linear's GraphQL** for label and comment operations. That's the only network call the orchestrator itself makes.
 
-1. **Label** a Linear issue with 🍋
-2. **Lemon.app** picks it up on the next poll (15s when active, 45s when idle)
-3. A **git worktree** is created at `/tmp/lemon-{identifier}` from your local repo
-4. A **Terminal window** opens running `claude --enable-auto-mode --remote-control`
-5. Claude works the issue, sets Linear labels as it goes, and opens a PR
-6. When Claude sets **🍋 Complete**, Lemon posts a report comment to Linear and cleans up
-7. Reply to the Lemon report comment to re-trigger a revision — Lemon reuses the branch
+Everything else flows through tools you launched and authenticated:
 
-## Linear labels
+| What | Where it goes |
+|---|---|
+| Issues, labels, comments | Linear API |
+| Claude API traffic | Your `claude` CLI → Anthropic (Lemon never sees the bytes) |
+| `gh pr create`, `git push` | GitHub, from inside the worktree |
+| Gemma 4 inference | **On your Mac's GPU.** Never leaves the machine. |
+| Model + runner downloads | **Once**, during onboarding, from HuggingFace + GitHub releases |
+| Telemetry | None. Zero. No analytics SDK. |
 
-Lemon creates and manages these automatically:
+The Linear API key is stored in macOS **Keychain**, not a file. Workspace paths live in UserDefaults. Session logs land in `/tmp/lemon-log-{id}.txt` and are wiped on cleanup.
 
-| Label | Set by | Meaning |
-|-------|--------|---------|
-| `🍋` | You | Trigger — Lemon picks this up |
-| `🍋 In Progress` | Lemon | Worktree active, Claude running |
-| `🍋 Waiting` | Claude | Paused, needs your input |
-| `🍋 Complete` | Claude | PR open, report posted |
+## Stack & gratitude
 
-## Setup
+None of this is from scratch. Lemon is a small assembly of other people's good ideas.
 
-### 1. Prerequisites
+| | Project | What |
+|---|---|---|
+| **The agent** | [Claude Code](https://claude.com/code) (Anthropic) | The intelligence. Lemon launches and watches; Claude codes. |
+| **The runtime** | [SwiftLM](https://github.com/SharpAI/SwiftLM) (SharpAI, `b648`) | OpenAI-compatible MLX inference server in pure Swift. |
+| **The framework** | [MLX](https://github.com/ml-explore/mlx) (Apple) | Open-source ML for Apple Silicon. SwiftLM maps Gemma onto Metal through it. |
+| **The weights** | [`mlx-community`](https://huggingface.co/mlx-community) on HuggingFace | The quantized [`gemma-4-e4b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit) / [`gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) |
+| **The surface** | [Linear](https://linear.app) | The issue tracker that's the entire Lemon UI for "what's next?" |
+
+**More silicon than you know what to do with?** [oMLX](https://omlx.ai) — same on-device idea, scaled up to a Mac Studio's larger MoE models.
+
+## Development
 
 ```sh
-brew install gh
-gh auth login
-
-# Claude Code CLI — install from claude.ai/code, then:
-claude login
+make ui                # incremental build + smoke screenshots (~8 s)
+make watch             # auto-rebuild + smoke on every .swift save
+make test              # XCTest suite
+make integration-test  # shell tests: tmux lifecycle + mock Gemma + claude -p
 ```
 
-### 2. Install Lemon.app
+UI iteration happens via the smoke test (`scripts/smoke-test.sh`), which drives every screen in-process and dumps PNGs to `/tmp/lemon-smoke/latest/`. See [`CLAUDE.md`](CLAUDE.md) for the full architecture, smoke loop, and contributor guide.
 
-Download from [lemon.living](https://lemon.living) and launch it.
+## License
 
-### 3. Onboarding (3 steps)
-
-**Step 1 — Linear:** Paste your Linear API key (from linear.app → Settings → API). Lemon verifies it and fetches your identity automatically.
-
-**Step 2 — Workspace:** Add your local repo paths and their Linear issue prefixes (e.g. `/Users/you/Projects/myapp` → `LEM`). Lemon uses the prefix to route issues to the right repo.
-
-**Step 3 — Done:** Lemon detects your Claude Code auth and starts polling.
+Apache 2.0. See [`LICENSE`](LICENSE).
 
 ---
 
-## Architecture
-
-```
-Lemon.app (macOS 26, unsandboxed)
-  └── polls Linear for 🍋-labeled issues
-  └── WorktreeRunner (one per issue)
-        ├── git worktree add /tmp/lemon-{id} -b lemon/{id} origin/main
-        ├── writes LEMON_CONTEXT.md (issue details + completion checklist)
-        ├── updates labels: 🍋 → 🍋 In Progress
-        ├── open -a Terminal launcher.sh  →  claude --enable-auto-mode --remote-control
-        ├── polls Linear every 10s for label changes
-        └── on 🍋 Complete: post report, remove worktree
-```
-
-## Requirements
-
-- macOS 26 (Darwin 25.x)
-- `gh` CLI, authenticated (`gh auth login`)
-- Claude Code CLI, authenticated (`claude login`)
-- A Linear workspace with API access
+<div align="center">
+<sub><i>Built by <a href="https://github.com/frkline">Frank Kline</a> as personal workflow tooling. Pull requests welcome.</i></sub>
+</div>
