@@ -579,11 +579,34 @@
   }
   .panel li .mark.no { color: var(--coral); }
 
+  /* ---------- Interlude (chapter-break) ---------- */
+
+  .interlude {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 96px 28px;
+    position: relative;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+  }
+  .interlude::before,
+  .interlude::after {
+    content: "";
+    display: block;
+    width: 64px;
+    height: 1px;
+    background: var(--rule);
+    margin: 0 auto;
+  }
+  .interlude::before { margin-bottom: 56px; }
+  .interlude::after  { margin-top: 56px; }
+
   /* ---------- Dedication block ---------- */
 
   .dedication {
-    margin: 0 auto 56px;
-    max-width: 460px;
+    margin: 0 auto;
+    max-width: 380px;
     text-align: center;
     padding: 0;
   }
@@ -785,8 +808,11 @@
     .stats { grid-template-columns: 1fr; }
     .masthead-meta { gap: 14px; }
     .code-block { padding: 22px; font-size: 12.5px; }
-    .dedication { max-width: 320px; margin-bottom: 36px; }
+    .dedication { max-width: 280px; }
     .dedication figcaption { font-size: 15px; }
+    .interlude { padding: 56px 18px; }
+    .interlude::before { margin-bottom: 32px; }
+    .interlude::after  { margin-top: 32px; }
   }
 </style>
 </head>
@@ -882,12 +908,15 @@
         <p>Lemon posts a Linear comment with the PR link and a one-paragraph summary. Reply to the comment to request revisions.</p>
       </article>
     </div>
+  </section>
 
-    <figure class="dedication" aria-label="Lemon loves Linear">
+  <!-- ============== INTERLUDE: Lemon ❤️ Linear ============== -->
+  <aside class="interlude" aria-label="Lemon loves Linear">
+    <figure class="dedication">
       <img src="img/lemon-linear.png" alt="A lemon, a heart, the Linear mark — Lemon loves Linear." />
       <figcaption>For Linear, who already knows what work needs doing.</figcaption>
     </figure>
-  </section>
+  </aside>
 
   <!-- ============== HOW IT WORKS ============== -->
   <section id="how-it-works" aria-labelledby="hiw-h">
