@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lemon — Label an issue, get a PR.</title>
+<meta name="description" content="A Mac-native AI developer agent. Label a Linear issue with 🍋. Lemon spins up a worktree, runs Claude, and opens a pull request." />
+<meta property="og:title" content="Lemon — Label an issue, get a PR." />
+<meta property="og:description" content="A Mac-native AI developer agent for Linear + Claude Code." />
+<meta name="theme-color" content="#F7C842" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper:        #f3ede1;
+    --paper-deep:   #ece4d3;
+    --ink:          #1a1714;
+    --ink-soft:     #45403b;
+    --rule:         #c9bea8;
+    --rule-soft:    #ddd2bb;
+    --lemon:        #f7c842;
+    --lemon-deep:   #b48a17;
+    --coral:        #ef6a48;
+    --moss:         #3a7a4a;
+    --shadow:       0 30px 60px -30px rgba(40, 30, 0, 0.35);
+
+    --display:      "Fraunces", "Newsreader", Georgia, serif;
+    --body:         "Newsreader", Georgia, serif;
+    --mono:         "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    scroll-behavior: smooth;
+    background: var(--paper);
+  }
+
+  body {
+    font-family: var(--body);
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 0% 0%, rgba(247,200,66,0.18) 0%, transparent 40%),
+      radial-gradient(circle at 100% 60%, rgba(239,106,72,0.10) 0%, transparent 35%),
+      var(--paper);
+    background-attachment: fixed;
+    line-height: 1.6;
+    font-size: 18px;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Subtle paper grain via SVG noise */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.07;
+    z-index: 1;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    mix-blend-mode: multiply;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 28px;
+    position: relative;
+    z-index: 2;
+  }
+
+  ::selection { background: var(--lemon); color: var(--ink); }
+
+  /* ---------- Masthead ---------- */
+
+  .masthead {
+    border-bottom: 1.5px solid var(--ink);
+    padding: 22px 0 18px;
+    margin-bottom: 60px;
+  }
+  .masthead-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .nameplate {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .nameplate .glyph {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 38px;
+    line-height: 1;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    font-variation-settings: "opsz" 144, "SOFT" 100;
+  }
+  .nameplate .dot {
+    width: 10px; height: 10px;
+    background: var(--lemon);
+    border-radius: 50%;
+    border: 1.5px solid var(--lemon-deep);
+    display: inline-block;
+    transform: translateY(-3px);
+  }
+  .nameplate .tagline {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+  }
+  .masthead-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    display: flex;
+    gap: 22px;
+    align-items: baseline;
+  }
+  .masthead-meta a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 1px;
+  }
+  .masthead-meta a:hover { color: var(--coral); border-bottom-color: var(--coral); }
+
+  /* ---------- Hero — magazine cover ---------- */
+
+  .hero {
+    padding: 30px 0 80px;
+    position: relative;
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 6fr 4fr;
+    gap: 60px;
+    align-items: end;
+  }
+  .hero-headline {
+    font-family: var(--display);
+    font-weight: 900;
+    font-variation-settings: "opsz" 144, "SOFT" 50;
+    font-size: clamp(54px, 8.2vw, 124px);
+    line-height: 0.92;
+    letter-spacing: -0.035em;
+    color: var(--ink);
+  }
+  .hero-headline em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--lemon-deep);
+    font-variation-settings: "opsz" 144, "SOFT" 100;
+  }
+  .hero-headline .arrow {
+    display: inline-block;
+    font-style: normal;
+    color: var(--coral);
+    transform: translate(-2px, -22px);
+    font-size: 0.6em;
+    margin-right: 0.04em;
+  }
+  .hero-side {
+    padding-bottom: 14px;
+  }
+  .hero-stand {
+    font-family: var(--body);
+    font-size: 19px;
+    line-height: 1.45;
+    color: var(--ink);
+    max-width: 30ch;
+    border-left: 3px solid var(--lemon);
+    padding-left: 18px;
+    margin-bottom: 28px;
+    font-weight: 500;
+  }
+  .hero-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    padding: 14px 22px;
+    border-radius: 0;
+    text-decoration: none;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1.5px solid var(--ink);
+    box-shadow: 4px 4px 0 var(--lemon);
+  }
+  .btn-primary:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--lemon);
+  }
+  .btn-ghost {
+    color: var(--ink);
+    border: 1.5px solid var(--ink);
+    background: transparent;
+  }
+  .btn-ghost:hover {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  /* Hero rule + dateline strip */
+  .dateline {
+    margin-top: 50px;
+    border-top: 1.5px solid var(--ink);
+    border-bottom: 1.5px solid var(--ink);
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 10px 0;
+    color: var(--ink-soft);
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .dateline span { display: inline-flex; gap: 8px; align-items: baseline; }
+  .dateline b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- Section scaffolding ---------- */
+
+  section {
+    padding: 96px 0 16px;
+    position: relative;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--coral);
+    margin-bottom: 16px;
+    display: inline-block;
+    border-bottom: 1.5px solid var(--coral);
+    padding-bottom: 4px;
+  }
+  .section-heading {
+    font-family: var(--display);
+    font-weight: 700;
+    font-variation-settings: "opsz" 96;
+    font-size: clamp(38px, 5.2vw, 64px);
+    line-height: 1;
+    letter-spacing: -0.025em;
+    margin-bottom: 32px;
+    max-width: 22ch;
+  }
+  .section-lede {
+    font-family: var(--body);
+    font-size: 20px;
+    line-height: 1.5;
+    max-width: 60ch;
+    color: var(--ink-soft);
+    margin-bottom: 40px;
+  }
+
+  /* ---------- The lifecycle ---------- */
+
+  .lifecycle {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 28px;
+    margin-top: 40px;
+  }
+  .step {
+    border-top: 1.5px solid var(--ink);
+    padding-top: 18px;
+    position: relative;
+  }
+  .step .num {
+    font-family: var(--display);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--lemon-deep);
+    font-size: 56px;
+    line-height: 1;
+    display: block;
+    margin-bottom: 14px;
+  }
+  .step .label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--coral);
+    margin-bottom: 8px;
+  }
+  .step h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 24px;
+    line-height: 1.1;
+    margin-bottom: 10px;
+    letter-spacing: -0.01em;
+  }
+  .step p {
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+  }
+  .step .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--lemon);
+    color: var(--ink);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--lemon-deep);
+    margin-bottom: 12px;
+  }
+  .step .chip.warn { background: transparent; color: var(--coral); border-color: var(--coral); }
+  .step .chip.done { background: var(--moss); color: var(--paper); border-color: var(--moss); }
+
+  /* ---------- Editorial spread ---------- */
+
+  .spread {
+    display: grid;
+    grid-template-columns: 5fr 7fr;
+    gap: 56px;
+    align-items: start;
+    margin-top: 36px;
+  }
+  .spread.flip { grid-template-columns: 7fr 5fr; }
+  .spread-text h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-variation-settings: "opsz" 96;
+    font-size: clamp(34px, 4.6vw, 56px);
+    line-height: 1;
+    margin-bottom: 18px;
+    letter-spacing: -0.02em;
+  }
+  .spread-text h2 em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--lemon-deep);
+  }
+  .spread-text p {
+    font-size: 18px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    margin-bottom: 16px;
+  }
+  .spread-text p strong { color: var(--ink); font-weight: 600; }
+  .marginalia {
+    border-left: 1.5px solid var(--rule);
+    padding: 4px 0 4px 18px;
+    margin: 28px 0 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+  }
+  .marginalia b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- Screenshot plates ---------- */
+
+  .plate {
+    background: var(--paper-deep);
+    border: 1.5px solid var(--ink);
+    padding: 14px 14px 0;
+    position: relative;
+    transform: rotate(-0.4deg);
+    box-shadow: var(--shadow);
+    transition: transform 200ms ease;
+  }
+  .plate:hover { transform: rotate(0deg) translateY(-2px); }
+  .plate.flip { transform: rotate(0.6deg); }
+  .plate.flip:hover { transform: rotate(0deg) translateY(-2px); }
+  .plate img {
+    width: 100%;
+    display: block;
+    border: 1.5px solid var(--ink);
+    background: white;
+  }
+  .plate-caption {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+    padding: 14px 4px 14px;
+    border-top: 1px dashed var(--rule);
+    margin-top: 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .plate-caption b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- Code block (install) ---------- */
+
+  .code-block {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 32px;
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.7;
+    position: relative;
+    box-shadow: var(--shadow);
+    border: 1.5px solid var(--ink);
+  }
+  .code-block .prompt { color: var(--lemon); user-select: none; }
+  .code-block .comment { color: #8c857a; }
+  .code-block::before {
+    content: "/tmp/install";
+    position: absolute;
+    top: 10px;
+    right: 16px;
+    font-size: 10px;
+    color: #8c857a;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  /* ---------- Stats strip ---------- */
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 28px;
+    border-top: 1.5px solid var(--ink);
+    border-bottom: 1.5px solid var(--ink);
+    padding: 28px 0;
+    margin-top: 64px;
+  }
+  .stat .num {
+    font-family: var(--display);
+    font-weight: 900;
+    font-variation-settings: "opsz" 144;
+    font-size: 56px;
+    line-height: 1;
+    color: var(--ink);
+    letter-spacing: -0.025em;
+  }
+  .stat .num small {
+    font-size: 0.45em;
+    color: var(--coral);
+    margin-left: 4px;
+    font-weight: 400;
+    font-style: italic;
+  }
+  .stat .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink-soft);
+    margin-top: 8px;
+  }
+
+  /* ---------- Privacy / what's it doing card ---------- */
+
+  .panel {
+    background: var(--paper-deep);
+    border: 1.5px solid var(--ink);
+    padding: 36px;
+    box-shadow: var(--shadow);
+  }
+  .panel .panel-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--coral);
+    margin-bottom: 14px;
+  }
+  .panel h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1.1;
+    margin-bottom: 18px;
+    letter-spacing: -0.02em;
+  }
+  .panel ul {
+    list-style: none;
+  }
+  .panel li {
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--rule);
+    font-size: 16px;
+    line-height: 1.45;
+  }
+  .panel li:last-child { border-bottom: none; }
+  .panel li .mark {
+    color: var(--moss);
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 14px;
+    line-height: 24px;
+  }
+  .panel li .mark.no { color: var(--coral); }
+
+  /* ---------- Footer ---------- */
+
+  footer {
+    border-top: 1.5px solid var(--ink);
+    margin-top: 120px;
+    padding: 40px 0 60px;
+  }
+  .footer-grid {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 32px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+  }
+  .footer-grid a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--ink);
+  }
+  .footer-grid a:hover { color: var(--coral); border-bottom-color: var(--coral); }
+
+  /* ---------- Lemon SVG hero ornament ---------- */
+
+  .lemon-ornament {
+    position: absolute;
+    top: -20px;
+    right: -40px;
+    width: 280px;
+    height: 280px;
+    z-index: 0;
+    opacity: 0.92;
+    transform: rotate(-12deg);
+    pointer-events: none;
+  }
+
+  /* ---------- Reveals ---------- */
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .reveal { animation: rise 600ms cubic-bezier(0.2, 0.6, 0.1, 1) both; }
+  .reveal.d1 { animation-delay: 60ms; }
+  .reveal.d2 { animation-delay: 140ms; }
+  .reveal.d3 { animation-delay: 220ms; }
+  .reveal.d4 { animation-delay: 300ms; }
+
+  /* ---------- Responsive ---------- */
+
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 28px; }
+    .hero-side { padding-bottom: 0; }
+    .spread, .spread.flip { grid-template-columns: 1fr; gap: 30px; }
+    .lifecycle { grid-template-columns: 1fr 1fr; }
+    .stats { grid-template-columns: 1fr 1fr; }
+    .lemon-ornament { width: 180px; height: 180px; top: -10px; right: -10px; }
+  }
+  @media (max-width: 600px) {
+    body { font-size: 17px; }
+    .wrap { padding: 0 18px; }
+    section { padding: 68px 0 8px; }
+    .lifecycle { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr; }
+    .masthead-meta { gap: 14px; }
+    .code-block { padding: 22px; font-size: 12.5px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead wrap">
+  <div class="masthead-row">
+    <div class="nameplate">
+      <span class="glyph">Lemon</span><span class="dot" aria-hidden="true"></span>
+      <span class="tagline">Vol. 1 · 2026 · A Mac-native agent</span>
+    </div>
+    <nav class="masthead-meta" aria-label="primary">
+      <a href="#workflow">Workflow</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#plates">Plates</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/frankcline/lemon" target="_blank" rel="noopener">Source ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============== HERO ============== -->
+  <section class="hero" aria-labelledby="hero-h">
+    <div class="hero-grid">
+      <h1 id="hero-h" class="hero-headline reveal">
+        Label an issue.<br/>
+        <em>Get a pull&nbsp;request.<span class="arrow">↘</span></em>
+      </h1>
+      <div class="hero-side reveal d2">
+        <p class="hero-stand">
+          A small Mac app that watches your Linear queue.
+          Tag any issue with 🍋 and it spins up a git worktree,
+          runs Claude Code, and posts a PR.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#install">
+            <span>↓</span> Install
+          </a>
+          <a class="btn btn-ghost" href="#how-it-works">How it works</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="dateline reveal d3">
+      <span><b>Issue:</b> No. 1 · A Mac-native AI developer agent</span>
+      <span><b>Stack:</b> SwiftUI · Linear API · Claude Code · MLX</span>
+      <span><b>License:</b> MIT</span>
+    </div>
+  </section>
+
+  <!-- ============== THE 🍋 WORKFLOW ============== -->
+  <section id="workflow" aria-labelledby="lifecycle-h">
+    <span class="eyebrow">The 🍋 Workflow</span>
+    <h2 id="lifecycle-h" class="section-heading">Four labels, one feedback loop.</h2>
+    <p class="section-lede">
+      Lemon&rsquo;s entire surface in your Linear workspace is four
+      labels and one comment. The popover just shows you what&rsquo;s
+      happening; the truth lives in Linear, where your team already
+      works.
+    </p>
+
+    <div class="lifecycle">
+      <article class="step reveal">
+        <span class="num">01</span>
+        <div class="chip">🍋</div>
+        <div class="label">Trigger</div>
+        <h3>You tag it.</h3>
+        <p>Add the 🍋 label to any issue in your workspace. Lemon polls Linear every 15 to 45 seconds and picks it up.</p>
+      </article>
+      <article class="step reveal d1">
+        <span class="num">02</span>
+        <div class="chip" style="background: transparent; color: var(--ink); border-color: var(--lemon-deep);">🍋 In Progress</div>
+        <div class="label">Working</div>
+        <h3>Claude takes it.</h3>
+        <p>A git worktree spins up. A Terminal opens running <code style="font-family:var(--mono);font-size:0.9em;background:var(--paper-deep);padding:1px 6px;border:1px solid var(--rule)">claude --enable-auto-mode</code>. The issue body is the prompt.</p>
+      </article>
+      <article class="step reveal d2">
+        <span class="num">03</span>
+        <div class="chip warn">🍋 Waiting</div>
+        <div class="label">Stuck</div>
+        <h3>It calls for you.</h3>
+        <p>Hit an ambiguous choice? Claude pauses, the label flips, your phone gets a push. Reply when you&rsquo;re back at your desk.</p>
+      </article>
+      <article class="step reveal d3">
+        <span class="num">04</span>
+        <div class="chip done">🍋 Complete</div>
+        <div class="label">Shipped</div>
+        <h3>A PR appears.</h3>
+        <p>Lemon posts a Linear comment with the PR link and a one-paragraph summary. Reply to the comment to request revisions.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============== HOW IT WORKS ============== -->
+  <section id="how-it-works" aria-labelledby="hiw-h">
+    <span class="eyebrow">Under the hood</span>
+    <h2 id="hiw-h" class="section-heading">A menu bar app, a real terminal, and a small local model.</h2>
+
+    <div class="spread">
+      <div class="spread-text">
+        <h2>The orchestrator <em>lives in your menu bar.</em></h2>
+        <p>
+          A SwiftUI <strong>menu bar app</strong> watches your Linear queue.
+          Two icons: idle and active. It never opens windows you didn&rsquo;t ask for.
+        </p>
+        <p>
+          When a 🍋 issue lands, the orchestrator creates a worktree at
+          <code style="font-family:var(--mono);font-size:0.9em;background:var(--paper-deep);padding:1px 6px;border:1px solid var(--rule)">/tmp/lemon-{id}</code>,
+          launches Claude Code inside it, and pipes the pane output to a log file.
+          You can <strong>Join</strong> from the popover at any time — the tmux session is real,
+          attaches in iTerm2 or Terminal.app, and stays running if you close the popover.
+        </p>
+        <div class="marginalia">
+          <b>Why a real terminal?</b> Because the model needs to see what
+          a senior engineer would see. Headless agents lose the texture
+          of "command 14 errored, ANSI red, here&rsquo;s the stack."
+        </div>
+      </div>
+      <div class="plate" style="transform: rotate(-1deg);">
+        <img src="img/list.png" alt="Lemon&rsquo;s menu bar popover showing active and recent sessions" />
+        <div class="plate-caption">
+          <span><b>Plate 1.</b> Popover &mdash; active &amp; recent</span>
+          <span>Citrus accent on the trigger bar.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spread flip" style="margin-top: 100px;">
+      <div class="plate flip" style="transform: rotate(0.8deg);">
+        <img src="img/detail-executing.png" alt="A session detail showing live console output, AI summary, and Stop / Join controls" />
+        <div class="plate-caption">
+          <span><b>Plate 2.</b> Session detail</span>
+          <span>Stream of <code style="font-family:var(--mono);color:var(--lemon-deep)">[lemon]</code> and <code style="font-family:var(--mono);color:#3a7a4a">[gemma]</code> lines.</span>
+        </div>
+      </div>
+      <div class="spread-text">
+        <h2>A second model <em>watches the first.</em></h2>
+        <p>
+          <strong>Gemma 4</strong> (E4B or E2B, your choice) runs locally via
+          <strong>SwiftLM &amp; MLX</strong> on Apple Silicon. After two minutes of pane
+          silence, Lemon hands it the tail of the log and asks: "what&rsquo;s happening?"
+        </p>
+        <p>
+          The classifier returns a four-state JSON (<em>running, blocked_prompt, stuck,
+          waiting, complete</em>) plus an optional action. For unambiguous confirmations
+          &mdash; a "Trust this MCP server? [y/N]" &mdash; it answers. Anything ambiguous,
+          it raises 🍋&nbsp;Waiting and sits down.
+        </p>
+        <div class="marginalia">
+          <b>Safety:</b> Gemma's "type something" actions are gated through
+          a hard allowlist: <code>y · n · yes · no · 1&ndash;9</code>. Anything outside
+          that list is dropped before it reaches the pane.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== STATS STRIP ============== -->
+  <section aria-label="numbers">
+    <div class="stats">
+      <div class="stat reveal">
+        <div class="num">4</div>
+        <div class="label">Labels in Linear<br/>are the whole protocol</div>
+      </div>
+      <div class="stat reveal d1">
+        <div class="num">~90<small>s</small></div>
+        <div class="label">For Gemma to load<br/>into GPU memory</div>
+      </div>
+      <div class="stat reveal d2">
+        <div class="num">2<small>min</small></div>
+        <div class="label">Of pane silence before<br/>Gemma is invoked</div>
+      </div>
+      <div class="stat reveal d3">
+        <div class="num">0</div>
+        <div class="label">Keys leave your machine.<br/>Linear is the only egress.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== ONBOARDING PLATES ============== -->
+  <section id="plates" aria-labelledby="plates-h">
+    <span class="eyebrow">Setup</span>
+    <h2 id="plates-h" class="section-heading">Five steps. Mostly downloads.</h2>
+    <p class="section-lede">
+      Onboarding is a small five-card wizard that walks you through
+      pasting a Linear API key, choosing repos, generating an optional
+      LEMON.md to teach Lemon your conventions, and downloading the
+      local model.
+    </p>
+
+    <div class="spread" style="margin-top: 36px;">
+      <div class="spread-text">
+        <h2>Local AI is <em>not optional.</em></h2>
+        <p>
+          The whole point of Lemon is the silence detector. Without a local model
+          watching, you don&rsquo;t get the 🍋&nbsp;Waiting auto-pause. So onboarding
+          gates Continue on a downloaded Gemma model and a SwiftLM binary.
+        </p>
+        <p>
+          Both are pulled inside the wizard. The model is from
+          <code style="font-family:var(--mono);font-size:0.9em;background:var(--paper-deep);padding:1px 6px;border:1px solid var(--rule)">mlx-community</code>,
+          the runner is a signed release from
+          <code style="font-family:var(--mono);font-size:0.9em;background:var(--paper-deep);padding:1px 6px;border:1px solid var(--rule)">SharpAI/SwiftLM</code>.
+          Nothing is built from source.
+        </p>
+        <div class="marginalia">
+          A <b>Self-test</b> button in Settings boots the runner,
+          fires one classify() call, and shows you the actual response.
+          The error tooltip carries the <code>log stream</code> predicate
+          ready to paste into Console.app.
+        </div>
+      </div>
+      <div class="plate" style="transform: rotate(-0.6deg);">
+        <img src="img/onboarding-localai.png" alt="The Local AI onboarding step with Gemma 4B and SwiftLM downloads" />
+        <div class="plate-caption">
+          <span><b>Plate 3.</b> Local AI setup</span>
+          <span>tmux · hf · 4-bit MLX</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spread flip" style="margin-top: 90px;">
+      <div class="plate flip" style="transform: rotate(1deg);">
+        <img src="img/onboarding-ready.png" alt="The final Ready step showing Linear label workflow and Claude auth detection" />
+        <div class="plate-caption">
+          <span><b>Plate 4.</b> Ready check</span>
+          <span>Auth · labels · start.</span>
+        </div>
+      </div>
+      <div class="spread-text">
+        <h2>Labels are created <em>for you.</em></h2>
+        <p>
+          The last onboarding step provisions all four labels in every Linear team
+          you have access to, then verifies your Claude Code login. By the time
+          you press <strong>Start Lemon</strong>, the workspace is ready to receive
+          its first 🍋.
+        </p>
+        <div class="marginalia">
+          If your Linear admin already created custom 🍋 labels with the same names,
+          Lemon adopts them (fetch-or-create). Colors are advisory — your existing
+          ones win.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== PRIVACY / TRUST ============== -->
+  <section aria-labelledby="trust-h">
+    <span class="eyebrow">What it does &amp; doesn&rsquo;t do</span>
+    <h2 id="trust-h" class="section-heading">A short list of promises.</h2>
+
+    <div class="spread" style="margin-top: 36px;">
+      <div class="panel">
+        <div class="panel-label">In your house</div>
+        <h3>What stays on your Mac</h3>
+        <ul>
+          <li><span class="mark">✓</span><span><strong>Linear API key</strong> &mdash; only in macOS Keychain. Never in a file or env var.</span></li>
+          <li><span class="mark">✓</span><span><strong>Workspace paths</strong> &mdash; UserDefaults. Never sent anywhere.</span></li>
+          <li><span class="mark">✓</span><span><strong>Session logs</strong> &mdash; written to <code>/tmp/lemon-log-{id}.txt</code>, wiped on cleanup.</span></li>
+          <li><span class="mark">✓</span><span><strong>The local model</strong> &mdash; ~5&nbsp;GB in Application Support. Loaded on launch, killed on quit.</span></li>
+          <li><span class="mark">✓</span><span><strong>Source on GitHub.</strong> Audit it before you trust it.</span></li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="panel-label">Off your machine</div>
+        <h3>What goes out</h3>
+        <ul>
+          <li><span class="mark no">→</span><span><strong>Linear GraphQL</strong> &mdash; issues, labels, comments. Standard Linear API surface.</span></li>
+          <li><span class="mark no">→</span><span><strong>Claude API</strong> &mdash; via the Claude Code CLI you already authenticated.</span></li>
+          <li><span class="mark no">→</span><span><strong>HuggingFace</strong> &mdash; once, to fetch the Gemma quant during setup.</span></li>
+          <li><span class="mark no">→</span><span><strong>GitHub</strong> &mdash; once, to fetch the pinned SwiftLM release.</span></li>
+          <li><span class="mark">×</span><span><strong>No telemetry. No analytics. No model traffic.</strong> Gemma runs entirely on the GPU.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== INSTALL ============== -->
+  <section id="install" aria-labelledby="install-h">
+    <span class="eyebrow">Getting started</span>
+    <h2 id="install-h" class="section-heading">Two commands and a wizard.</h2>
+    <p class="section-lede">
+      Lemon ships as a notarized Mac app, served direct from
+      <code style="font-family:var(--mono);font-size:0.9em;background:var(--paper-deep);padding:1px 6px;border:1px solid var(--rule)">lemon.living</code>.
+      Build from source if you&rsquo;d rather audit the wire first.
+    </p>
+
+    <div class="code-block reveal">
+<span class="comment"># Prerequisites for the local model + workflow</span>
+<span class="prompt">$</span> brew install hf tmux gh claude-code
+
+<span class="comment"># Build &amp; open</span>
+<span class="prompt">$</span> git clone https://github.com/frankcline/lemon
+<span class="prompt">$</span> cd lemon &amp;&amp; open app/Lemon.xcodeproj
+
+<span class="comment"># Or: just download the signed .app</span>
+<span class="prompt">$</span> open https://lemon.living
+    </div>
+
+    <p style="font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); margin-top: 20px; text-transform: uppercase; letter-spacing: 0.08em;">
+      Requires macOS 26 · Apple Silicon · ~6 GB free
+    </p>
+  </section>
+
+  <!-- ============== CLOSING SPREAD ============== -->
+  <section aria-label="closing">
+    <div class="spread" style="margin-top: 20px; grid-template-columns: 3fr 5fr; align-items: center;">
+      <div class="spread-text">
+        <h2 style="font-size: clamp(40px, 5vw, 64px);">
+          The point isn&rsquo;t <em>"Claude, but in a menu bar."</em>
+        </h2>
+      </div>
+      <div class="spread-text">
+        <p>
+          It&rsquo;s that <strong>Linear is already where the work lives</strong> &mdash;
+          and Lemon makes that the surface, not a separate dashboard.
+          You&rsquo;ve been triaging in Linear all morning anyway. Tag the ones
+          you don&rsquo;t want to do yourself with 🍋, get back to the harder problems.
+        </p>
+        <p>
+          That&rsquo;s it. That&rsquo;s the whole pitch.
+        </p>
+        <div class="marginalia" style="margin-top: 18px;">
+          <b>Built by</b> Frank Kline.<br/>
+          Open source under MIT. Pull requests welcome.
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap footer-grid">
+    <div>Lemon · Vol. 1 · 2026 · MIT License</div>
+    <div>
+      <a href="https://github.com/frankcline/lemon">Source ↗</a>
+      &nbsp;·&nbsp;
+      <a href="https://lemon.living">Download ↗</a>
+      &nbsp;·&nbsp;
+      <a href="https://linear.app">Linear ↗</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
