@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="520">
-
 # 🍋 Lemon
 
 **A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device.**
@@ -15,13 +13,23 @@
 [![Silicon](https://img.shields.io/badge/silicon-Apple-1a1714?style=flat-square)]()
 [![SwiftLM](https://img.shields.io/badge/SwiftLM-b648-EF6A48?style=flat-square)](https://github.com/SharpAI/SwiftLM)
 
+### → [**lemon.living**](https://lemon.living) ←
+
 [**Install**](#install) · [**How it works**](#how-it-works) · [**The 🍋 workflow**](#the--workflow) · [**Stack**](#stack--gratitude) · [**Releases**](https://github.com/frkline/lemon/releases)
 
 </div>
 
 ---
 
-Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer." I already have Claude Code, and I already do the interesting parts: answering Claude's clarifying questions, shaping the plan, reviewing the diff. What I *didn't* want to keep doing by hand was the workflow bureaucracy around it — scanning Linear for what's next, spinning up worktrees, dropping in the right context, transitioning labels, posting the PR comment back.
+Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer."  
+
+I already have Claude Code, and I already do the interesting parts: answering Claude's clarifying questions, shaping the plan, reviewing the diff. What I *didn't* want to keep doing by hand was the workflow bureaucracy around it — scanning Linear for what's next, spinning up worktrees, dropping in the right context, transitioning labels, posting the PR comment back.
+
+<div align="center">
+<kbd>
+<img src="docs/img/live-list.png" alt="The Lemon popover with one active session" width="540">
+</kbd>
+</div>  
 
 Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier so you don't have to babysit every "Trust this MCP server?" prompt, and routes the result back to Linear.
 
@@ -32,11 +40,15 @@ Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watche
 
 ## What Lemon is
 
-A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** between your Linear queue and your Claude Code CLI. A **local Gemma 4 classifier** that auto-accepts obvious confirmations and unsticks dumb prompts. Built for **one developer** running it on their own machine.
+A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** between your Linear queue and your Claude Code CLI. A **local Gemma 4 classifier** that auto-accepts obvious confirmations and unsticks dumb prompts. Built for **one developer** running it on their own silicon (❤️ Mac mini).
+
+<div align="center">
+    <img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="300">
+</div>
 
 ## What Lemon isn't
 
-Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a competitor to Anthropic, Linear, or anything else in your stack.
+Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a competitor to Anthropic, Linear, or anything else in your stack. Not an asignee developer-replacement agent for your team to dump issues onto.
 
 ---
 
@@ -72,10 +84,6 @@ Build target **Lemon** in Xcode. First launch runs the onboarding wizard, which 
 ---
 
 ## How it works
-
-<div align="center">
-<img src="docs/img/live-list.png" alt="The Lemon popover with one active session" width="640">
-</div>
 
 ```mermaid
 flowchart LR
@@ -129,16 +137,20 @@ Labels are auto-provisioned in every team you have access to on first launch. Cu
 
 ---
 
-## Local AI is not optional
+## Local AI, by design
 
 <div align="center">
-<img src="docs/img/setup-3-localai.png" alt="Local AI onboarding step with Gemma model and SwiftLM runner both ready" width="380">
+<kbd>
+<img src="docs/img/setup-3-localai.png" alt="The Local AI onboarding step with Gemma model and SwiftLM runner both reporting ready" width="380">
+</kbd>
 </div>
 
-The whole point of Lemon is the silence detector + auto-accept + unstick-dumb-prompts trio. Without a local model running, the 🍋 Waiting auto-pause and confirmation auto-accept paths don't fire. So onboarding gates Continue on:
+The silence detector, the auto-accept for obvious confirmations, the nudge when Claude gets stuck on a dumb prompt — all of it runs **on your Mac's GPU** via [MLX](https://github.com/ml-explore/mlx). No round-trip to a cloud classifier. No second API key. No second monthly bill. The whole pattern is only possible because Apple Silicon is genuinely good at this kind of inference, and Apple's MLX team has made it accessible to the rest of us.
 
-- A downloaded **Gemma 4** quant from [`mlx-community`](https://huggingface.co/mlx-community): [`gemma-4-e4b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit) or [`gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
-- A signed **SwiftLM** binary from [`SharpAI/SwiftLM`](https://github.com/SharpAI/SwiftLM), pinned to build `b648`
+What the wizard installs:
+
+- **Gemma 4** quants from [`mlx-community`](https://huggingface.co/mlx-community) — [`gemma-4-e4b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit) (~6 GB, recommended on 24 GB+ Macs) or [`gemma-4-e2b-it-4bit`](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) (~4 GB, comfortable on 16 GB)
+- **[SwiftLM](https://github.com/SharpAI/SwiftLM)** — an OpenAI-compatible MLX inference server in pure Swift. Signed release binary, pinned to build `b648`.
 
 Both pulled inside the wizard. Nothing is built from source.
 
