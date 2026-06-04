@@ -1,6 +1,6 @@
 # Lemon
 
-A personal workflow tool for Claude Code + Linear. Lemon is a menu-bar orchestrator: tag a Linear issue with 🍋 and it spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a tiny local Gemma classifier — Lemon itself is glue.
+A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device. Made for the Mac mini sitting on your desk. Tag a Linear issue with 🍋 and Lemon spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a small local Gemma 4 classifier — Lemon itself is glue.
 
 ## Repo layout
 
