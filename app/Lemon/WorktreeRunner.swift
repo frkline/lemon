@@ -416,17 +416,32 @@ final class WorktreeRunner: @unchecked Sendable {
         // Pipe all pane output to the log file for Gemma to read.
         runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(identifier))'")
 
-        // Open in iTerm2 using tmux control mode (native tabs) if available.
-        // Fall back gracefully — the user can always attach manually.
+        // Open a visible terminal so the user can watch and join. Prefer iTerm2
+        // (native tmux control mode via tmux -CC) and fall back to Terminal.app,
+        // which is present on every macOS install. The tmux session is detached
+        // either way — the visible window is for human eyes only.
         let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
         if hasITerm {
-            runSync("""
+            let ok = runSync("""
                 osascript -e 'tell application "iTerm" to create window with default profile \
-                command "tmux -CC attach -t \(sessionName)"' 2>/dev/null || true
+                command "tmux -CC attach -t \(sessionName)"' 2>/dev/null
                 """)
+            if !ok {
+                Logger.worktree.warning("iTerm window open failed for \(sessionName); falling back to Terminal.app")
+                openInTerminalApp(sessionName: sessionName)
+            }
+        } else {
+            openInTerminalApp(sessionName: sessionName)
         }
 
         return true
+    }
+
+    private func openInTerminalApp(sessionName: String) {
+        runSync("""
+            osascript -e 'tell application "Terminal" to do script "tmux attach -t \(sessionName)"' \
+            -e 'tell application "Terminal" to activate' 2>/dev/null || true
+            """)
     }
 
     // MARK: - Gemma orchestration
