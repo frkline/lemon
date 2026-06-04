@@ -50,21 +50,24 @@ final class LocalLLM: @unchecked Sendable {
             return
         }
 
-        // Poll /health up to 30 s for the server to become ready.
-        for _ in 0..<30 {
+        // Poll /health up to 180 s for the server to become ready. A 4-bit Gemma 4 E4B
+        // (5 GB) takes ~60-90 s to load on M-series Macs; a 2 GB Qwen 0.5B was ~6 s in
+        // standalone testing. The earlier 30 s cap timed out before real models loaded.
+        let startedAt = Date()
+        for _ in 0..<180 {
             try? await Task.sleep(for: .seconds(1))
             guard process?.isRunning == true else {
-                Logger.orchestrator.error("SwiftLM exited during startup")
+                Logger.orchestrator.error("SwiftLM exited during startup after \(Int(Date().timeIntervalSince(startedAt))) s")
                 process = nil
                 return
             }
             if await healthCheck() {
                 _ready = true
-                Logger.orchestrator.info("SwiftLM ready on port \(self.port)")
+                Logger.orchestrator.info("SwiftLM ready on port \(self.port) after \(Int(Date().timeIntervalSince(startedAt))) s")
                 return
             }
         }
-        Logger.orchestrator.error("SwiftLM did not become healthy within 30 s")
+        Logger.orchestrator.error("SwiftLM did not become healthy within 180 s")
     }
 
     func stop() {
@@ -78,7 +81,10 @@ final class LocalLLM: @unchecked Sendable {
 
     private func healthCheck() async -> Bool {
         guard let url = URL(string: "http://localhost:\(port)/health") else { return false }
-        return (try? await session.data(from: url)) != nil
+        guard let (_, resp) = try? await session.data(from: url),
+              let http = resp as? HTTPURLResponse,
+              http.statusCode == 200 else { return false }
+        return true
     }
 
     // MARK: - Inference
