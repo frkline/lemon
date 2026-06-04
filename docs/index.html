@@ -521,6 +521,112 @@
   }
   .panel li .mark.no { color: var(--coral); }
 
+  /* ---------- Credits grid ---------- */
+
+  .credits-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 22px;
+    margin-top: 32px;
+  }
+  .credit {
+    background: var(--paper-deep);
+    border: 1.5px solid var(--ink);
+    padding: 24px 26px;
+    text-decoration: none;
+    color: var(--ink);
+    display: block;
+    transition: transform 140ms ease, box-shadow 140ms ease;
+    box-shadow: 4px 4px 0 transparent;
+  }
+  .credit:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--lemon);
+  }
+  .credit-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--coral);
+    margin-bottom: 10px;
+  }
+  .credit-name {
+    font-family: var(--display);
+    font-weight: 700;
+    font-variation-settings: "opsz" 72;
+    font-size: 28px;
+    line-height: 1.05;
+    margin-bottom: 12px;
+    letter-spacing: -0.015em;
+  }
+  .credit-name .arrow {
+    font-family: var(--body);
+    font-size: 0.65em;
+    color: var(--lemon-deep);
+    margin-left: 4px;
+    transition: transform 140ms ease;
+    display: inline-block;
+  }
+  .credit:hover .credit-name .arrow { transform: translate(2px, -2px); }
+  .credit-detail {
+    font-family: var(--body);
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+  }
+  .credit-detail code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 4px 8px;
+    margin-top: 6px;
+    display: inline-block;
+    line-height: 1.5;
+  }
+  .credit-detail code a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .credit-detail code a:hover {
+    color: var(--coral);
+    border-bottom-color: var(--coral);
+  }
+
+  .aside-card {
+    margin-top: 28px;
+    border: 1.5px dashed var(--ink);
+    background:
+      repeating-linear-gradient(135deg,
+        transparent 0 8px,
+        rgba(247, 200, 66, 0.08) 8px 9px);
+    padding: 22px 26px;
+  }
+  .aside-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--lemon-deep);
+    margin-bottom: 10px;
+  }
+  .aside-card p {
+    font-family: var(--body);
+    font-size: 16.5px;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+  .aside-card a {
+    color: var(--ink);
+    font-weight: 600;
+    text-decoration: none;
+    border-bottom: 1.5px solid var(--lemon);
+    padding-bottom: 1px;
+  }
+  .aside-card a:hover { border-bottom-color: var(--coral); color: var(--coral); }
+
   /* ---------- Footer ---------- */
 
   footer {
@@ -580,6 +686,7 @@
     .spread, .spread.flip { grid-template-columns: 1fr; gap: 30px; }
     .lifecycle { grid-template-columns: 1fr 1fr; }
     .stats { grid-template-columns: 1fr 1fr; }
+    .credits-grid { grid-template-columns: 1fr; }
     .lemon-ornament { width: 180px; height: 180px; top: -10px; right: -10px; }
   }
   @media (max-width: 600px) {
@@ -870,6 +977,61 @@
     </div>
   </section>
 
+  <!-- ============== STACK & GRATITUDE ============== -->
+  <section id="stack" aria-labelledby="stack-h">
+    <span class="eyebrow">Stack &amp; gratitude</span>
+    <h2 id="stack-h" class="section-heading">None of this is from scratch.</h2>
+    <p class="section-lede">
+      Lemon is a small assembly of other people&rsquo;s good ideas. The
+      agent, the runtime, the model weights &mdash; all upstream. Lemon
+      is the menu bar around them.
+    </p>
+
+    <div class="credits-grid">
+      <a class="credit" href="https://claude.com/code" target="_blank" rel="noopener">
+        <div class="credit-label">The agent</div>
+        <div class="credit-name">Claude Code <span class="arrow">↗</span></div>
+        <div class="credit-detail">Anthropic. The intelligence doing the actual coding. Lemon launches and watches; Claude works.</div>
+      </a>
+
+      <a class="credit" href="https://github.com/SharpAI/SwiftLM" target="_blank" rel="noopener">
+        <div class="credit-label">The runtime</div>
+        <div class="credit-name">SwiftLM <span class="arrow">↗</span></div>
+        <div class="credit-detail">by SharpAI. OpenAI-compatible MLX inference server in pure Swift. Lemon ships build <code>b648</code> from their releases.</div>
+      </a>
+
+      <a class="credit" href="https://huggingface.co/mlx-community" target="_blank" rel="noopener">
+        <div class="credit-label">The weights</div>
+        <div class="credit-name">mlx-community <span class="arrow">↗</span></div>
+        <div class="credit-detail">
+          On HuggingFace. The quantized Gemma 4 you&rsquo;ll actually download:<br/>
+          <code>
+            <a href="https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit" target="_blank" rel="noopener">gemma-4-e4b-it-4bit</a><br/>
+            <a href="https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit" target="_blank" rel="noopener">gemma-4-e2b-it-4bit</a>
+          </code>
+        </div>
+      </a>
+
+      <a class="credit" href="https://linear.app" target="_blank" rel="noopener">
+        <div class="credit-label">The surface</div>
+        <div class="credit-name">Linear <span class="arrow">↗</span></div>
+        <div class="credit-detail">The issue tracker that&rsquo;s the entire Lemon UI for "what should the agent work on next?"</div>
+      </a>
+    </div>
+
+    <div class="aside-card">
+      <div class="aside-label">If you have more silicon than you know what to do with</div>
+      <p>
+        Have a <strong>Mac Studio</strong> and want to run a bigger model as your
+        primary coding agent? Look at
+        <a href="https://omlx.ai" target="_blank" rel="noopener">oMLX <span class="arrow">↗</span></a>.
+        Same on-device idea as Lemon&rsquo;s Gemma classifier, scaled up to the
+        larger MoE models the M2/M3 Ultra can actually serve. Different shape of
+        project, complementary ambition.
+      </p>
+    </div>
+  </section>
+
   <!-- ============== INSTALL ============== -->
   <section id="install" aria-labelledby="install-h">
     <span class="eyebrow">Getting started</span>
@@ -960,9 +1122,11 @@
     <div>
       <a href="https://github.com/frankcline/lemon">Source ↗</a>
       &nbsp;·&nbsp;
-      <a href="https://lemon.living">Download ↗</a>
+      <a href="https://github.com/SharpAI/SwiftLM">SwiftLM ↗</a>
       &nbsp;·&nbsp;
-      <a href="https://linear.app">Linear ↗</a>
+      <a href="https://huggingface.co/mlx-community">mlx-community ↗</a>
+      &nbsp;·&nbsp;
+      <a href="https://omlx.ai">oMLX ↗</a>
     </div>
   </div>
 </footer>

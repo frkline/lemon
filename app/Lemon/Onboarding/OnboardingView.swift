@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 import os
 
 // MARK: - Step enum
@@ -1198,6 +1199,7 @@ private struct ReadyStep: View {
 
     @State private var claudeAccount: String? = nil
     @State private var claudeChecked = false
+    @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
 
     enum LabelState { case pending, creating, done(Int), failed(String) }
     @State private var labelState: LabelState = .pending
@@ -1225,7 +1227,7 @@ private struct ReadyStep: View {
             nextEnabled: canStart,
             nextAction: onFinish
         ) {
-            VStack(spacing: 12) {
+            VStack(spacing: 9) {
                 // Claude auth status
                 statusRow(
                     checked: claudeChecked,
@@ -1239,6 +1241,11 @@ private struct ReadyStep: View {
 
                 // Linear labels + workflow education
                 linearLabelsRow
+
+                // Launch at login — quiet opt-in; Lemon is workflow tooling
+                // for a dedicated Mac, so this is the recommended default for
+                // anyone running it on a Mac mini.
+                launchAtLoginRow
             }
         }
         .onAppear {
@@ -1335,7 +1342,7 @@ private struct ReadyStep: View {
             }
             Spacer()
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
     }
 
     // MARK: - Generic status row
@@ -1378,6 +1385,44 @@ private struct ReadyStep: View {
                 .padding(14)
                 .background(LD.coral.opacity(0.08), in: RoundedRectangle(cornerRadius: LD.r10))
             }
+        }
+    }
+
+    // MARK: - Launch at login
+
+    private var launchAtLoginRow: some View {
+        HStack(spacing: 10) {
+            iconBox("power.circle.fill", tint: launchAtLogin ? LD.lemon : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Launch at login").font(.system(size: 12, weight: .semibold))
+                Text("Recommended if Lemon lives on a Mac that stays on")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: $launchAtLogin)
+                .labelsHidden()
+                .onChange(of: launchAtLogin) { _, enabled in
+                    do {
+                        if enabled { try SMAppService.mainApp.register() }
+                        else       { try SMAppService.mainApp.unregister() }
+                    } catch {
+                        Logger.onboarding.error("SMAppService toggle failed: \(error.localizedDescription)")
+                        launchAtLogin = (SMAppService.mainApp.status == .enabled)
+                    }
+                }
+        }
+        .padding(14)
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+    }
+
+    private func iconBox(_ systemName: String, tint: Color) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: LD.r6)
+                .fill(tint.opacity(0.12))
+                .frame(width: 28, height: 28)
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(tint)
         }
     }
 
