@@ -32,14 +32,43 @@ final class KeychainStore: @unchecked Sendable {
     var linearApiKey: String {
         get {
             if memory != nil { return memory?["linearApiKey"] ?? "" }
+            // Env var bypass — for unattended iteration loops and recursive
+            // Claude-Code-driving-Lemon sessions. Both forms skip Keychain
+            // entirely, which avoids the OS prompt on first launch and keeps
+            // tests/scripts headless. Direct value wins over file path.
+            //   LEMON_LINEAR_KEY=lin_...       — value inline (less safe)
+            //   LEMON_LINEAR_KEY_FILE=~/path   — read from disk (file perms = auth)
+            if let bypass = Self.envKeyBypass() { return bypass }
             if Self.isTestRun || Self.isMockMode { return "" }
             return readKeychain("lemon-linear-key") ?? ""
         }
         set {
             if memory != nil { memory?["linearApiKey"] = newValue; return }
             if Self.isTestRun || Self.isMockMode { return }
+            // Don't mutate the real Keychain entry when env-var bypass is in
+            // play — the user is explicitly running with an external key, so
+            // writes should be no-ops to avoid polluting their stored secret.
+            if Self.envKeyBypass() != nil { return }
             writeKeychain("lemon-linear-key", value: newValue)
         }
+    }
+
+    // Returns the bypass value (from LEMON_LINEAR_KEY or LEMON_LINEAR_KEY_FILE)
+    // or nil if neither env var is set. Trims whitespace and expands ~ in paths.
+    static func envKeyBypass() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        if let direct = env["LEMON_LINEAR_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !direct.isEmpty {
+            return direct
+        }
+        if let raw = env["LEMON_LINEAR_KEY_FILE"], !raw.isEmpty {
+            let path = (raw as NSString).expandingTildeInPath
+            if let contents = try? String(contentsOfFile: path, encoding: .utf8) {
+                let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
     }
 
     var linearUserId: String {

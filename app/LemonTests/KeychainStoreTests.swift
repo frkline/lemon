@@ -117,4 +117,84 @@ final class KeychainStoreTests: XCTestCase {
         a.linearApiKey = "key-a"
         XCTAssertEqual(b.linearApiKey, "")
     }
+
+    // MARK: - Env-var bypass (for unattended iteration + recursive Claude loops)
+
+    private func withEnv(_ vars: [String: String?], _ body: () -> Void) {
+        // setenv/unsetenv mutate process-global state — caller's job to ensure
+        // tests don't run in parallel against the same vars (XCTest does sequential
+        // by default within a class).
+        let prior = vars.keys.reduce(into: [String: String?]()) { acc, k in
+            acc[k] = ProcessInfo.processInfo.environment[k]
+        }
+        for (k, v) in vars {
+            if let v { setenv(k, v, 1) } else { unsetenv(k) }
+        }
+        defer {
+            for (k, v) in prior {
+                if let v { setenv(k, v, 1) } else { unsetenv(k) }
+            }
+        }
+        body()
+    }
+
+    func testEnvBypassNilWhenUnset() {
+        withEnv(["LEMON_LINEAR_KEY": nil, "LEMON_LINEAR_KEY_FILE": nil]) {
+            XCTAssertNil(KeychainStore.envKeyBypass())
+        }
+    }
+
+    func testEnvBypassDirectKey() {
+        withEnv(["LEMON_LINEAR_KEY": "lin_direct_value"]) {
+            XCTAssertEqual(KeychainStore.envKeyBypass(), "lin_direct_value")
+        }
+    }
+
+    func testEnvBypassDirectKeyTrimsWhitespace() {
+        withEnv(["LEMON_LINEAR_KEY": "  lin_with_spaces  \n"]) {
+            XCTAssertEqual(KeychainStore.envKeyBypass(), "lin_with_spaces")
+        }
+    }
+
+    func testEnvBypassEmptyDirectKeyIsIgnored() {
+        withEnv(["LEMON_LINEAR_KEY": "   ", "LEMON_LINEAR_KEY_FILE": nil]) {
+            XCTAssertNil(KeychainStore.envKeyBypass())
+        }
+    }
+
+    func testEnvBypassFilePath() throws {
+        let path = NSTemporaryDirectory() + "kc-bypass-\(UUID().uuidString)"
+        try "lin_from_file\n".write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        withEnv(["LEMON_LINEAR_KEY": nil, "LEMON_LINEAR_KEY_FILE": path]) {
+            XCTAssertEqual(KeychainStore.envKeyBypass(), "lin_from_file")
+        }
+    }
+
+    func testEnvBypassFilePathExpandsTilde() throws {
+        let home = NSHomeDirectory()
+        let filename = "kc-tilde-\(UUID().uuidString).key"
+        let realPath = home + "/" + filename
+        try "lin_tilde_test".write(toFile: realPath, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: realPath) }
+        withEnv(["LEMON_LINEAR_KEY": nil, "LEMON_LINEAR_KEY_FILE": "~/" + filename]) {
+            XCTAssertEqual(KeychainStore.envKeyBypass(), "lin_tilde_test")
+        }
+    }
+
+    func testEnvBypassDirectKeyWinsOverFile() throws {
+        let path = NSTemporaryDirectory() + "kc-loses-\(UUID().uuidString)"
+        try "from_file".write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        withEnv(["LEMON_LINEAR_KEY": "from_env", "LEMON_LINEAR_KEY_FILE": path]) {
+            XCTAssertEqual(KeychainStore.envKeyBypass(), "from_env")
+        }
+    }
+
+    func testEnvBypassFileMissingReturnsNil() {
+        withEnv(["LEMON_LINEAR_KEY": nil,
+                 "LEMON_LINEAR_KEY_FILE": "/tmp/does-not-exist-\(UUID().uuidString)"]) {
+            XCTAssertNil(KeychainStore.envKeyBypass())
+        }
+    }
 }
