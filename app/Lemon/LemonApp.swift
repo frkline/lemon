@@ -10,7 +10,15 @@ struct LemonApp: App {
         #if DEBUG
         if KeychainStore.isMockMode { return MockAppState.shared.orchestrator }
         #endif
-        return Orchestrator()
+        let o = Orchestrator()
+        // Start polling at launch when already configured — otherwise polling
+        // only kicked in once the user opened the popover, which meant Lemon
+        // would silently miss 🍋 issues at app startup. start() is idempotent
+        // so the .task on PopoverView below is harmless redundancy.
+        if KeychainStore.shared.isConfigured {
+            Task { @MainActor in o.start() }
+        }
+        return o
     }()
 
     @State private var nav: AppNavigation = {
