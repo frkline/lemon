@@ -33,14 +33,14 @@ I already have Claude Code, and I already do the interesting parts: answering Cl
 
 <br/>
 
-Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier so you don't have to babysit every "Trust this MCP server?" prompt, and routes the result back to Linear.
+Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier so you don't have to click through every "Trust this MCP server?" prompt yourself, and routes the result back to Linear.
 
 > [!IMPORTANT]
 > **Lemon isn't an AI agent product.** The intelligence is Claude Code; the judgment is yours. Lemon handles the workflow bureaucracy around your session so you stay focused on the parts that need a person.
 
 ## What Lemon is
 
-A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** between your Linear queue and your Claude Code CLI. A **local Gemma 4 classifier** that auto-accepts obvious confirmations and unsticks dumb prompts. Built for **one developer** running it on their own silicon (❤️ Mac mini).
+A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** between your Linear queue and your Claude Code CLI. A **local Gemma 4 classifier** that auto-accepts obvious confirmations and gently nudges past routine prompts so the session keeps moving. Built for **one developer** running it on their own silicon (❤️ Mac mini).
 
 <div align="center">
 <img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="300">
@@ -50,7 +50,7 @@ A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** bet
 
 ## What Lemon isn't
 
-Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a competitor to Anthropic, Linear, or anything else in your stack. Not an assignee developer-replacement agent for your team to dump issues onto.
+Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a substitute for Anthropic, Linear, or anything else in your stack. Not an assignee-style agent meant to stand in for a developer on your team.
 
 ## Install
 
@@ -81,34 +81,7 @@ Build target **Lemon** in Xcode. First launch runs the onboarding wizard, which 
 
 </details>
 
-## How it works
-
-```mermaid
-flowchart LR
-    L([Linear queue])
-    O[Lemon.app<br/><sub>menu bar</sub>]
-    T[claude in tmux<br/><sub>your CLI</sub>]
-    G[Gemma 4<br/><sub>SwiftLM + MLX</sub>]
-    U([You])
-
-    L -->|🍋 polled| O
-    O -->|launch| T
-    T -->|pane log| G
-    G -->|JSON| O
-    O -->|🍋 Complete + PR comment| L
-
-    T <-.->|"📱 Claude iOS push<br/>💻 or Join the tmux"| U
-```
-
-1. **You label** a Linear issue with 🍋.
-2. **Orchestrator** picks it up next poll (15 s active, 45 s idle), spins up a git worktree at `/tmp/lemon-{id}`, writes `LEMON_CONTEXT.md` with the issue body + your team's `LEMON.md` + completion checklist.
-3. A **terminal window** opens running `claude --enable-auto-mode --remote-control` (iTerm2 preferred, Terminal.app fallback).
-4. **Gemma 4** runs locally via SwiftLM + MLX. After 2 minutes of pane silence, it sees the log tail and decides: auto-accept a confirmation (`y / n / Enter / Escape / 1-9`, through a hard allowlist), or raise 🍋 Waiting if it's ambiguous.
-5. When Claude sets **🍋 Complete**, Lemon posts the PR link + summary to Linear, then cleans up.
-
-Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch.
-
-## The 🍋 workflow
+## Workflow
 
 <div align="center">
 <img src="docs/img/lemon-linear.png" alt="Lemon loves Linear" width="240">
@@ -136,6 +109,33 @@ Labels are auto-provisioned in every team you have access to on first launch. Cu
 >
 > Lemon and Gemma absorbed the routine bits so the only thing that reaches you is the one decision that actually needs you.
 
+### How it works
+
+```mermaid
+flowchart LR
+    L([Linear queue])
+    O[Lemon.app<br/><sub>menu bar</sub>]
+    T[claude in tmux<br/><sub>your CLI</sub>]
+    G[Gemma 4<br/><sub>SwiftLM + MLX</sub>]
+    U([You])
+
+    L -->|🍋 polled| O
+    O -->|launch| T
+    T -->|pane log| G
+    G -->|JSON| O
+    O -->|🍋 Complete + PR comment| L
+
+    T <-.->|"📱 Claude iOS push<br/>💻 or Join the tmux"| U
+```
+
+1. **You label** a Linear issue with 🍋.
+2. **Orchestrator** picks it up next poll (15 s active, 45 s idle), spins up a git worktree at `/tmp/lemon-{id}`, writes `LEMON_CONTEXT.md` with the issue body + your team's `LEMON.md` + completion checklist.
+3. A **terminal window** opens running `claude --enable-auto-mode --remote-control` (iTerm2 preferred, Terminal.app fallback).
+4. **Gemma 4** runs locally via SwiftLM + MLX. After 2 minutes of pane silence, it sees the log tail and decides: auto-accept a confirmation (`y / n / Enter / Escape / 1-9`, through a hard allowlist), or raise 🍋 Waiting if it's ambiguous.
+5. When Claude sets **🍋 Complete**, Lemon posts the PR link + summary to Linear, then cleans up.
+
+Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch.
+
 ## Local AI, by design
 
 <div align="center">
@@ -146,7 +146,7 @@ Labels are auto-provisioned in every team you have access to on first launch. Cu
 
 <br/>
 
-The silence detector, the auto-accept for obvious confirmations, the nudge when Claude gets stuck on a dumb prompt — all of it runs **on your Mac's GPU** via [MLX](https://github.com/ml-explore/mlx). No round-trip to a cloud classifier. No second API key. No second monthly bill. The whole pattern is only possible because Apple Silicon is genuinely good at this kind of inference, and Apple's MLX team has made it accessible to the rest of us.
+The silence detector, the auto-accept for obvious confirmations, the nudge when Claude is paused on a prompt that doesn't really need a person — all of it runs **on your Mac's GPU** via [MLX](https://github.com/ml-explore/mlx). No round-trip to a cloud classifier. No second API key. No second monthly bill. The whole pattern is only possible because Apple Silicon is genuinely good at this kind of inference, and Apple's MLX team has made it accessible to the rest of us.
 
 What the wizard installs:
 
