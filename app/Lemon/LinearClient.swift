@@ -43,15 +43,21 @@ final class LinearClient: Sendable {
 
     // MARK: - Issue queues
 
-    // Issues assigned to userId with 🍋 label but none of the active labels — new work to pick up.
+    // Issues with 🍋 label but none of the active labels — new work to pick up.
+    // Includes both issues assigned to the user AND unassigned issues, since solo
+    // developers commonly don't self-assign. Workspace prefix → repo mapping in the
+    // Orchestrator still scopes the issues that can actually be acted on.
     func fetchLemonQueue(apiKey: String, userId: String) async throws -> [LinearIssue] {
         let query = """
         query LemonQueue($label: String!, $activeStates: [String!]!, $userId: ID!) {
           issues(
             filter: {
               labels: { name: { eq: $label } }
-              assignee: { id: { eq: $userId } }
               state: { type: { nin: $activeStates } }
+              or: [
+                { assignee: { id: { eq: $userId } } }
+                { assignee: { null: true } }
+              ]
             }
             first: 25
           ) {
@@ -76,15 +82,19 @@ final class LinearClient: Sendable {
         }
     }
 
-    // Issues assigned to userId with 🍋 Complete label that are still open.
+    // Issues with 🍋 Complete label that are still open. Same assignee semantics
+    // as fetchLemonQueue: assigned to the user OR unassigned.
     func fetchCompleteIssues(apiKey: String, userId: String) async throws -> [LinearIssue] {
         let query = """
         query LemonComplete($label: String!, $activeStates: [String!]!, $userId: ID!) {
           issues(
             filter: {
               labels: { name: { eq: $label } }
-              assignee: { id: { eq: $userId } }
               state: { type: { nin: $activeStates } }
+              or: [
+                { assignee: { id: { eq: $userId } } }
+                { assignee: { null: true } }
+              ]
             }
             first: 25
           ) {
