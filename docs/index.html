@@ -138,18 +138,22 @@
   /* ---------- Hero — magazine cover ---------- */
 
   .hero {
-    padding: 16px 0 80px;
+    padding: 8px 0 72px;
     position: relative;
   }
   .hero-grid {
     display: grid;
-    grid-template-columns: 7fr 5fr;
-    gap: 64px;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 52px;
     align-items: center;
   }
   .hero-photo {
     position: relative;
     margin: 0;
+    /* let the photo lean slightly into the gutter so the lemon doesn't get
+       isolated against the right column's text wall */
+    margin-left: -3%;
+    margin-right: -2%;
   }
   .hero-photo img {
     width: 100%;
@@ -181,30 +185,31 @@
   .hero-stand {
     font-family: var(--display);
     font-weight: 500;
-    font-variation-settings: "opsz" 72;
-    font-size: clamp(28px, 3.5vw, 44px);
-    line-height: 1.15;
-    letter-spacing: -0.018em;
+    font-variation-settings: "opsz" 60;
+    font-size: clamp(22px, 2.6vw, 32px);
+    line-height: 1.2;
+    letter-spacing: -0.012em;
     color: var(--ink);
-    margin-bottom: 22px;
+    margin-bottom: 18px;
+    max-width: 22ch;
   }
   .hero-stand strong {
     font-weight: 700;
     font-style: italic;
     color: var(--lemon-deep);
-    font-variation-settings: "opsz" 96;
+    font-variation-settings: "opsz" 72;
   }
   .hero-coda {
     font-family: var(--display);
     font-style: italic;
     font-weight: 400;
-    font-size: clamp(18px, 2vw, 24px);
-    line-height: 1.3;
+    font-size: clamp(15px, 1.5vw, 19px);
+    line-height: 1.4;
     color: var(--ink-soft);
     border-left: 3px solid var(--lemon);
-    padding-left: 16px;
-    margin-bottom: 30px;
-    max-width: 36ch;
+    padding-left: 14px;
+    margin-bottom: 26px;
+    max-width: 32ch;
   }
   .hero-coda em {
     font-style: italic;
@@ -438,6 +443,33 @@
     gap: 14px;
   }
   .plate-caption b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- Exhibit (centered solo plate) ---------- */
+
+  .exhibit {
+    padding: 12px 0;
+  }
+  .exhibit-caption {
+    font-family: var(--display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 18px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    text-align: center;
+    max-width: 50ch;
+    margin: 28px auto 0;
+  }
+  .exhibit-caption em {
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    border-bottom: 1px dashed var(--rule);
+    padding-bottom: 1px;
+  }
 
   /* ---------- Code block (install) ---------- */
 
@@ -805,17 +837,12 @@
     <div class="dateline reveal d3">
       <span><b>Issue:</b> No. 1 · Menu-bar glue for Claude Code + Linear</span>
       <span><b>Stack:</b> SwiftUI · Linear API · Claude Code · MLX</span>
-      <span><b>License:</b> MIT</span>
+      <span><b>License:</b> Apache 2.0</span>
     </div>
   </section>
 
   <!-- ============== THE 🍋 WORKFLOW ============== -->
   <section id="workflow" aria-labelledby="lifecycle-h">
-    <figure class="dedication" aria-label="Lemon loves Linear">
-      <img src="img/lemon-linear.png" alt="A lemon, a heart, the Linear mark — Lemon loves Linear." />
-      <figcaption>For Linear, who already knows what work needs doing.</figcaption>
-    </figure>
-
     <span class="eyebrow">The 🍋 Workflow</span>
     <h2 id="lifecycle-h" class="section-heading">Four labels, one feedback loop.</h2>
     <p class="section-lede">
@@ -845,7 +872,7 @@
         <div class="chip warn">🍋 Waiting</div>
         <div class="label">Stuck</div>
         <h3>It calls for you.</h3>
-        <p>Hit an ambiguous choice? Claude pauses, the label flips, your phone gets a push. Reply when you&rsquo;re back at your desk.</p>
+        <p>Hit an ambiguous choice? Claude pauses, the label flips, your phone gets a push. Reply on a walk, or pick up the terminal session back at your desk.</p>
       </article>
       <article class="step reveal d3">
         <span class="num">04</span>
@@ -855,6 +882,11 @@
         <p>Lemon posts a Linear comment with the PR link and a one-paragraph summary. Reply to the comment to request revisions.</p>
       </article>
     </div>
+
+    <figure class="dedication" aria-label="Lemon loves Linear">
+      <img src="img/lemon-linear.png" alt="A lemon, a heart, the Linear mark — Lemon loves Linear." />
+      <figcaption>For Linear, who already knows what work needs doing.</figcaption>
+    </figure>
   </section>
 
   <!-- ============== HOW IT WORKS ============== -->
@@ -883,20 +915,20 @@
         </div>
       </div>
       <div class="plate" style="transform: rotate(-1deg);">
-        <img src="img/list.png" alt="Lemon&rsquo;s menu bar popover showing active and recent sessions" />
+        <img src="img/live-list.png" alt="The Lemon popover on a real desktop with the menu bar visible. HRP-37 is in Planning state. Next poll in 13s." />
         <div class="plate-caption">
-          <span><b>Plate 1.</b> Popover &mdash; active &amp; recent</span>
-          <span>Citrus accent on the trigger bar.</span>
+          <span><b>Plate 1.</b> Popover &mdash; live, with menu bar grounding</span>
+          <span>HRP-37 picked up, planning.</span>
         </div>
       </div>
     </div>
 
     <div class="spread flip" style="margin-top: 100px;">
       <div class="plate flip" style="transform: rotate(0.8deg);">
-        <img src="img/detail-executing.png" alt="A session detail showing live console output, AI summary, and Stop / Join controls" />
+        <img src="img/live-detail.png" alt="Session detail for HRP-37 mid-planning. The console shows [lemon] starting session and the discovered repos." />
         <div class="plate-caption">
-          <span><b>Plate 2.</b> Session detail</span>
-          <span>Stream of <code style="font-family:var(--mono);color:var(--lemon-deep)">[lemon]</code> and <code style="font-family:var(--mono);color:#3a7a4a">[gemma]</code> lines.</span>
+          <span><b>Plate 2.</b> Session detail &mdash; mid-planning</span>
+          <span>Live <code style="font-family:var(--mono);color:var(--lemon-deep)">[lemon]</code> lines, Join + Stop ready.</span>
         </div>
       </div>
       <div class="spread-text">
@@ -938,7 +970,7 @@
       </div>
       <div class="stat reveal d3">
         <div class="num">0</div>
-        <div class="label">Keys leave your machine.<br/>Linear is the only egress.</div>
+        <div class="label">Lines of telemetry.<br/>Lemon&rsquo;s only network call is Linear; everything else is your Claude session.</div>
       </div>
     </div>
   </section>
@@ -956,11 +988,13 @@
 
     <div class="spread" style="margin-top: 36px;">
       <div class="spread-text">
-        <h2>Local AI is <em>not optional.</em></h2>
+        <h2>Made for <em>Apple silicon.</em></h2>
         <p>
-          The whole point of Lemon is the silence detector. Without a local model
-          watching, you don&rsquo;t get the 🍋&nbsp;Waiting auto-pause. So onboarding
-          gates Continue on a downloaded Gemma model and a SwiftLM binary.
+          A big chunk of Lemon&rsquo;s value is the silence detector &mdash;
+          plus auto-accepting obvious confirmations, plus unsticking
+          dumb prompts that Claude can&rsquo;t see past on its own. All of that
+          needs <strong>a local model running</strong>, which is why
+          onboarding gates Continue on a downloaded Gemma and a SwiftLM binary.
         </p>
         <p>
           Both are pulled inside the wizard. The model is from
@@ -976,7 +1010,7 @@
           ready to paste into Console.app.
         </div>
       </div>
-      <div class="plate" style="transform: rotate(-0.6deg);">
+      <div class="plate" style="transform: rotate(-0.6deg); max-width: 380px; margin-left: auto;">
         <img src="img/onboarding-localai.png" alt="The Local AI onboarding step with Gemma 4B and SwiftLM downloads" />
         <div class="plate-caption">
           <span><b>Plate 3.</b> Local AI setup</span>
@@ -986,7 +1020,7 @@
     </div>
 
     <div class="spread flip" style="margin-top: 90px;">
-      <div class="plate flip" style="transform: rotate(1deg);">
+      <div class="plate flip" style="transform: rotate(1deg); max-width: 380px;">
         <img src="img/onboarding-ready.png" alt="The final Ready step showing Linear label workflow and Claude auth detection" />
         <div class="plate-caption">
           <span><b>Plate 4.</b> Ready check</span>
@@ -1006,6 +1040,32 @@
           Lemon adopts them (fetch-or-create). Colors are advisory — your existing
           ones win.
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== SETTINGS SPREAD ============== -->
+  <section aria-labelledby="settings-h">
+    <div class="spread flip">
+      <div class="plate flip" style="transform: rotate(-0.6deg); max-width: 360px; margin-left: auto;">
+        <img src="img/live-settings.png" alt="Lemon Settings pane showing General, Linear (Connected), Workspace (HRP), and Local AI sections with Gemma model + SwiftLM Ready and the Self-test row." />
+        <div class="plate-caption">
+          <span><b>Plate 5.</b> Settings</span>
+          <span>SwiftLM <code style="font-family:var(--mono);color:var(--lemon-deep)">b648</code> · Self-test ready.</span>
+        </div>
+      </div>
+      <div class="spread-text">
+        <h2 id="settings-h">Everything <em>in one pane.</em></h2>
+        <p>
+          Settings is the single canonical place to check what Lemon is
+          configured against &mdash; <strong>Linear key</strong>,
+          <strong>workspace mapping</strong>, <strong>Gemma model path</strong>,
+          <strong>SwiftLM binary</strong> &mdash; and to fire the on-demand
+          Self-test before you trigger a real session.
+        </p>
+        <p>
+          <em>Re-run setup</em> in the corner if anything ever needs refreshing.
+        </p>
       </div>
     </div>
   </section>
@@ -1064,15 +1124,14 @@
         <div class="credit-detail">by SharpAI. OpenAI-compatible MLX inference server in pure Swift. Lemon ships build <code>b648</code> from their releases.</div>
       </a>
 
-      <a class="credit" href="https://huggingface.co/mlx-community" target="_blank" rel="noopener">
-        <div class="credit-label">The weights</div>
-        <div class="credit-name">mlx-community <span class="arrow">↗</span></div>
+      <a class="credit" href="https://github.com/ml-explore/mlx" target="_blank" rel="noopener">
+        <div class="credit-label">The framework</div>
+        <div class="credit-name">MLX <span class="arrow">↗</span></div>
         <div class="credit-detail">
-          On HuggingFace. The quantized Gemma 4 you&rsquo;ll actually download:<br/>
-          <code>
-            <a href="https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit" target="_blank" rel="noopener">gemma-4-e4b-it-4bit</a><br/>
-            <a href="https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit" target="_blank" rel="noopener">gemma-4-e2b-it-4bit</a>
-          </code>
+          Apple&rsquo;s open-source ML framework for Apple Silicon. SwiftLM
+          maps Gemma onto Metal through it; quants come via
+          <strong>mlx-community</strong> on HuggingFace:
+          <code>gemma-4-e4b-it-4bit<br/>gemma-4-e2b-it-4bit</code>
         </div>
       </a>
 
@@ -1172,7 +1231,7 @@
         </p>
         <div class="marginalia" style="margin-top: 18px;">
           <b>Built by</b> Frank Kline as personal workflow tooling.<br/>
-          Open source under MIT. Pull requests welcome.
+          Open source under Apache 2.0. Pull requests welcome.
         </div>
       </div>
     </div>
@@ -1182,7 +1241,7 @@
 
 <footer>
   <div class="wrap footer-grid">
-    <div>Lemon · Vol. 1 · 2026 · MIT License</div>
+    <div>Lemon · Vol. 1 · 2026 · Apache 2.0</div>
     <div>
       <a href="https://github.com/frankcline/lemon">Source ↗</a>
       &nbsp;·&nbsp;

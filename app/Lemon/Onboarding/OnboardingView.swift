@@ -1221,7 +1221,7 @@ private struct ReadyStep: View {
         StepShell(
             emoji: "✅",
             title: "You're all set",
-            subtitle: "Lemon is ready. Label any Linear issue with 🍋\nand Lemon will pick it up within 60 seconds.",
+            subtitle: "Lemon is ready. Tag any Linear issue with the lemon label\nand Lemon will pick it up within 60 seconds.",
             backAction: onBack,
             nextLabel: "Start Lemon",
             nextEnabled: canStart,

@@ -543,11 +543,17 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Synchronous shell helper (used for setup/teardown, not in async hot paths)
 
+    // Use a login shell (`zsh -l -c`) so Homebrew's PATH on Apple Silicon
+    // (/opt/homebrew/bin) is sourced from .zprofile. Without -l, tools like
+    // tmux installed via `brew install` are invisible at runtime even though
+    // the onboarding step (which also uses -l) correctly detects them — that
+    // mismatch caused "tmux not found" failures live, despite tmux being
+    // installed and verified at setup.
     @discardableResult
     private func runSync(_ command: String) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-c", command]
+        p.arguments = ["-l", "-c", command]
         p.standardOutput = Pipe()
         p.standardError = Pipe()
         try? p.run()
@@ -764,12 +770,13 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Shell helper
 
+    // Login shell for the same PATH reason as runSync above.
     @discardableResult
     private func shell(_ command: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-c", command]
+            p.arguments = ["-l", "-c", command]
             let pipe = Pipe()
             p.standardOutput = pipe
             p.standardError = pipe
