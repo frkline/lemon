@@ -663,17 +663,34 @@ final class WorktreeRunner: @unchecked Sendable {
                 return
             }
 
-            // If the launcher script wrote its exit sentinel, the claude process exited.
-            // Give it one extra poll interval to let Linear label changes propagate,
-            // then mark the session failed — it ended without completing.
-            if FileManager.default.fileExists(atPath: sentinelPath) {
-                let exitCode = (try? String(contentsOfFile: sentinelPath, encoding: .utf8))?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
-                Logger.worktree.warning("claude exited (code \(exitCode)) without setting 🍋 Complete on \(issue.identifier)")
-                log("[lemon] session ended without completing (exit \(exitCode))", level: .error)
+            // Two ways the session can have ended without 🍋 Complete:
+            //   (a) the launcher's `echo $? > sentinelPath` ran after claude
+            //       exited cleanly — happy "claude died but session was alive"
+            //   (b) the tmux session itself is gone — user killed the Terminal
+            //       window (SIGHUPing the bash before it could write the sentinel),
+            //       or `tmux kill-session` happened, or something OOM'd it.
+            //
+            // The previous code only handled (a). Without (b) the orchestrator
+            // would happily poll for hours after the user closed the window,
+            // showing "Executing" forever.
+            let sentinelExists = FileManager.default.fileExists(atPath: sentinelPath)
+            let tmuxAlive = runSync("tmux has-session -t '\(tmuxSessionName(issue.identifier))' 2>/dev/null")
+            if sentinelExists || !tmuxAlive {
+                let exitCode: String
+                let cause: String
+                if sentinelExists {
+                    exitCode = (try? String(contentsOfFile: sentinelPath, encoding: .utf8))?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
+                    cause = "claude exited (code \(exitCode))"
+                } else {
+                    exitCode = "no-tmux"
+                    cause = "tmux session disappeared (window closed or killed)"
+                }
+                Logger.worktree.warning("\(cause) without setting 🍋 Complete on \(issue.identifier)")
+                log("[lemon] session ended without completing — \(cause)", level: .error)
                 _ = try? await linear.postComment(
                     issueId: issue.id,
-                    body: "🍋 Session exited without completing (exit \(exitCode)). Re-add the 🍋 label to retry.",
+                    body: "🍋 Session ended without completing — \(cause). Re-add the 🍋 label to retry.",
                     apiKey: apiKey
                 )
                 if let inProgressId = labelIds[LinearClient.labelInProgress] {
@@ -682,6 +699,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 if let waitingId = labelIds[LinearClient.labelWaiting] {
                     try? await linear.removeLabel(issueId: issue.id, labelId: waitingId, apiKey: apiKey)
                 }
+                _ = exitCode
                 onStatusChange?(.failed)
                 return
             }
