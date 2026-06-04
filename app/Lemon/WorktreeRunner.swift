@@ -435,6 +435,14 @@ final class WorktreeRunner: @unchecked Sendable {
         let launcherPath = "/tmp/lemon-launch-\(identifier.lowercased()).sh"
         let mcpFlag      = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
 
+        // Trailing positional kickoff prompt — `claude [options] [prompt]`.
+        // Without this Claude opens an empty REPL and just sits there; the
+        // user is supposed to be afk, so Gemma sees an idle pane forever and
+        // (correctly) returns state=running/action=null on every classify.
+        // Pointing Claude at LEMON_CONTEXT.md makes the session self-starting.
+        // Single-quoted in bash, so no apostrophes in the prompt body.
+        let kickoffPrompt = "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
+
         // Source common shell profiles so PATH includes Homebrew, npm-global,
         // pyenv shims, etc. Same root cause as the runSync(zsh -l -c) fix:
         // `claude` is typically installed via brew or npm -g, which puts it
@@ -446,7 +454,7 @@ final class WorktreeRunner: @unchecked Sendable {
         [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control
+        cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
