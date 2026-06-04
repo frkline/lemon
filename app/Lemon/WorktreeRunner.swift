@@ -688,7 +688,11 @@ final class WorktreeRunner: @unchecked Sendable {
             md += "\n### What was done\n\(summary)\n"
         }
         md += "\n---\n*Reply to this comment to ask Lemon to revise. Lemon will update the branch and PR.*\n\n"
-        md += "<!-- lemon\nbranch: \(branch)\npr: \(prNumber)\ncomment: PENDING\nrepo: \(repoPath)\n-->"
+        // No `comment:` field here on purpose. The Lemon Report comment is the
+        // marker itself, so its ID is unknown until commentCreate returns.
+        // LinearClient.parseLemonMarker falls back to the host comment's own ID
+        // when the field is absent, which is exactly what we want for re-trigger.
+        md += "<!-- lemon\nbranch: \(branch)\npr: \(prNumber)\nrepo: \(repoPath)\n-->"
         return md
     }
 

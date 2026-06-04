@@ -80,6 +80,72 @@ final class LinearClientTests: XCTestCase {
         let issues = try await client().fetchLemonQueue(apiKey: "k", userId: "u")
         XCTAssertEqual(issues.map(\.id), ["good"])
     }
+
+    // MARK: - parseLemonMarker
+
+    func testParseLemonMarkerFallsBackToHostCommentId() {
+        // Lemon Report comments don't know their own ID at write time, so the
+        // marker omits `comment:` and the parser falls back to the host comment.
+        let body = """
+        ## 🍋 Lemon Report — HRP-42
+
+        **PR:** [#101](https://github.com/x/y/pull/101)
+
+        <!-- lemon
+        branch: lemon/HRP-42
+        pr: 101
+        repo: /tmp/repo
+        -->
+        """
+        let marker = client().parseLemonMarker(from: body, commentId: "host-comment-real-id")
+        XCTAssertNotNil(marker)
+        XCTAssertEqual(marker?.commentId, "host-comment-real-id",
+                       "Must use the host comment id when `comment:` is absent — re-trigger detection depends on it.")
+        XCTAssertEqual(marker?.branch, "lemon/HRP-42")
+        XCTAssertEqual(marker?.prNumber, "101")
+        XCTAssertEqual(marker?.repoPath, "/tmp/repo")
+    }
+
+    func testParseLemonMarkerExplicitCommentIdWins() {
+        // If a future code path does fill in the real comment id, honor it.
+        let body = """
+        <!-- lemon
+        branch: lemon/HRP-7
+        pr: 22
+        comment: explicit-id
+        repo: /tmp/r
+        -->
+        """
+        let marker = client().parseLemonMarker(from: body, commentId: "host-id")
+        XCTAssertEqual(marker?.commentId, "explicit-id")
+    }
+
+    func testParseLemonMarkerRejectsPlaceholder() {
+        // Documents the bug we just fixed: a literal "PENDING" placeholder
+        // poisons the re-trigger detection. The Lemon Report builder must
+        // not emit `comment: PENDING`.
+        let body = """
+        <!-- lemon
+        branch: lemon/HRP-1
+        pr: 99
+        comment: PENDING
+        repo: /tmp/r
+        -->
+        """
+        let marker = client().parseLemonMarker(from: body, commentId: "real-id")
+        XCTAssertEqual(marker?.commentId, "PENDING",
+                       "Parser honors what's written. Builder must not write a placeholder; see WorktreeRunner.buildLemonComment.")
+    }
+
+    func testParseLemonMarkerMissingFieldsReturnsNil() {
+        let body = """
+        <!-- lemon
+        branch: lemon/HRP-1
+        -->
+        """
+        XCTAssertNil(client().parseLemonMarker(from: body, commentId: "x"),
+                     "Required pr + repo fields must be present.")
+    }
 }
 
 // MARK: - URLProtocol stub

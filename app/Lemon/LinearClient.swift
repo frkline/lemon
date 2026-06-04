@@ -171,7 +171,8 @@ final class LinearClient: Sendable {
         return nil
     }
 
-    private func parseLemonMarker(from body: String, commentId: String) -> LemonMarker? {
+    // Exposed for tests; treat as private otherwise.
+    func parseLemonMarker(from body: String, commentId: String) -> LemonMarker? {
         guard
             let start = body.range(of: "<!-- lemon\n"),
             let end   = body.range(of: "\n-->", range: start.upperBound..<body.endIndex)
