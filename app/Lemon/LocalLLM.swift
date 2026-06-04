@@ -55,14 +55,43 @@ final class LocalLLM: @unchecked Sendable {
         p.arguments = ["--model", store.modelPath, "--port", "\(port)"]
         Logger.orchestrator.info("SwiftLM launching: \(store.swiftLMPath) --model \(store.modelPath) --port \(self.port)")
         p.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
-        p.standardOutput = Pipe()
-        p.standardError = Pipe()
+
+        // Capture stdout/stderr to a log file AND drain them continuously.
+        // Two reasons both matter:
+        //   (a) without draining, the pipe buffer fills (~16-64 KB) and
+        //       SwiftLM blocks/dies on its next write — a likely cause of
+        //       the post-ready exit we keep seeing.
+        //   (b) without capturing the stream to disk, we have no way to
+        //       diagnose *why* SwiftLM crashed. The Self-test message ends
+        //       up generic when the underlying SwiftLM stderr would have
+        //       said something useful ("k_norm.weight not found",
+        //       "Metal: out of memory", etc.).
+        let logPath = "/tmp/lemon-swiftlm.log"
+        try? FileManager.default.removeItem(atPath: logPath)
+        FileManager.default.createFile(atPath: logPath, contents: nil)
+        let outPipe = Pipe(); let errPipe = Pipe()
+        p.standardOutput = outPipe; p.standardError = errPipe
+        // Append-on-demand drain. Opens/closes FileHandle per chunk to keep
+        // the @Sendable closure free of non-Sendable captures (FileHandle
+        // isn't Sendable). The overhead is fine — chunks are coalesced by
+        // the kernel's pipe buffer, so we're not doing it per byte.
+        let drain: @Sendable (FileHandle) -> Void = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            if let fh = FileHandle(forWritingAtPath: logPath) {
+                _ = try? fh.seekToEnd()
+                try? fh.write(contentsOf: chunk)
+                try? fh.close()
+            }
+        }
+        outPipe.fileHandleForReading.readabilityHandler = drain
+        errPipe.fileHandleForReading.readabilityHandler = drain
 
         do {
             try p.run()
             process = p
             _state = .starting
-            Logger.orchestrator.info("SwiftLM launched (pid \(p.processIdentifier))")
+            Logger.orchestrator.info("SwiftLM launched (pid \(p.processIdentifier)) — stream → /tmp/lemon-swiftlm.log")
         } catch {
             let msg = "SwiftLM launch failed: \(error.localizedDescription)"
             Logger.orchestrator.error("\(msg)")
@@ -78,8 +107,9 @@ final class LocalLLM: @unchecked Sendable {
             try? await Task.sleep(for: .seconds(1))
             guard process?.isRunning == true else {
                 let secs = Int(Date().timeIntervalSince(startedAt))
-                let msg = "SwiftLM exited during startup after \(secs) s — check `log stream --predicate 'subsystem == \"com.lemon.app\"'`"
-                Logger.orchestrator.error("\(msg)")
+                let tail = Self.readSwiftLMLogTail()
+                Logger.orchestrator.error("SwiftLM exited during startup after \(secs)s. Last lines:\n\(tail, privacy: .public)")
+                let msg = "SwiftLM exited \(secs)s into startup. Tail of /tmp/lemon-swiftlm.log:\n\n\(tail)"
                 process = nil
                 _state = .failed(msg)
                 return
@@ -113,13 +143,37 @@ final class LocalLLM: @unchecked Sendable {
     func isReady() -> Bool {
         let stillUp = process?.isRunning ?? true
         if _ready && !stillUp {
-            Logger.orchestrator.error("SwiftLM process exited after reporting ready — clearing state for re-launch")
+            let tail = Self.readSwiftLMLogTail()
+            Logger.orchestrator.error("SwiftLM process exited after reporting ready. Last lines:\n\(tail, privacy: .public)")
             _ready = false
-            _state = .failed("SwiftLM process exited unexpectedly after startup. Click Run again to relaunch.")
+            let msg = "SwiftLM exited after startup. Tail of /tmp/lemon-swiftlm.log:\n\n\(tail)"
+            _state = .failed(msg)
             process = nil
             return false
         }
         return _ready && stillUp
+    }
+
+    // Reads the last ~80 lines (truncated to 1.5 KB) of the SwiftLM stream
+    // we've been draining to /tmp/lemon-swiftlm.log. Surfaces in the Self-test
+    // failure card so the user sees the actual SwiftLM error (model load fault,
+    // GPU OOM, missing tensor, etc.) instead of a generic "exited" message.
+    static func readSwiftLMLogTail(maxBytes: Int = 1500) -> String {
+        let path = "/tmp/lemon-swiftlm.log"
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8),
+              !content.isEmpty else {
+            return "(log empty or unreadable — see Console.app)"
+        }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxBytes else { return trimmed }
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false)
+        var acc = ""
+        for line in lines.reversed() {
+            let next = String(line) + (acc.isEmpty ? "" : "\n") + acc
+            if next.count > maxBytes { break }
+            acc = next
+        }
+        return acc.isEmpty ? String(trimmed.suffix(maxBytes)) : "…\n\(acc)"
     }
 
     private func healthCheck() async -> Bool {

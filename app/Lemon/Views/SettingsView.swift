@@ -218,12 +218,25 @@ struct SettingsView: View {
                     Text("Self-test").font(.system(size: 13))
                     aiTestBadge
                 }
-                Text(aiTestDetail)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .textSelection(.enabled)
+                // Failed states often carry a multi-line SwiftLM log tail —
+                // give them more vertical room and let the user scroll inside.
+                if case .failed = aiTestState {
+                    ScrollView {
+                        Text(aiTestDetail)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 160)
+                } else {
+                    Text(aiTestDetail)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .textSelection(.enabled)
+                }
             }
             Spacer(minLength: 8)
             switch aiTestState {
