@@ -71,4 +71,27 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(s.logLines.count, 2000)
         XCTAssertEqual(s.logLines.first, "line 5")
     }
+
+    // Locks down the fix for the stopSession-vs-natural-finish race that
+    // would otherwise double-insert the same session into `recent`.
+    func testFinishIsIdempotent() {
+        let store = SessionStore()
+        let s = Session(issue: issue(id: "race"))
+        store.add(s)
+        store.finish(s)
+        store.finish(s)  // simulates stopSession racing with runner's onStatusChange terminal callback
+        XCTAssertEqual(store.recent.count, 1, "Double-finish must not duplicate the session in recent")
+        XCTAssertEqual(store.recent.first?.issue.id, "race")
+    }
+
+    func testFinishOnUnknownSessionIsSafe() {
+        let store = SessionStore()
+        let stranger = Session(issue: issue(id: "ghost"))
+        store.finish(stranger)
+        XCTAssertEqual(store.active.count, 0)
+        XCTAssertEqual(store.recent.count, 1, "First-time finish of an off-store session is still valid")
+
+        store.finish(stranger)
+        XCTAssertEqual(store.recent.count, 1, "Second finish still idempotent")
+    }
 }

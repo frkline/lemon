@@ -12,9 +12,14 @@ final class SessionStore {
         active.append(session)
     }
 
+    // Idempotent: called from both the runner's natural completion path and
+    // Orchestrator.stopSession. Without the guard, a stop racing with a
+    // natural finish duplicates the session in `recent`.
     func finish(_ session: Session) {
+        let wasActive = active.contains { $0.id == session.id }
         active.removeAll { $0.id == session.id }
-        session.endedAt = Date()
+        guard wasActive || !recent.contains(where: { $0.id == session.id }) else { return }
+        if session.endedAt == nil { session.endedAt = Date() }
         recent.insert(session, at: 0)
         if recent.count > maxRecent { recent = Array(recent.prefix(maxRecent)) }
     }
