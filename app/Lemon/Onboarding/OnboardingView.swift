@@ -244,7 +244,12 @@ private struct LinearStep: View {
                     SecureField("lin_api_...", text: $apiKey)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
-                        .onChange(of: apiKey) { _, _ in
+                        .onChange(of: apiKey) { _, new in
+                            // Pasted keys frequently arrive with trailing newlines or
+                            // surrounding whitespace from clipboard helpers; strip them
+                            // before they poison the Authorization header.
+                            let cleaned = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if cleaned != new { apiKey = cleaned }
                             userId = ""; userName = ""; verifyError = nil
                         }
                 }
@@ -540,6 +545,10 @@ private struct OnboardingRepoRow: View {
                     TextField(repo.allReposInFolder ? "/path/to/projects" : "/path/to/repo", text: $repo.path)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11, design: .monospaced))
+                        .onChange(of: repo.path) { _, new in
+                            let cleaned = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if cleaned != new { repo.path = cleaned }
+                        }
                 }
 
                 // "All repos in folder" toggle
