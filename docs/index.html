@@ -484,6 +484,8 @@
     position: relative;
     box-shadow: var(--shadow);
     border: 1.5px solid var(--ink);
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .code-block .prompt { color: var(--lemon); user-select: none; }
   .code-block .comment { color: #8c857a; }
@@ -496,6 +498,42 @@
     color: #8c857a;
     text-transform: uppercase;
     letter-spacing: 0.12em;
+  }
+
+  /* ---------- Spec sheet (under install) ---------- */
+
+  .spec-sheet {
+    margin-top: 28px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--ink-soft);
+    border-top: 1.5px solid var(--ink);
+    border-bottom: 1.5px solid var(--ink);
+    padding: 14px 0;
+  }
+  .spec-sheet > div {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 18px;
+    padding: 6px 0;
+    align-items: baseline;
+  }
+  .spec-sheet > div + div { border-top: 1px dashed var(--rule); }
+  .spec-sheet dt {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    color: var(--ink);
+    font-size: 10.5px;
+  }
+  .spec-sheet dd {
+    margin: 0;
+    color: var(--ink);
+  }
+  .spec-sheet dd strong {
+    font-weight: 700;
+    color: var(--lemon-deep);
   }
 
   /* ---------- Stats strip ---------- */
@@ -1104,6 +1142,13 @@
   <section aria-labelledby="trust-h">
     <span class="eyebrow">What it does &amp; doesn&rsquo;t do</span>
     <h2 id="trust-h" class="section-heading">A short list of promises.</h2>
+    <p class="section-lede">
+      Lemon&rsquo;s job is starting Claude Code sessions, watching them,
+      and getting the result back into Linear &mdash; so you can skip
+      the routine parts of your workflow (the obvious confirmations,
+      the wait-for-PR cycle, the context juggle) and keep your
+      attention on the work that needs thinking.
+    </p>
 
     <div class="spread" style="margin-top: 36px;">
       <div class="panel">
@@ -1207,9 +1252,17 @@
 <span class="prompt">$</span> open https://lemon.living
     </div>
 
-    <p style="font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); margin-top: 20px; text-transform: uppercase; letter-spacing: 0.08em;">
-      Requires macOS 26 · Apple Silicon · ~6 GB free
-    </p>
+    <dl class="spec-sheet">
+      <div><dt>Requires</dt><dd>macOS 26 · Apple Silicon</dd></div>
+      <div>
+        <dt>Pick a model</dt>
+        <dd>
+          <strong>Gemma 4 E2B</strong> &mdash; ~4 GB on disk, runs on 16 GB&nbsp;Macs<br/>
+          <strong>Gemma 4 E4B</strong> &mdash; ~6 GB on disk, recommended on 24 GB+
+        </dd>
+      </div>
+      <div><dt>Toggle</dt><dd>In onboarding, or anytime via Settings &rarr; Re-run setup.</dd></div>
+    </dl>
   </section>
 
   <!-- ============== WHAT IT IS / ISN'T ============== -->
@@ -1251,10 +1304,16 @@
       </div>
       <div class="spread-text">
         <p>
-          It&rsquo;s that <strong>Linear is already where the work lives</strong> &mdash;
-          and Lemon makes that the surface, not a separate dashboard.
-          You&rsquo;ve been triaging in Linear all morning anyway. Tag the ones
-          you want to kickstart with a Claude Code session, get back to the harder problems.
+          It&rsquo;s <strong>skipping the dumb routine stuff</strong> &mdash;
+          the tags you&rsquo;d kickstart by hand anyway, the trust prompts
+          you&rsquo;d answer the same way every time, the PR wait you&rsquo;d
+          just sit through. Lemon orchestrates those out of your day.
+        </p>
+        <p>
+          And it makes <strong>Linear the surface</strong>, not a separate
+          dashboard. You&rsquo;ve been triaging there all morning anyway.
+          Tag the ones you want kickstarted, get back to the work that
+          actually needs your head.
         </p>
         <p>
           That&rsquo;s it. That&rsquo;s the whole pitch.
