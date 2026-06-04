@@ -625,23 +625,26 @@ private struct LocalAIStep: View {
         var id: String { rawValue }
         var hfId: String {
             switch self {
-            case .e4b: return "mlx-community/gemma-4-e4b-it-OptiQ-4bit"
-            case .e2b: return "mlx-community/gemma-4-e2b-it-OptiQ-4bit"
+            // Canonical mlx-community 4-bit. OptiQ-4bit variants exist but SwiftLM b648
+            // can't load them (k_norm.weight missing at decode time — verified end-to-end
+            // on Apple Silicon). Stick with the plain 4-bit quant SwiftLM's README lists.
+            case .e4b: return "mlx-community/gemma-4-e4b-it-4bit"
+            case .e2b: return "mlx-community/gemma-4-e2b-it-4bit"
             }
         }
         var dirName: String {
             switch self {
-            case .e4b: return "gemma-4-e4b"
-            case .e2b: return "gemma-4-e2b"
+            case .e4b: return "gemma-4-e4b-it-4bit"
+            case .e2b: return "gemma-4-e2b-it-4bit"
             }
         }
         var label: String {
             switch self {
-            case .e4b: return "4B  (~2.5 GB)"
-            case .e2b: return "2B  (~1.4 GB)"
+            case .e4b: return "4B  (~5.2 GB)"
+            case .e2b: return "2B  (~3.6 GB)"
             }
         }
-        var approxMB: Int { self == .e4b ? 2500 : 1400 }
+        var approxMB: Int { self == .e4b ? 5200 : 3600 }
     }
 
     private var modelDir: String {
