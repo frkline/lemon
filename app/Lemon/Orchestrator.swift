@@ -9,6 +9,7 @@ final class Orchestrator {
     var lastPollError: String?
     var lastPolledAt: Date?
     var isPolling = false
+    var aiState: LocalLLM.AIState = .notConfigured
 
     private let linear = LinearClient()
     private var pollTask: Task<Void, Never>?
@@ -45,7 +46,11 @@ final class Orchestrator {
         }
 
         isPolling = true
-        defer { isPolling = false; lastPolledAt = Date() }
+        defer {
+            isPolling = false
+            lastPolledAt = Date()
+            aiState = LocalLLM.shared.state()
+        }
 
         let apiKey = keychain.linearApiKey
 

@@ -217,6 +217,7 @@ struct PopoverView: View {
             HStack(spacing: 6) {
                 pollDot
                 pollText
+                aiStatusBadge
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.borderless)
@@ -225,6 +226,32 @@ struct PopoverView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+        }
+    }
+
+    // Surface AI status only when it would help — hide for .ready (green path)
+    // and .notConfigured (user opted out / hasn't set up). Show starting + failed.
+    @ViewBuilder
+    private var aiStatusBadge: some View {
+        switch orchestrator.aiState {
+        case .ready, .notConfigured:
+            EmptyView()
+        case .starting:
+            HStack(spacing: 6) {
+                Text("·").font(.system(size: 10)).foregroundStyle(.quaternary)
+                Text("AI: loading…")
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.lemon)
+                    .help(Text(verbatim: "Loading Gemma into memory; can take 60-90 s on first launch."))
+            }
+        case .failed(let msg):
+            HStack(spacing: 6) {
+                Text("·").font(.system(size: 10)).foregroundStyle(.quaternary)
+                Text("AI: error")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LD.coral)
+                    .help(Text(verbatim: msg))
+            }
         }
     }
 

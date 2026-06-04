@@ -10,6 +10,19 @@ final class LocalLLM: @unchecked Sendable {
     private let port: Int
     private let session: URLSession
     private var _ready = false
+    private var _state: AIState = .notConfigured
+
+    // Coarse-grained AI status surfaced to the UI. Snapshot at any time via state().
+    enum AIState: Equatable {
+        case notConfigured                   // aiEnabled=false or paths missing
+        case starting                        // SwiftLM subprocess launched, waiting for /health
+        case ready                           // /health 200, classify() should succeed
+        case failed(String)                  // exited / didn't respond / health-poll timeout
+
+        var isReady: Bool { if case .ready = self { return true } else { return false } }
+    }
+
+    func state() -> AIState { _state }
 
     private init(port: Int, session: URLSession) {
         self.port = port
@@ -20,6 +33,7 @@ final class LocalLLM: @unchecked Sendable {
     static func makeForTesting(port: Int, session: URLSession) -> LocalLLM {
         let llm = LocalLLM(port: port, session: session)
         llm._ready = true
+        llm._state = .ready
         return llm
     }
     #endif
@@ -28,7 +42,10 @@ final class LocalLLM: @unchecked Sendable {
 
     func start() async {
         let store = KeychainStore.shared
-        guard store.aiEnabled, !store.swiftLMPath.isEmpty, !store.modelPath.isEmpty else { return }
+        guard store.aiEnabled, !store.swiftLMPath.isEmpty, !store.modelPath.isEmpty else {
+            _state = .notConfigured
+            return
+        }
         guard process == nil else { return }
 
         let p = Process()
@@ -44,9 +61,12 @@ final class LocalLLM: @unchecked Sendable {
         do {
             try p.run()
             process = p
+            _state = .starting
             Logger.orchestrator.info("SwiftLM launched (pid \(p.processIdentifier))")
         } catch {
-            Logger.orchestrator.error("SwiftLM launch failed: \(error)")
+            let msg = "SwiftLM launch failed: \(error.localizedDescription)"
+            Logger.orchestrator.error("\(msg)")
+            _state = .failed(msg)
             return
         }
 
@@ -57,21 +77,28 @@ final class LocalLLM: @unchecked Sendable {
         for _ in 0..<180 {
             try? await Task.sleep(for: .seconds(1))
             guard process?.isRunning == true else {
-                Logger.orchestrator.error("SwiftLM exited during startup after \(Int(Date().timeIntervalSince(startedAt))) s")
+                let secs = Int(Date().timeIntervalSince(startedAt))
+                let msg = "SwiftLM exited during startup after \(secs) s — check `log stream --predicate 'subsystem == \"com.lemon.app\"'`"
+                Logger.orchestrator.error("\(msg)")
                 process = nil
+                _state = .failed(msg)
                 return
             }
             if await healthCheck() {
                 _ready = true
+                _state = .ready
                 Logger.orchestrator.info("SwiftLM ready on port \(self.port) after \(Int(Date().timeIntervalSince(startedAt))) s")
                 return
             }
         }
-        Logger.orchestrator.error("SwiftLM did not become healthy within 180 s")
+        let msg = "SwiftLM didn't reach /health within 180 s — model load stalled."
+        Logger.orchestrator.error("\(msg)")
+        _state = .failed(msg)
     }
 
     func stop() {
         _ready = false
+        _state = .notConfigured
         process?.terminate()
         process = nil
     }
