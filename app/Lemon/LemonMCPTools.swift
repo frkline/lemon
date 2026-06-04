@@ -15,6 +15,7 @@ import os
 enum LemonMCPTools {
     static func registerAll(server: LemonMCPServer, orchestrator: Orchestrator) {
         registerReadOnly(server: server, orchestrator: orchestrator)
+        registerControl(server: server, orchestrator: orchestrator)
     }
 
     // MARK: - Read-only tools
@@ -140,6 +141,177 @@ enum LemonMCPTools {
         ))
     }
 
+    // MARK: - Control tools
+
+    private static func registerControl(server: LemonMCPServer, orchestrator: Orchestrator) {
+        // ── force_classify ─────────────────────────────────────────────────
+        // Sidestep the 2-minute silence detector — pull the pane log right
+        // now, run Gemma on it, return the raw verdict. Lets a recursive
+        // Claude probe what Gemma thinks of the current state on demand.
+        server.register(LemonMCPServer.Tool(
+            name: "force_classify",
+            description: "Run the Gemma classifier on a session's current pane log immediately, bypassing the silence-detector wait. Returns the GemmaResponse {state, summary, action} plus the input log lines that were sent for the classification.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Session UUID or Linear identifier"],
+                    "log_lines": [
+                        "type": "integer",
+                        "description": "How many tail lines to feed Gemma (default 80, max 400). Mirrors what the silence detector normally sends.",
+                        "default": 80
+                    ]
+                ],
+                "required": ["id"],
+                "additionalProperties": false
+            ],
+            handler: { args in
+                guard let idArg = args["id"] as? String, !idArg.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'id' argument")
+                }
+                let lines = min(max((args["log_lines"] as? Int) ?? 80, 1), 400)
+                // Resolve the session and snapshot the issue + log lines on
+                // MainActor so we can leave the actor before the (potentially
+                // slow) network round-trip to SwiftLM.
+                let snapshot = await MainActor.run { () -> (LinearIssue, [String])? in
+                    guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg) else { return nil }
+                    let tail = readPaneLogTail(identifier: session.issue.identifier, lines: lines)
+                    return (session.issue, tail)
+                }
+                guard let (issue, tail) = snapshot else {
+                    throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
+                }
+                guard LocalLLM.shared.isReady() else {
+                    throw MCPError(code: -32001, message: "LocalLLM not ready — check Self-test in Settings")
+                }
+                let started = Date()
+                let verdict: GemmaResponse
+                do {
+                    verdict = try await LocalLLM.shared.classify(issue: issue, logLines: tail)
+                } catch {
+                    throw MCPError(code: -32002, message: "classify failed: \(error.localizedDescription)")
+                }
+                let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+                var actionDict: [String: Any] = [:]
+                if let a = verdict.action {
+                    actionDict["type"] = a.type
+                    if let k = a.keys { actionDict["keys"] = k }
+                    if let m = a.message { actionDict["message"] = m }
+                }
+                let payload: [String: Any] = [
+                    "identifier": issue.identifier,
+                    "state": verdict.state,
+                    "summary": verdict.summary,
+                    "action": actionDict.isEmpty ? NSNull() : actionDict,
+                    "input_log_lines": tail,
+                    "elapsed_ms": elapsedMs
+                ]
+                return LemonMCPServer.encode(payload)
+            }
+        ))
+
+        // ── send_keys ──────────────────────────────────────────────────────
+        // Bypasses WorktreeRunner's isSafeSendKeys allowlist — anything the
+        // caller passes goes straight to tmux. That's the point: this is for
+        // unsticking sessions the silence detector or Gemma can't handle.
+        // Loopback bind + no auth is the threat model.
+        server.register(LemonMCPServer.Tool(
+            name: "send_keys",
+            description: "Send raw keystrokes to a session's tmux pane. BYPASSES the safety allowlist — the caller is fully trusted (localhost-only bind). For special keys, pass tmux's literal names (Enter, Escape, Space, Up, Down, Left, Right, BSpace, Tab). Regular text keys auto-append Enter unless 'append_enter' is false.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Session UUID or Linear identifier"],
+                    "keys": ["type": "string", "description": "Key sequence or tmux special-key name (e.g. 'Enter', 'y', '/clear')"],
+                    "append_enter": [
+                        "type": "boolean",
+                        "description": "Append Enter after the keys (default true; ignored for tmux special-key names)",
+                        "default": true
+                    ]
+                ],
+                "required": ["id", "keys"],
+                "additionalProperties": false
+            ],
+            handler: { args in
+                guard let idArg = args["id"] as? String, !idArg.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'id' argument")
+                }
+                guard let keys = args["keys"] as? String, !keys.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'keys' argument")
+                }
+                let appendEnter = (args["append_enter"] as? Bool) ?? true
+                let identifier = await MainActor.run { () -> String? in
+                    findSession(orchestrator: orchestrator, idOrIdentifier: idArg)?.issue.identifier
+                }
+                guard let identifier else {
+                    throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
+                }
+                let sessionName = "lemon-\(identifier.lowercased())"
+                // Verify the tmux session is actually alive — silent failure
+                // here would just look like "I sent keys but nothing happened"
+                // and waste the caller's debugging time.
+                guard runShell("tmux has-session -t '\(sessionName)' 2>/dev/null") == 0 else {
+                    throw MCPError(code: -32005, message: "tmux session '\(sessionName)' not alive")
+                }
+                let specialKeys: Set<String> = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
+                let cmd: String
+                if specialKeys.contains(keys) {
+                    cmd = "tmux send-keys -t '\(sessionName)' \(keys)"
+                } else {
+                    let escaped = keys.replacingOccurrences(of: "'", with: "'\\''")
+                    cmd = appendEnter
+                        ? "tmux send-keys -t '\(sessionName)' '\(escaped)' Enter"
+                        : "tmux send-keys -t '\(sessionName)' '\(escaped)'"
+                }
+                let rc = runShell(cmd)
+                let payload: [String: Any] = [
+                    "identifier": identifier,
+                    "session_name": sessionName,
+                    "keys": keys,
+                    "appended_enter": !specialKeys.contains(keys) && appendEnter,
+                    "exit_code": rc,
+                    "ok": rc == 0
+                ]
+                return LemonMCPServer.encode(payload)
+            }
+        ))
+
+        // ── stop_session ───────────────────────────────────────────────────
+        server.register(LemonMCPServer.Tool(
+            name: "stop_session",
+            description: "Cancel an active Lemon session — terminates the WorktreeRunner, kills the tmux session, marks the session as failed, and moves it into recent. Does NOT clean up the worktree directory or revert Linear labels.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Session UUID or Linear identifier"]
+                ],
+                "required": ["id"],
+                "additionalProperties": false
+            ],
+            handler: { args in
+                guard let idArg = args["id"] as? String, !idArg.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'id' argument")
+                }
+                let json: String? = await MainActor.run { () -> String? in
+                    guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg),
+                          orchestrator.sessions.active.contains(where: { $0.id == session.id }) else {
+                        return nil
+                    }
+                    let payload: [String: Any] = [
+                        "identifier": session.issue.identifier,
+                        "uuid": session.id.uuidString,
+                        "stopped": true
+                    ]
+                    orchestrator.stopSession(session)
+                    return LemonMCPServer.encode(payload)
+                }
+                guard let json else {
+                    throw MCPError(code: -32004, message: "no active session matching '\(idArg)'")
+                }
+                return json
+            }
+        ))
+    }
+
     // MARK: - Helpers
 
     @MainActor
@@ -183,6 +355,26 @@ enum LemonMCPTools {
         case .starting:      return "starting"
         case .ready:         return "ready"
         case .failed(let m): return "failed: \(m)"
+        }
+    }
+
+    // Synchronous shell helper for tmux send-keys / tmux has-session. Same
+    // login-shell pattern WorktreeRunner uses so Homebrew tmux is on PATH.
+    // nonisolated so handlers can call it without an actor hop — Process is
+    // thread-safe and doesn't touch any MainActor state.
+    nonisolated private static func runShell(_ command: String) -> Int32 {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-l", "-c", command]
+        p.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        do {
+            try p.run()
+            p.waitUntilExit()
+            return p.terminationStatus
+        } catch {
+            return -1
         }
     }
 }

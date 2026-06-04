@@ -247,9 +247,15 @@ final class LemonMCPServer: @unchecked Sendable {
 
 // MARK: - MCP error
 
-struct MCPError: Error {
+// Conforms to LocalizedError so the dispatcher's `error.localizedDescription`
+// surfaces our actual message instead of the generic
+// "The operation couldn't be completed. (Lemon.MCPError error 1.)" Foundation
+// hands back for raw Error conformers.
+struct MCPError: LocalizedError {
     let code: Int
     let message: String
+
+    var errorDescription: String? { message }
 }
 
 // MARK: - Tiny HTTP/1.1 parser
