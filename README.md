@@ -101,6 +101,9 @@ Lemon's entire surface in your Linear workspace is **four labels** and **one com
 
 Labels are auto-provisioned in every team you have access to on first launch — if your Linear admin already created custom 🍋 labels with the same names, Lemon adopts them (fetch-or-create).
 
+> **When it calls for you, it calls for you — wherever you are.**
+> Claude Code launches with `--remote-control`, so when Gemma can't resolve a prompt and 🍋 Waiting fires, a push notification lands in the **Claude iOS app** on your phone. You answer the question natively — from the couch, from a walk, from a park bench while your kid is on the swings — and the session keeps going. Lemon and Gemma absorbed the routine bits so the only thing that reaches you is the one decision that actually needs you.
+
 ## Local AI is not optional
 
 <div align="center">
