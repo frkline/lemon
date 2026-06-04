@@ -144,17 +144,14 @@
   }
   .hero-grid {
     display: grid;
-    grid-template-columns: 1.15fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 52px;
     align-items: center;
   }
   .hero-photo {
     position: relative;
-    margin: 0;
-    /* let the photo lean slightly into the gutter so the lemon doesn't get
-       isolated against the right column's text wall */
-    margin-left: -3%;
-    margin-right: -2%;
+    margin: 0 auto;
+    max-width: 520px;
   }
   .hero-photo img {
     width: 100%;
