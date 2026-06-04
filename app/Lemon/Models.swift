@@ -93,6 +93,56 @@ struct GemmaResponse: Decodable {
     let state: String
     let summary: String
     let action: GemmaAction?
+
+    enum ParseError: Error, Equatable {
+        case empty
+        case noJSON
+        case decodeFailed(String)
+    }
+
+    // Robust parser for the inner JSON content returned by SwiftLM's
+    // /v1/chat/completions choices[0].message.content. Chat-tuned models
+    // sometimes wrap the JSON in markdown fences (```json ... ```), prefix it
+    // with prose, or trail commentary. This locates the JSON body, strips
+    // fences/prose, and decodes — handing back a typed ParseError when it
+    // can't recover, so callers can degrade gracefully instead of crashing.
+    static func parse(_ raw: String) throws -> GemmaResponse {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw ParseError.empty }
+
+        // Strip ```json ... ``` or ``` ... ``` fences if present.
+        let fenced: String = {
+            guard trimmed.hasPrefix("```") else { return trimmed }
+            // Drop opening fence (and optional "json" tag) up to the first newline.
+            let afterOpenFence = trimmed
+                .drop(while: { $0 == "`" })
+                .drop(while: { !$0.isNewline })
+                .dropFirst()  // the newline itself
+            // Drop the trailing fence + any trailing whitespace.
+            var body = String(afterOpenFence)
+            if let range = body.range(of: "```", options: .backwards) {
+                body = String(body[..<range.lowerBound])
+            }
+            return body.trimmingCharacters(in: .whitespacesAndNewlines)
+        }()
+
+        // Fall back to extracting the first {...} object in case the model
+        // emitted prose before or after the JSON.
+        let jsonString: String = {
+            if fenced.hasPrefix("{") { return fenced }
+            guard let start = fenced.firstIndex(of: "{"),
+                  let end   = fenced.lastIndex(of: "}"),
+                  start < end else { return fenced }
+            return String(fenced[start...end])
+        }()
+
+        guard jsonString.hasPrefix("{") else { throw ParseError.noJSON }
+        do {
+            return try JSONDecoder().decode(GemmaResponse.self, from: Data(jsonString.utf8))
+        } catch {
+            throw ParseError.decodeFailed(error.localizedDescription)
+        }
+    }
 }
 
 struct GemmaAction: Decodable {

@@ -198,11 +198,19 @@ final class LocalLLM: @unchecked Sendable {
         }
 
         let chat = try JSONDecoder().decode(ChatResponse.self, from: responseData)
-        guard let content    = chat.choices.first?.message.content,
-              let innerData  = content.data(using: .utf8) else {
+        guard let content = chat.choices.first?.message.content else {
             throw LocalLLMError.invalidResponse
         }
-        return try JSONDecoder().decode(GemmaResponse.self, from: innerData)
+        // GemmaResponse.parse strips markdown fences and prose, then decodes.
+        // Smaller / chat-tuned models routinely emit ```json {...} ``` or
+        // leading "Here's my analysis: {...}" — the raw decoder would reject
+        // both, leaving the silence-detector pipeline silently broken.
+        do {
+            return try GemmaResponse.parse(content)
+        } catch let err as GemmaResponse.ParseError {
+            Logger.orchestrator.error("Gemma response parse failed: \(String(describing: err)); raw=\(content.prefix(400), privacy: .public)")
+            throw LocalLLMError.invalidResponse
+        }
     }
 }
 

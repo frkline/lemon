@@ -86,6 +86,70 @@ final class GemmaResponseTests: XCTestCase {
         XCTAssertTrue(r.summary.contains("approval"))
     }
 
+    // MARK: - GemmaResponse.parse robustness
+
+    func testParseStripsMarkdownFenceWithJsonTag() throws {
+        let raw = """
+        ```json
+        {"state":"running","summary":"All good","action":null}
+        ```
+        """
+        let r = try GemmaResponse.parse(raw)
+        XCTAssertEqual(r.state, "running")
+        XCTAssertNil(r.action)
+    }
+
+    func testParseStripsPlainMarkdownFence() throws {
+        let raw = """
+        ```
+        {"state":"complete","summary":"PR opened","action":null}
+        ```
+        """
+        let r = try GemmaResponse.parse(raw)
+        XCTAssertEqual(r.state, "complete")
+    }
+
+    func testParseExtractsFirstJsonObjectFromProse() throws {
+        let raw = """
+        Here is my analysis of the session:
+
+        {"state":"blocked_prompt","summary":"MCP trust prompt","action":{"type":"send_keys","keys":"y"}}
+
+        Let me know if you need more.
+        """
+        let r = try GemmaResponse.parse(raw)
+        XCTAssertEqual(r.state, "blocked_prompt")
+        XCTAssertEqual(r.action?.keys, "y")
+    }
+
+    func testParseHandlesPureJsonNoFenceNoProse() throws {
+        let raw = #"{"state":"waiting","summary":"Needs review","action":null}"#
+        let r = try GemmaResponse.parse(raw)
+        XCTAssertEqual(r.state, "waiting")
+    }
+
+    func testParseEmptyThrows() {
+        XCTAssertThrowsError(try GemmaResponse.parse("   \n  ")) { err in
+            XCTAssertEqual(err as? GemmaResponse.ParseError, .empty)
+        }
+    }
+
+    func testParseNoJSONThrows() {
+        XCTAssertThrowsError(try GemmaResponse.parse("just some prose, no json here")) { err in
+            XCTAssertEqual(err as? GemmaResponse.ParseError, .noJSON)
+        }
+    }
+
+    func testParseMissingRequiredFieldThrowsDecodeFailed() {
+        // "state" missing — decode should fail and surface as .decodeFailed
+        XCTAssertThrowsError(try GemmaResponse.parse(#"{"summary":"oops"}"#)) { err in
+            switch err as? GemmaResponse.ParseError {
+            case .some(.decodeFailed): break
+            default: XCTFail("Expected .decodeFailed, got \(err)")
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func decode(_ json: String) throws -> GemmaResponse {
