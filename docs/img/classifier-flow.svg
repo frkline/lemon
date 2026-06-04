@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" role="img" aria-labelledby="title desc">
+  <title id="title">The Gemma classifier flow</title>
+  <desc id="desc">Pane log feeds into Gemma 4, which returns a four-state JSON. Actions are gated through an allowlist.</desc>
+
+  <defs>
+    <style>
+      .label   { font: 700 11px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.14em; fill: #ef6a48; text-transform: uppercase; }
+      .title   { font: 600 22px "Fraunces", "Newsreader", Georgia, serif; fill: #1a1714; letter-spacing: -0.01em; }
+      .title-it{ font-style: italic; fill: #b48a17; font-weight: 400; }
+      .body    { font: 400 13px "JetBrains Mono", ui-monospace, monospace; fill: #1a1714; }
+      .muted   { font: 400 12px "JetBrains Mono", ui-monospace, monospace; fill: #45403b; }
+      .small   { font: 400 10.5px "JetBrains Mono", ui-monospace, monospace; fill: #45403b; letter-spacing: 0.04em; }
+      .stroke  { fill: none; stroke: #1a1714; stroke-width: 1.5; }
+      .rule    { fill: none; stroke: #c9bea8; stroke-width: 1; }
+      .dashed  { fill: none; stroke: #ef6a48; stroke-width: 1.2; stroke-dasharray: 4 3; }
+      .arrow   { fill: none; stroke: #1a1714; stroke-width: 1.5; marker-end: url(#arr); }
+      .gate    { fill: none; stroke: #ef6a48; stroke-width: 1.5; }
+      .lemon-fill { fill: #f7c842; }
+      .ink-fill   { fill: #1a1714; }
+      .paper-fill { fill: #ece4d3; }
+      .moss-fill  { fill: #3a7a4a; }
+      .coral-fill { fill: #ef6a48; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1a1714"/>
+    </marker>
+  </defs>
+
+  <!-- ============ INPUT COLUMN (left) ============ -->
+  <g transform="translate(40, 60)">
+    <text class="label" x="0" y="0">Input</text>
+    <text class="title" x="0" y="28">Pane log</text>
+
+    <!-- Stacked log lines representation -->
+    <rect x="0" y="48" width="200" height="170" class="stroke paper-fill"/>
+    <g class="muted" transform="translate(12, 70)">
+      <text>$ claude --enable-auto</text>
+      <text y="18">Reading View.swift…</text>
+      <text y="36">✓ updated tokens</text>
+      <text y="54">$ git diff</text>
+      <text y="72">…</text>
+      <text y="90" fill="#ef6a48">Trust this MCP server?</text>
+      <text y="108" fill="#ef6a48">[y/N] █</text>
+    </g>
+    <text class="small" x="0" y="240">tail 100 lines · from tmux pipe-pane</text>
+  </g>
+
+  <!-- Triggers (below input) -->
+  <g transform="translate(40, 360)">
+    <text class="label" x="0" y="0">Triggers</text>
+    <g class="muted" transform="translate(0, 22)">
+      <text>· 2 min pane silence</text>
+      <text y="20">· session terminates</text>
+    </g>
+  </g>
+
+  <!-- Arrow: input → classifier -->
+  <path d="M 244 145 Q 285 145, 320 145" class="arrow"/>
+  <text class="small" x="244" y="135">pane log</text>
+
+  <!-- ============ CLASSIFIER (middle) ============ -->
+  <g transform="translate(320, 60)">
+    <text class="label" x="0" y="0">The classifier</text>
+    <text class="title" x="0" y="28">Gemma 4 <tspan class="title-it">on device</tspan></text>
+
+    <!-- Big classifier box with lemon tint -->
+    <rect x="0" y="48" width="240" height="170" class="stroke" fill="#fff8df"/>
+    <g transform="translate(20, 80)">
+      <text class="body" font-weight="700">Gemma 4 · E4B / E2B</text>
+      <text class="muted" y="22">SwiftLM build b648</text>
+      <text class="muted" y="40">MLX · Metal · ~5 GB GPU</text>
+
+      <!-- Token decoration -->
+      <g transform="translate(0, 60)">
+        <line x1="0" y1="0" x2="200" y2="0" class="rule"/>
+        <text class="small" y="20">prompt: 4-shot examples + log tail</text>
+        <text class="small" y="38">response_format: json_object</text>
+        <text class="small" y="56">temperature: 0.1</text>
+      </g>
+    </g>
+    <text class="small" x="0" y="240">~6-18 tok/s · classify in &lt; 5 s</text>
+  </g>
+
+  <!-- Arrow: classifier → output -->
+  <path d="M 564 145 Q 600 145, 635 145" class="arrow"/>
+  <text class="small" x="565" y="135">one JSON</text>
+
+  <!-- ============ OUTPUT (right) ============ -->
+  <g transform="translate(635, 60)">
+    <text class="label" x="0" y="0">Output</text>
+    <text class="title" x="0" y="28">Schema</text>
+
+    <!-- Output schema card -->
+    <rect x="0" y="48" width="200" height="170" class="stroke paper-fill"/>
+    <g transform="translate(14, 70)">
+      <text class="body" font-weight="700">{</text>
+      <text class="muted" x="10" y="18">"state":</text>
+      <text class="muted" x="62" y="18" fill="#3a7a4a">running</text>
+      <text class="muted" x="10" y="34">       <tspan fill="#ef6a48">| blocked_prompt</tspan></text>
+      <text class="muted" x="10" y="50">       <tspan fill="#ef6a48">| stuck</tspan></text>
+      <text class="muted" x="10" y="66">       <tspan fill="#ef6a48">| waiting</tspan></text>
+      <text class="muted" x="10" y="82">       <tspan fill="#3a7a4a">| complete</tspan></text>
+      <text class="muted" x="10" y="100">"summary":</text>
+      <text class="muted" x="10" y="118">  "&lt;one sentence&gt;"</text>
+      <text class="muted" x="10" y="134">"action": …</text>
+      <text class="body" font-weight="700" x="0" y="150">}</text>
+    </g>
+  </g>
+
+  <!-- Arrow down: output → actions -->
+  <path d="M 735 250 L 735 295" class="arrow"/>
+
+  <!-- ============ ACTIONS (bottom) ============ -->
+  <g transform="translate(335, 305)">
+    <text class="label" x="0" y="0">Action</text>
+
+    <!-- send_keys with allowlist gate -->
+    <g transform="translate(0, 14)">
+      <rect x="0" y="0" width="220" height="78" class="stroke paper-fill"/>
+      <text class="body" font-weight="700" x="14" y="22">send_keys</text>
+      <text class="small" x="14" y="40">gated through allowlist:</text>
+      <g transform="translate(14, 54)">
+        <rect x="0" y="-12" width="178" height="22" class="gate"/>
+        <text class="body" x="6" y="4" fill="#ef6a48">y · n · yes · no · 1–9</text>
+      </g>
+    </g>
+    <text class="small" x="0" y="108">Out-of-list keys are dropped.</text>
+
+    <!-- notify_user -->
+    <g transform="translate(255, 14)">
+      <rect x="0" y="0" width="220" height="78" class="stroke paper-fill"/>
+      <text class="body" font-weight="700" x="14" y="22">notify_user</text>
+      <text class="small" x="14" y="40">raises 🍋 Waiting label</text>
+      <text class="small" x="14" y="56">in Linear; phone push fires</text>
+      <text class="small" x="14" y="72">via claude --remote-control.</text>
+    </g>
+    <text class="small" x="255" y="108">Default when in doubt.</text>
+  </g>
+
+  <!-- Decorative dashed rule at very top - chapter marker -->
+  <line x1="40" y1="32" x2="120" y2="32" class="rule"/>
+  <line x1="320" y1="32" x2="400" y2="32" class="rule"/>
+  <line x1="635" y1="32" x2="715" y2="32" class="rule"/>
+
+  <!-- Footer rule + figure marker -->
+  <line x1="40" y1="490" x2="840" y2="490" class="rule"/>
+  <text class="small" x="40" y="508">FIG. 1 · CLASSIFIER FLOW</text>
+  <text class="small" x="840" y="508" text-anchor="end">2 MIN SILENCE → 1 JSON → 1 GATED ACTION</text>
+</svg>

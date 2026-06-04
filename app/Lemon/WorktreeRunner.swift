@@ -414,8 +414,17 @@ final class WorktreeRunner: @unchecked Sendable {
         let launcherPath = "/tmp/lemon-launch-\(identifier.lowercased()).sh"
         let mcpFlag      = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
 
+        // Source common shell profiles so PATH includes Homebrew, npm-global,
+        // pyenv shims, etc. Same root cause as the runSync(zsh -l -c) fix:
+        // `claude` is typically installed via brew or npm -g, which puts it
+        // somewhere non-default-bash PATH won't find. Without this the launch
+        // dies immediately with "claude: command not found" the moment tmux
+        // boots the launcher.
         let launcher = """
         #!/bin/bash
+        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
+        [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
+        [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
         cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control
         echo $? > '\(sentinelPath)'
         """
