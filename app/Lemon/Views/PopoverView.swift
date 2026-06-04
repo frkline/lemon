@@ -212,20 +212,9 @@ struct PopoverView: View {
 
     private var listFooter: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            HStack {
-                if orchestrator.isPolling {
-                    Text("polling…")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                } else if let next = nextPollIn {
-                    Text("next poll in \(next)s")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                } else if orchestrator.lastPolledAt != nil {
-                    Text("polling soon")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
+            HStack(spacing: 6) {
+                pollDot
+                pollText
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.borderless)
@@ -234,6 +223,31 @@ struct PopoverView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+        }
+    }
+
+    private var pollDot: some View {
+        Circle()
+            .fill(orchestrator.isPolling ? LD.lemon : Color.secondary)
+            .frame(width: 5, height: 5)
+            .opacity(orchestrator.isPolling ? 1 : 0.5)
+            .animation(LD.smooth, value: orchestrator.isPolling)
+    }
+
+    @ViewBuilder
+    private var pollText: some View {
+        if orchestrator.isPolling {
+            Text("polling…")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        } else if let next = nextPollIn {
+            Text("next poll in \(next)s")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        } else {
+            Text(orchestrator.lastPolledAt == nil ? "connecting…" : "polling soon")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
         }
     }
 
