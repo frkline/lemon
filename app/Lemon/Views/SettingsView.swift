@@ -6,12 +6,20 @@ extension Notification.Name {
 }
 
 struct SettingsView: View {
+    @Environment(Orchestrator.self) private var orchestrator
+
     @State private var linearApiKey = ""
     @State private var repos: [WorkspaceRepo] = []
     @State private var saved = false
     @State private var editingWorkspace = false
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var aiTestState: AITestState = .idle
+
+    // MCP server state — mirrors UserDefaults but lets the toggle drive
+    // start/stop on change. The port text field is also a UserDefault.
+    @AppStorage("lemon-mcp-enabled") private var mcpEnabled = false
+    @AppStorage("lemon-mcp-port")    private var mcpPort   = Int(LemonMCPServer.defaultPort)
+    @State private var mcpCopyHint: String?
 
     enum AITestState: Equatable {
         case idle
@@ -29,6 +37,7 @@ struct SettingsView: View {
                     linearSection
                     workspaceSection
                     localAISection
+                    mcpSection
                 }
                 .padding(24)
                 .padding(.bottom, 4)
@@ -36,7 +45,7 @@ struct SettingsView: View {
             Divider()
             settingsFooter
         }
-        .frame(minHeight: 680)
+        .frame(minHeight: 780)
         .onAppear { load() }
     }
 
@@ -207,6 +216,140 @@ struct SettingsView: View {
                 }
             }
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        }
+    }
+
+    // MARK: - MCP server section
+    //
+    // Opt-in HTTP+JSON-RPC server that exposes Lemon's session state and
+    // control surface to Claude Code (or any MCP-speaking client). Localhost
+    // bind only — anyone on this Mac who can reach loopback can hit it.
+    // Same threat model as Lemon's running process; we don't add a bearer
+    // token to keep setup friction at zero.
+    private var mcpSection: some View {
+        let running = LemonMCPServer.shared.isRunning
+        let endpoint = "http://127.0.0.1:\(mcpPort)/mcp"
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                sectionLabel("MCP Server")
+                Spacer()
+                Text("Claude Code · recursive mode")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(LD.citrus)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(LD.lemon.opacity(0.18), in: RoundedRectangle(cornerRadius: LD.r3))
+            }
+
+            VStack(spacing: 0) {
+                // Toggle row
+                HStack(spacing: 12) {
+                    iconBox("network", tint: running ? LD.lemon : .secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Expose to Claude Code")
+                            .font(.system(size: 13))
+                        Text(running
+                             ? "Running on \(endpoint) — localhost only"
+                             : "Off — flip on to let another Claude observe and steer Lemon sessions")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("", isOn: $mcpEnabled)
+                        .labelsHidden()
+                        .onChange(of: mcpEnabled) { _, enabled in
+                            applyMcpToggle(enabled: enabled)
+                        }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+
+                if mcpEnabled {
+                    Divider().padding(.leading, 54)
+
+                    // Port row
+                    HStack(spacing: 12) {
+                        iconBox("number", tint: .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Port").font(.system(size: 13))
+                            Text("Default 8765 — change requires a quick toggle off/on")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 8)
+                        TextField("8765", value: $mcpPort, format: .number.grouping(.never))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                            .frame(width: 80)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+
+                    Divider().padding(.leading, 54)
+
+                    // Copy config row
+                    HStack(spacing: 12) {
+                        iconBox("doc.on.clipboard", tint: .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Add to Claude Code")
+                                .font(.system(size: 13))
+                            if let hint = mcpCopyHint {
+                                Text(hint)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(LD.statusDone)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else {
+                                Text("Copies a JSON snippet for ~/.claude.json")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Button("Copy", action: copyMcpConfig)
+                            .buttonStyle(GhostButtonStyle())
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                }
+            }
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        }
+    }
+
+    private func applyMcpToggle(enabled: Bool) {
+        let port = UInt16(exactly: max(1024, min(mcpPort, 65535))) ?? LemonMCPServer.defaultPort
+        if enabled {
+            do {
+                try LemonMCPServer.shared.start(port: port)
+                LemonMCPTools.registerAll(server: LemonMCPServer.shared, orchestrator: orchestrator)
+            } catch {
+                mcpEnabled = false  // bind failed — reflect the actual state
+                mcpCopyHint = "Failed to start: \(error.localizedDescription)"
+            }
+        } else {
+            LemonMCPServer.shared.stop()
+            mcpCopyHint = nil
+        }
+    }
+
+    private func copyMcpConfig() {
+        let snippet = """
+        {
+          "mcpServers": {
+            "lemon": {
+              "type": "http",
+              "url": "http://127.0.0.1:\(mcpPort)/mcp"
+            }
+          }
+        }
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(snippet, forType: .string)
+        mcpCopyHint = "Copied — paste into ~/.claude.json"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if mcpCopyHint == "Copied — paste into ~/.claude.json" { mcpCopyHint = nil }
         }
     }
 
