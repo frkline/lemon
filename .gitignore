@@ -9,3 +9,4 @@ app/build/
 app/Lemon.xcodeproj/project.xcworkspace/xcuserdata/
 app/Lemon/LemonWorker/
 *.profraw
+.claude/*.lock
