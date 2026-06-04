@@ -111,7 +111,6 @@ final class Orchestrator {
 
     private func bootstrapLabels(apiKey: String) async {
         guard !labelsBootstrapped else { return }
-        labelsBootstrapped = true
         do {
             let teams = try await linear.fetchTeams(apiKey: apiKey)
             Logger.orchestrator.info("Bootstrapping Lemon labels for \(teams.count) team(s)")
@@ -121,9 +120,16 @@ final class Orchestrator {
                     _ = try? await linear.ensureLabelId(name: label, teamId: team.id, apiKey: apiKey)
                 }
             }
+            // Mark complete only after the fetch + ensure loop ran. The previous
+            // code set this guard before the network call, so a transient
+            // fetchTeams failure on first launch would permanently skip the
+            // eager bootstrap. WorktreeRunner.run still calls ensureLabelId
+            // lazily, but the eager pass is what makes onboarding's "Labels
+            // ready in N teams" indicator green; better to retry on next poll.
+            labelsBootstrapped = true
             Logger.orchestrator.info("Label bootstrap complete")
         } catch {
-            Logger.orchestrator.error("Label bootstrap failed: \(error)")
+            Logger.orchestrator.error("Label bootstrap failed: \(error) — will retry on next poll")
         }
     }
 
