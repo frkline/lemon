@@ -6,6 +6,8 @@ struct PopoverView: View {
     @Environment(AppNavigation.self) private var nav
     @State private var pulse = false
     @State private var joinCopied = false
+    @State private var stopConfirmingId: UUID? = nil
+    @State private var stopConfirmTask: Task<Void, Never>? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -362,9 +364,23 @@ struct PopoverView: View {
                 }
                 .buttonStyle(GhostButtonStyle())
 
-                Button("Stop") {
-                    orchestrator.stopSession(session)
-                    withAnimation(LD.slide) { nav.showList() }
+                Button(stopConfirmingId == session.id ? "Confirm Stop" : "Stop") {
+                    if stopConfirmingId == session.id {
+                        stopConfirmTask?.cancel()
+                        stopConfirmingId = nil
+                        orchestrator.stopSession(session)
+                        withAnimation(LD.slide) { nav.showList() }
+                    } else {
+                        withAnimation(LD.snappy) { stopConfirmingId = session.id }
+                        stopConfirmTask?.cancel()
+                        let sessionId = session.id
+                        stopConfirmTask = Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(3))
+                            guard !Task.isCancelled,
+                                  stopConfirmingId == sessionId else { return }
+                            withAnimation(LD.smooth) { stopConfirmingId = nil }
+                        }
+                    }
                 }
                 .buttonStyle(LemonButtonStyle(isDestructive: true))
             }
