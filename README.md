@@ -15,7 +15,7 @@
 
 ### → [**lemon.living**](https://lemon.living) ←
 
-[**Install**](#install) · [**How it works**](#how-it-works) · [**The 🍋 workflow**](#the--workflow) · [**Stack**](#stack--gratitude) · [**Releases**](https://github.com/frkline/lemon/releases)
+[**Install**](#install) · [**Workflow**](#workflow) · [**Recursive mode**](#recursive-mode-let-claude-monitor-lemon) · [**Stack**](#stack--gratitude) · [**Releases**](https://github.com/frkline/lemon/releases)
 
 </div>
 
@@ -151,6 +151,45 @@ Both pulled inside the wizard. Nothing is built from source.
 
 > [!NOTE]
 > A **Self-test** button in Settings boots the runner, fires one `classify()` call, and reports the actual response. On failure, the error tooltip carries the `log stream` predicate ready to paste into Console.app.
+
+## Recursive mode: let Claude monitor Lemon
+
+Lemon can expose its session state and control surface to Claude Code over an MCP server. Flip the toggle in **Settings → MCP Server**, copy the snippet, paste it into `~/.claude.json`, and now a separate `claude` session can ask things like *"what is HRP-37 doing, and why has it been silent for 40 minutes?"* — pulling pane logs and Gemma verdicts from the live Lemon process.
+
+```json
+{
+  "mcpServers": {
+    "lemon": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+Or launch Lemon with the server already on:
+
+```sh
+LEMON_ENABLE_MCP=1 open /Applications/Lemon.app
+```
+
+**Tools the server exposes:**
+
+| Read | What |
+|---|---|
+| `list_sessions` | Active + recent sessions with status, identifiers, timing |
+| `get_session` | One session in detail — pane log tail, last Gemma summary, labels, PR URL |
+| `get_pane_log` | Raw tmux pane output for a session |
+| `get_swiftlm_log` | SwiftLM stderr/stdout tail + current AI state |
+
+| Control | What |
+|---|---|
+| `force_classify` | Run Gemma on the current pane log right now — skip the 2 min silence wait |
+| `send_keys` | Push keystrokes to a session's tmux pane (bypasses the safety allowlist) |
+| `stop_session` | Cancel an active session |
+
+> [!NOTE]
+> Bind is **127.0.0.1 only** — no auth. Same threat model as Lemon's running process: anyone on this Mac can reach it. If you don't want it on, the toggle is off by default.
 
 ## Stack & gratitude
 

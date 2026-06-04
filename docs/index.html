@@ -1122,6 +1122,60 @@
     </div>
   </section>
 
+  <!-- ============== RECURSIVE MODE ============== -->
+  <section aria-labelledby="recursive-h">
+    <span class="eyebrow">Recursive mode</span>
+    <h2 id="recursive-h" class="section-heading">Let Claude monitor Lemon.</h2>
+    <p class="section-lede">
+      Flip a toggle and Lemon exposes its session state to Claude Code
+      over MCP. Now a second <code>claude</code> can ask
+      <em>&ldquo;what is HRP&ndash;37 doing, and why has it been
+      silent for forty minutes?&rdquo;</em> &mdash; and read the pane
+      log, the Gemma verdicts, or push a key to unstick it.
+    </p>
+
+    <div class="spread" style="margin-top: 36px; grid-template-columns: 5fr 4fr;">
+      <div class="spread-text">
+        <p>
+          Settings &rarr; <strong>MCP Server</strong> &rarr; toggle on.
+          Lemon binds <code>127.0.0.1</code>, registers a small surface
+          of read &amp; control tools, and shows you the snippet to
+          paste into <code>~/.claude.json</code>:
+        </p>
+        <pre style="background:var(--paper-deep);border:1px solid var(--rule);padding:14px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;border-radius:4px;">{
+  "mcpServers": {
+    "lemon": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}</pre>
+        <p style="margin-top: 16px;">
+          Power users can launch with the server already on:
+        </p>
+        <pre style="background:var(--paper-deep);border:1px solid var(--rule);padding:10px;font-family:var(--mono);font-size:12px;border-radius:4px;">LEMON_ENABLE_MCP=1 open /Applications/Lemon.app</pre>
+      </div>
+
+      <div class="panel">
+        <div class="panel-label">Tool surface</div>
+        <h3 style="margin-bottom: 12px;">What Claude can do</h3>
+        <ul style="font-size: 13px; line-height: 1.7;">
+          <li><strong>list_sessions</strong> &mdash; what&rsquo;s running</li>
+          <li><strong>get_session</strong> &mdash; full state of one session</li>
+          <li><strong>get_pane_log</strong> &mdash; raw tmux output</li>
+          <li><strong>get_swiftlm_log</strong> &mdash; classifier server tail</li>
+          <li><strong>force_classify</strong> &mdash; run Gemma now, skip the silence wait</li>
+          <li><strong>send_keys</strong> &mdash; push keystrokes (bypasses the safety allowlist)</li>
+          <li><strong>stop_session</strong> &mdash; cancel a wedged run</li>
+        </ul>
+        <p style="margin-top: 16px; font-size: 12px; color: var(--ink-mute);">
+          Bind is loopback only &mdash; no auth, same threat model as
+          Lemon&rsquo;s running process. Off by default.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============== PRIVACY / TRUST ============== -->
   <section aria-labelledby="trust-h">
     <span class="eyebrow">What it does &amp; doesn&rsquo;t do</span>
