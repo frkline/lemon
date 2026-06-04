@@ -19,9 +19,9 @@
 
 </div>
 
----
+<br/>
 
-Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer."  
+Every coding-agent product I tried wanted to be **the agent** — wrap Claude in their UI, route the API through their servers, sell me an "AI developer."
 
 I already have Claude Code, and I already do the interesting parts: answering Claude's clarifying questions, shaping the plan, reviewing the diff. What I *didn't* want to keep doing by hand was the workflow bureaucracy around it — scanning Linear for what's next, spinning up worktrees, dropping in the right context, transitioning labels, posting the PR comment back.
 
@@ -29,28 +29,28 @@ I already have Claude Code, and I already do the interesting parts: answering Cl
 <kbd>
 <img src="docs/img/live-list.png" alt="The Lemon popover with one active session" width="540">
 </kbd>
-</div>  
+</div>
+
+<br/>
 
 Lemon is that menu-bar glue. It runs `claude` (your login, your machine), watches the pane with a tiny on-device Gemma 4 classifier so you don't have to babysit every "Trust this MCP server?" prompt, and routes the result back to Linear.
 
 > [!IMPORTANT]
 > **Lemon isn't an AI agent product.** The intelligence is Claude Code; the judgment is yours. Lemon handles the workflow bureaucracy around your session so you stay focused on the parts that need a person.
 
----
-
 ## What Lemon is
 
 A **menu-bar orchestrator** that decides when to start Claude Code. **Glue** between your Linear queue and your Claude Code CLI. A **local Gemma 4 classifier** that auto-accepts obvious confirmations and unsticks dumb prompts. Built for **one developer** running it on their own silicon (❤️ Mac mini).
 
 <div align="center">
-    <img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="300">
+<img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="300">
 </div>
+
+<br/>
 
 ## What Lemon isn't
 
-Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a competitor to Anthropic, Linear, or anything else in your stack. Not an asignee developer-replacement agent for your team to dump issues onto.
-
----
+Not an AI agent product — the agent is Claude Code. Not a Claude reseller — Lemon never proxies your API traffic. Not multi-tenant SaaS. Not a competitor to Anthropic, Linear, or anything else in your stack. Not an assignee developer-replacement agent for your team to dump issues onto.
 
 ## Install
 
@@ -81,8 +81,6 @@ Build target **Lemon** in Xcode. First launch runs the onboarding wizard, which 
 
 </details>
 
----
-
 ## How it works
 
 ```mermaid
@@ -107,8 +105,6 @@ flowchart LR
 
 Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch.
 
----
-
 ## The 🍋 workflow
 
 <div align="center">
@@ -116,6 +112,8 @@ Reply to the Lemon comment on a completed issue to re-trigger a revision pass �
 <br/>
 <sub><i>For Linear, who already knows what work needs doing.</i></sub>
 </div>
+
+<br/>
 
 Lemon's entire surface in your Linear workspace is **four labels** and **one comment**.
 
@@ -135,8 +133,6 @@ Labels are auto-provisioned in every team you have access to on first launch. Cu
 >
 > Lemon and Gemma absorbed the routine bits so the only thing that reaches you is the one decision that actually needs you.
 
----
-
 ## Local AI, by design
 
 <div align="center">
@@ -144,6 +140,8 @@ Labels are auto-provisioned in every team you have access to on first launch. Cu
 <img src="docs/img/setup-3-localai.png" alt="The Local AI onboarding step with Gemma model and SwiftLM runner both reporting ready" width="380">
 </kbd>
 </div>
+
+<br/>
 
 The silence detector, the auto-accept for obvious confirmations, the nudge when Claude gets stuck on a dumb prompt — all of it runs **on your Mac's GPU** via [MLX](https://github.com/ml-explore/mlx). No round-trip to a cloud classifier. No second API key. No second monthly bill. The whole pattern is only possible because Apple Silicon is genuinely good at this kind of inference, and Apple's MLX team has made it accessible to the rest of us.
 
@@ -156,23 +154,6 @@ Both pulled inside the wizard. Nothing is built from source.
 
 > [!NOTE]
 > A **Self-test** button in Settings boots the runner, fires one `classify()` call, and reports the actual response. On failure, the error tooltip carries the `log stream` predicate ready to paste into Console.app.
-
----
-
-## Nest `/loop` inside
-
-Lemon is itself a hand-coded `/loop` — *goal = ship a PR for this Linear issue*. The Orchestrator polls, Gemma watches the pane, the session keeps going until 🍋 Complete fires.
-
-That same pattern is broadly useful **inside** a session, for work that benefits from iteration over one-shot:
-
-> **Polish** UI / docs / a tricky code path · **Review** diffs, PRs, modules · **Refactor** when you can't enumerate every call site upfront · **Bug-hunt** — fix one, run tests, find the next · **Backfill tests** · **Explore** when the next move depends on what the last one told you
-
-Tell Claude to lean on `/loop` in your team's `LEMON.md` when the issue calls for it. You get nested iteration: Lemon iterates the Linear queue, Claude iterates inside each ticket.
-
-> [!TIP]
-> *This README, the docs site, and most of the bug fixes in this repo were built by running `/loop` against an open-ended "drive Lemon to fully baked" goal.*
-
----
 
 ## Stack & gratitude
 
@@ -187,8 +168,6 @@ None of this is from scratch.
 | **Surface** | [Linear](https://linear.app) | The issue tracker that's the entire Lemon UI for "what's next?" |
 
 **More silicon than you know what to do with?** [oMLX](https://omlx.ai) — same on-device idea, scaled up to Mac Studio's larger MoE models.
-
----
 
 <details>
 <summary><b>Privacy & egress</b> — what flows where</summary>
@@ -229,8 +208,6 @@ UI iteration happens via the smoke test (`scripts/smoke-test.sh`), which drives 
 See [`CLAUDE.md`](CLAUDE.md) for the full architecture, smoke loop, and contributor guide.
 
 </details>
-
----
 
 ## License
 
