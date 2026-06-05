@@ -2,7 +2,7 @@
 
 # 🍋 Lemon
 
-**A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device.**
+**A personal workflow orchestration menu-bar app for Claude Code + Linear or GitHub Issues, leveraging Gemma 4 on device.**
 
 <sub><i>Made for the Mac mini sitting on your desk.</i></sub>
 
@@ -33,7 +33,7 @@ I already have Claude Code, and I already do the interesting parts: answering Cl
 
 <br/>
 
-Lemon is a **menu-bar orchestrator** that decides when to start Claude Code. It's **Glue** between your Linear queue and your Claude Code CLI. Includes a **local Gemma 4 classifier** that auto-accepts obvious confirmations and gently nudges past routine prompts so the session keeps moving.  
+Lemon is a **menu-bar orchestrator** that decides when to start Claude Code. It's **Glue** between your issue tracker (Linear or GitHub Issues) and your Claude Code CLI. Includes a **local Gemma 4 classifier** that auto-accepts obvious confirmations and gently nudges past routine prompts so the session keeps moving.  
 
 You are in the loop with Claude's **Remote Control** (or joining existing sessions) to answer the **critical things** that need your attention. Built for **one developer** running it on their own silicon (❤️ Mac mini) on their own Linear inbox.
 
@@ -85,7 +85,7 @@ Build target **Lemon** in Xcode. First launch runs the onboarding wizard, which 
 
 <br/>
 
-Lemon's entire surface in your Linear workspace is **four labels** and **one comment**.
+Lemon's entire surface — in your Linear workspace **or your GitHub repos** — is **four labels** and **one comment**.
 
 | Label | Set by | Meaning |
 |---|---|---|
@@ -94,7 +94,16 @@ Lemon's entire surface in your Linear workspace is **four labels** and **one com
 | `🍋 Waiting` | Claude / Gemma | Paused, needs your input |
 | `🍋 Complete` | Claude | PR open, Lemon report posted |
 
-Labels are auto-provisioned in every team you have access to on first launch. Custom 🍋 labels your Linear admin already created are adopted (fetch-or-create).
+Labels are auto-provisioned per pair on first poll — for Linear that's every team you can access; for GitHub it's each configured `owner/repo`. Custom 🍋 labels you (or your admin) created already are adopted (fetch-or-create).
+
+### Sources
+
+Configure as many `(source, workspace)` pairs as you need (capped at 10), mix and match per pair:
+
+- **Linear** — Personal API key from `linear.app/settings → API`. Each pair maps a team prefix (e.g. `HRP`) to a local repo or folder.
+- **GitHub Issues** — Classic or fine-grained PAT with `repo` scope (`github.com/settings/tokens`). Each pair maps `owner/repo` to a local repo or folder.
+
+Both polled on the same 15 s / 45 s cadence. Webhooks are tracked in [#4](https://github.com/frkline/lemon/issues/4) — when that lands, the trigger source flips but everything downstream stays the same.
 
 > [!TIP]
 > **When it calls for you, it calls for you — wherever you are.**
@@ -107,7 +116,7 @@ Labels are auto-provisioned in every team you have access to on first launch. Cu
 
 ```mermaid
 flowchart LR
-    L([Linear queue])
+    L([Linear · GitHub queues])
     O[Lemon.app<br/><sub>menu bar</sub>]
     T[claude in tmux<br/><sub>your CLI</sub>]
     G[Gemma 4<br/><sub>SwiftLM + MLX</sub>]
@@ -122,13 +131,13 @@ flowchart LR
     T <-.->|"📱 Claude iOS push<br/>💻 or Join the tmux"| U
 ```
 
-1. **You label** a Linear issue with 🍋.
-2. **Orchestrator** picks it up next poll (15 s active, 45 s idle), spins up a git worktree at `/tmp/lemon-{id}`, writes `LEMON_CONTEXT.md` with the issue body + your team's `LEMON.md` + completion checklist.
+1. **You label** an issue (Linear or GitHub) with 🍋.
+2. **Orchestrator** picks it up next poll (15 s active, 45 s idle), spins up a git worktree at `/tmp/lemon-{slug}`, writes `LEMON_CONTEXT.md` with the issue body + your team's `LEMON.md` + completion checklist.
 3. A **terminal window** opens running `claude --permission-mode auto --remote-control` (iTerm2 preferred, Terminal.app fallback).
 4. **Gemma 4** runs locally via SwiftLM + MLX. After 2 minutes of pane silence, it sees the log tail and decides: auto-accept a confirmation (`y / n / Enter / Escape / 1-9`, through a hard allowlist), or raise 🍋 Waiting if it's ambiguous.
-5. When Claude sets **🍋 Complete**, Lemon posts the PR link + summary to Linear, then cleans up.
+5. When Claude sets **🍋 Complete**, Lemon posts the PR link + summary back to the originating issue (Linear comment or GitHub comment), then cleans up.
 
-Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch.
+Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch. Works the same on either source.
 
 ## Local AI, by design
 

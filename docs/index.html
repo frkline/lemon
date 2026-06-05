@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Lemon — Run Claude Code from your Linear queue.</title>
-<meta name="description" content="A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device. Tag an issue with 🍋, get a PR." />
-<meta property="og:title" content="Lemon — Run Claude Code from your Linear queue." />
-<meta property="og:description" content="A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device." />
+<title>Lemon — Run Claude Code from your Linear or GitHub queue.</title>
+<meta name="description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device. Tag an issue with 🍋, get a PR." />
+<meta property="og:title" content="Lemon — Run Claude Code from your Linear or GitHub queue." />
+<meta property="og:description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker (Linear or GitHub), leveraging Gemma 4 on device." />
 <meta name="theme-color" content="#F7C842" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍋</text></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -888,8 +888,8 @@
       <div class="hero-side reveal d2">
         <h1 id="hero-h" class="hero-stand">
           A personal workflow orchestration menu-bar app for
-          <strong>Claude Code</strong> + <strong>Linear</strong>,
-          leveraging <strong>Gemma 4</strong> on device.
+          <strong>Claude Code</strong> + <strong>your issue tracker</strong>
+          (Linear or GitHub), leveraging <strong>Gemma 4</strong> on device.
         </h1>
         <p class="hero-coda">
           <em>Made for the Mac mini sitting on your desk.</em>
@@ -904,8 +904,8 @@
     </div>
 
     <div class="dateline reveal d3">
-      <span><b>Issue:</b> No. 1 · Menu-bar glue for Claude Code + Linear</span>
-      <span><b>Stack:</b> SwiftUI · Linear API · Claude Code · MLX</span>
+      <span><b>Issue:</b> No. 1 · Menu-bar glue for Claude Code + your tracker</span>
+      <span><b>Stack:</b> SwiftUI · Linear API · GitHub REST · Claude Code · MLX</span>
       <span><b>License:</b> Apache 2.0</span>
     </div>
   </section>
@@ -915,10 +915,7 @@
     <span class="eyebrow">The 🍋 Workflow</span>
     <h2 id="lifecycle-h" class="section-heading">Four labels, one feedback loop.</h2>
     <p class="section-lede">
-      Lemon&rsquo;s entire surface in your Linear workspace is four
-      labels and one comment. The popover just shows you what&rsquo;s
-      happening; the truth lives in Linear, where your team already
-      works.
+      Lemon&rsquo;s entire surface — in your Linear workspace <strong>or your GitHub repos</strong> — is four labels and one comment. The popover just shows you what&rsquo;s happening; the truth lives in your issue tracker, where your team already works.
     </p>
 
     <div class="lifecycle">
@@ -927,7 +924,7 @@
         <div class="chip">🍋</div>
         <div class="label">Trigger</div>
         <h3>You tag it.</h3>
-        <p>Add the 🍋 label to any issue in your workspace. Lemon polls Linear every 15 to 45 seconds and picks it up.</p>
+        <p>Add the 🍋 label to any issue (Linear or GitHub). Lemon polls every 15 to 45 seconds per configured pair and picks it up.</p>
       </article>
       <article class="step reveal d1">
         <span class="num">02</span>
@@ -948,7 +945,7 @@
         <div class="chip done">🍋 Complete</div>
         <div class="label">Shipped</div>
         <h3>A PR appears.</h3>
-        <p>Lemon posts a Linear comment with the PR link and a one-paragraph summary. Reply to the comment to request revisions.</p>
+        <p>Lemon posts a comment on the originating issue (Linear or GitHub) with the PR link and a one-paragraph summary. Reply to the comment to request revisions — works the same on either source.</p>
       </article>
     </div>
   </section>
@@ -957,7 +954,7 @@
   <aside class="interlude" aria-label="Lemon loves Linear">
     <figure class="dedication">
       <img src="img/lemon-linear.png" alt="A lemon, a heart, the Linear mark — Lemon loves Linear." />
-      <figcaption>For Linear, who already knows what work needs doing.</figcaption>
+      <figcaption>For Linear, who already knows what work needs doing. <span style="opacity: 0.7;">(GitHub Issues works the same way — same labels, same comment loop, same shape.)</span></figcaption>
     </figure>
   </aside>
 
@@ -977,10 +974,10 @@
           just sit through. Lemon orchestrates those out of your day.
         </p>
         <p>
-          And it makes <strong>Linear the surface</strong>, not a separate
-          dashboard. You&rsquo;ve been triaging there all morning anyway.
-          Tag the ones you want kickstarted, get back to the work that
-          actually needs your head.
+          And it makes <strong>your issue tracker the surface</strong>, not a separate
+          dashboard. Linear, GitHub Issues, or both — you&rsquo;ve been triaging
+          there all morning anyway. Tag the ones you want kickstarted, get back
+          to the work that actually needs your head.
         </p>
         <p>
           And you stay <strong>in the driver&rsquo;s seat for the questions that actually matter.</strong>
