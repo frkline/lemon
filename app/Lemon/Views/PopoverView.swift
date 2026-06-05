@@ -232,17 +232,111 @@ struct PopoverView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 5) {
-            Text("No active sessions")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text("Label an issue with 🍋 to start")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+        let keychain = KeychainStore.shared
+        let identities = keychain.identities
+        let workspaces = keychain.workspaces
+
+        return VStack(spacing: 14) {
+            if identities.isEmpty || workspaces.isEmpty {
+                // Genuinely nothing connected — point at Settings.
+                unconfiguredEmptyState
+            } else {
+                // Configured but no triggers yet — show what's being watched
+                // so the user knows where to tag a 🍋.
+                watchingEmptyState(identities: identities, workspaces: workspaces)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 32)
         .accessibilityIdentifier("empty-state")
+    }
+
+    private var unconfiguredEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "tray")
+                .font(.system(size: 22))
+                .foregroundStyle(.quaternary)
+            Text("Nothing connected yet")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Connect a tracker — Linear or GitHub — and point Lemon at a folder of work.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                withAnimation(LD.slide) { nav.showSettings() }
+            } label: {
+                Text("Open Settings")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(LD.citrus)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(LD.lemon, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+        }
+    }
+
+    private func watchingEmptyState(identities: [Identity], workspaces: [Workspace]) -> some View {
+        VStack(spacing: 12) {
+            Text("Waiting for a 🍋")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Label an issue in any of these and Lemon picks it up next poll.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 6) {
+                ForEach(workspaces.prefix(4)) { ws in
+                    watchingRow(workspace: ws, identities: identities)
+                }
+                if workspaces.count > 4 {
+                    Text("+ \(workspaces.count - 4) more")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.quaternary)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func watchingRow(workspace: Workspace, identities: [Identity]) -> some View {
+        let identity = identities.first { $0.id == workspace.routing.identityId }
+        let surface = identity?.knownSurfaces.first { $0.id == workspace.routing.surfaceId }
+        let folder = URL(fileURLWithPath: workspace.path).lastPathComponent
+        return HStack(spacing: 8) {
+            if let kind = identity?.kind {
+                SourceGlyph(source: kind.issueSource, size: 8)
+            } else {
+                Text("?")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(LD.coral)
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .background(Capsule().fill(LD.coral.opacity(0.10)))
+            }
+            HStack(spacing: 4) {
+                Text(folder.isEmpty ? "Unnamed" : folder)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("·")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+                Text(surface?.key ?? workspace.routing.surfaceId)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 340)
     }
 
     private var nextPollIn: Int? {
