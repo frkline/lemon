@@ -201,7 +201,7 @@ struct PopoverView: View {
             Text("No active sessions")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-            Text("Label an issue with 🍋 in Linear to start")
+            Text("Label an issue with 🍋 to start")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }

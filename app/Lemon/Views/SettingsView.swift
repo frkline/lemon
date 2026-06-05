@@ -9,9 +9,12 @@ struct SettingsView: View {
     @Environment(Orchestrator.self) private var orchestrator
 
     @State private var linearApiKey = ""
-    @State private var repos: [WorkspaceRepo] = []
+    @State private var githubToken = ""
+    @State private var githubUser = ""
+    @State private var pairs: [WorkspacePair] = []
     @State private var saved = false
     @State private var editingWorkspace = false
+    @State private var ghVerifyState: VerifyState = .idle
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var aiTestState: AITestState = .idle
 
@@ -29,12 +32,20 @@ struct SettingsView: View {
         case failed(String)
     }
 
+    enum VerifyState: Equatable {
+        case idle
+        case verifying
+        case ok(login: String)
+        case failed(String)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 28) {
                     generalSection
                     linearSection
+                    githubSection
                     workspaceSection
                     localAISection
                     mcpSection
@@ -105,18 +116,60 @@ struct SettingsView: View {
         }
     }
 
+    private var githubSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionLabel("GitHub")
+            HStack(alignment: .top, spacing: 12) {
+                iconBox("key.horizontal.fill", tint: LD.statusDone)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Personal Access Token")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        if case .ok(let login) = ghVerifyState {
+                            connectedBadge
+                            Text("@\(login)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        } else if !githubToken.isEmpty && !githubUser.isEmpty {
+                            connectedBadge
+                        }
+                    }
+                    SecureField("ghp_… (scope: repo)", text: $githubToken)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, design: .monospaced))
+                    HStack {
+                        Button("Verify") { Task { await verifyGitHubToken() } }
+                            .buttonStyle(GhostButtonStyle())
+                            .disabled(githubToken.isEmpty || ghVerifyState == .verifying)
+                        if case .verifying = ghVerifyState {
+                            ProgressView().controlSize(.small)
+                        }
+                        if case .failed(let msg) = ghVerifyState {
+                            Text(msg).font(.system(size: 10)).foregroundStyle(.red)
+                        }
+                        Spacer()
+                    }
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        }
+    }
+
     private var workspaceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                sectionLabel("Workspace")
+                sectionLabel("Workspace pairs (\(pairs.count) / \(KeychainStore.maxPairs))")
                 Spacer()
                 Button("Edit") { editingWorkspace = true }
                     .buttonStyle(GhostButtonStyle())
             }
-            if repos.isEmpty {
+            if pairs.isEmpty {
                 HStack(spacing: 12) {
                     iconBox("folder.fill", tint: .secondary)
-                    Text("No repos configured")
+                    Text("No pairs configured")
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                 }
@@ -125,9 +178,9 @@ struct SettingsView: View {
                 .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
             } else {
                 VStack(spacing: 0) {
-                    ForEach(repos) { repo in
-                        repoRow(repo)
-                        if repo.id != repos.last?.id {
+                    ForEach(pairs) { pair in
+                        pairRow(pair)
+                        if pair.id != pairs.last?.id {
                             Divider().padding(.leading, 54)
                         }
                     }
@@ -136,22 +189,32 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $editingWorkspace) {
-            WorkspaceEditorView(repos: $repos, onDone: { editingWorkspace = false })
+            WorkspaceEditorView(pairs: $pairs, onDone: { editingWorkspace = false })
         }
     }
 
-    private func repoRow(_ repo: WorkspaceRepo) -> some View {
+    private func pairRow(_ pair: WorkspacePair) -> some View {
         HStack(spacing: 12) {
-            iconBox(repo.allReposInFolder ? "folder.fill.badge.plus" : "folder.fill", tint: LD.lemon)
+            iconBox(
+                pair.source.source == .github ? "chevron.left.forwardslash.chevron.right" :
+                    (pair.workspace.allReposInFolder ? "folder.fill.badge.plus" : "folder.fill"),
+                tint: pair.source.source == .github ? LD.statusDone : LD.lemon
+            )
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(repo.issuePrefix)
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(LD.citrus)
-                        .padding(.horizontal, 6)
+                    Text(pair.source.source.displayName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(pair.source.source == .github ? LD.statusDone : LD.citrus)
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(LD.lemon.opacity(0.18), in: RoundedRectangle(cornerRadius: LD.r3))
-                    if repo.allReposInFolder {
+                        .background(
+                            (pair.source.source == .github ? LD.statusDone : LD.lemon).opacity(0.18),
+                            in: Capsule()
+                        )
+                    Text(pair.workspace.matchKey)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if pair.workspace.allReposInFolder {
                         Text("folder")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(.tertiary)
@@ -159,8 +222,8 @@ struct SettingsView: View {
                             .padding(.vertical, 2)
                             .background(.primary.opacity(0.05), in: Capsule())
                     }
-                    if repo.allReposInFolder && !repo.homeRepo.isEmpty {
-                        Text("→ \(repo.homeRepo)/")
+                    if pair.workspace.allReposInFolder && !pair.workspace.homeRepo.isEmpty {
+                        Text("→ \(pair.workspace.homeRepo)/")
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
@@ -168,7 +231,7 @@ struct SettingsView: View {
                             .background(LD.lemon.opacity(0.10), in: Capsule())
                     }
                 }
-                Text(repo.path)
+                Text(pair.workspace.path)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -597,16 +660,39 @@ struct SettingsView: View {
     private func load() {
         let k = KeychainStore.shared
         linearApiKey = k.linearApiKey
-        repos = k.workspaceRepos
+        githubToken = k.githubToken
+        githubUser = k.githubUser
+        pairs = k.pairs
     }
 
     private func save() {
         let k = KeychainStore.shared
         if !linearApiKey.isEmpty { k.linearApiKey = linearApiKey }
-        k.saveWorkspaceRepos(repos)
+        if !githubToken.isEmpty { k.githubToken = githubToken }
+        if !githubUser.isEmpty { k.githubUser = githubUser }
+        k.pairs = pairs
         withAnimation { saved = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             withAnimation { saved = false }
+        }
+    }
+
+    private func verifyGitHubToken() async {
+        await MainActor.run { ghVerifyState = .verifying }
+        do {
+            let identity = try await GitHubClient().verifyCredential(token: githubToken)
+            // The login (used as the assignee filter) lives in displayName when
+            // the user hasn't set a name on GH; CredentialIdentity stores both
+            // sides of that fallback in displayName, so re-derive login from id
+            // shape isn't reliable. Persist a best-effort login = displayName.
+            await MainActor.run {
+                ghVerifyState = .ok(login: identity.displayName)
+                githubUser = identity.displayName
+            }
+        } catch {
+            await MainActor.run {
+                ghVerifyState = .failed(error.localizedDescription)
+            }
         }
     }
 }
@@ -614,19 +700,20 @@ struct SettingsView: View {
 // MARK: - Workspace editor sheet
 
 struct WorkspaceEditorView: View {
-    @Binding var repos: [WorkspaceRepo]
+    @Binding var pairs: [WorkspacePair]
     let onDone: () -> Void
+
+    private var atCap: Bool { pairs.count >= KeychainStore.maxPairs }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Workspace Repos")
+                Text("Workspace Pairs")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                 Spacer()
-                // Calling \\.dismiss on a sheet inside a MenuBarExtra .window
-                // closes the parent popover, not just the sheet. Use an
-                // explicit owner-passed callback to toggle the @State flag
-                // back home — that closes only the sheet.
+                Text("\(pairs.count) / \(KeychainStore.maxPairs)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
                 Button("Done") { onDone() }
                     .buttonStyle(LemonButtonStyle())
             }
@@ -636,57 +723,112 @@ struct WorkspaceEditorView: View {
 
             ScrollView {
                 VStack(spacing: 8) {
-                    ForEach($repos) { $repo in
-                        RepoRowView(repo: $repo) {
-                            repos.removeAll { $0.id == repo.id }
+                    ForEach($pairs) { $pair in
+                        PairRowView(pair: $pair) {
+                            pairs.removeAll { $0.id == pair.id }
                         }
                     }
                     Button {
-                        repos.append(WorkspaceRepo(issuePrefix: "", path: ""))
+                        let linear = SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: [""])
+                        pairs.append(WorkspacePair(
+                            source: linear,
+                            workspace: WorkspaceMapping(matchKey: "", path: "")
+                        ))
                     } label: {
-                        Label("Add Repo", systemImage: "plus")
+                        Label(atCap ? "10-pair limit reached" : "Add Pair", systemImage: "plus")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .buttonStyle(GhostButtonStyle())
+                    .disabled(atCap)
                     .padding(.top, 4)
+                    if atCap {
+                        Text("Remove a pair to add another.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 .padding(20)
             }
         }
-        .frame(width: 480, height: 360)
+        .frame(width: 520, height: 420)
         .background(.regularMaterial)
     }
 }
 
-struct RepoRowView: View {
-    @Binding var repo: WorkspaceRepo
+struct PairRowView: View {
+    @Binding var pair: WorkspacePair
     let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text("Prefix")
+                    Text("Source")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                    TextField("e.g. HRP", text: $repo.issuePrefix)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(width: 80)
+                        .frame(width: 56, alignment: .trailing)
+                    Picker("", selection: Binding(
+                        get: { pair.source.source },
+                        set: { newSource in
+                            pair.source = SourceConfig(
+                                id: pair.source.id,
+                                source: newSource,
+                                displayName: newSource.displayName,
+                                linearTeamKeys: newSource == .linear ? [pair.workspace.matchKey] : nil,
+                                githubRepos: newSource == .github ? [pair.workspace.matchKey] : nil
+                            )
+                        })
+                    ) {
+                        Text("Linear").tag(IssueSource.linear)
+                        Text("GitHub").tag(IssueSource.github)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
                 }
                 HStack(spacing: 8) {
-                    Text(repo.allReposInFolder ? "Folder" : "Repo")
+                    Text(pair.source.source == .github ? "Repo" : "Prefix")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                    TextField(repo.allReposInFolder ? "/path/to/projects" : "/path/to/repo", text: $repo.path)
+                        .frame(width: 56, alignment: .trailing)
+                    TextField(
+                        pair.source.source == .github ? "owner/repo" : "e.g. HRP",
+                        text: $pair.workspace.matchKey
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: pair.source.source == .github ? 200 : 110)
+                    .onChange(of: pair.workspace.matchKey) { _, newKey in
+                        // Keep SourceConfig allowlist in sync with matchKey so
+                        // the orchestrator's per-pair filter matches what the
+                        // user typed in this row.
+                        if pair.source.source == .linear {
+                            pair.source = SourceConfig(
+                                id: pair.source.id, source: .linear,
+                                displayName: "Linear",
+                                linearTeamKeys: [newKey], githubRepos: nil
+                            )
+                        } else {
+                            pair.source = SourceConfig(
+                                id: pair.source.id, source: .github,
+                                displayName: "GitHub",
+                                linearTeamKeys: nil, githubRepos: [newKey]
+                            )
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    Text(pair.workspace.allReposInFolder ? "Folder" : "Repo")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 56, alignment: .trailing)
+                    TextField(pair.workspace.allReposInFolder ? "/path/to/projects" : "/path/to/repo",
+                              text: $pair.workspace.path)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
                 }
                 HStack(spacing: 8) {
-                    Spacer().frame(width: 52)
-                    Toggle(isOn: $repo.allReposInFolder) {
+                    Spacer().frame(width: 64)
+                    Toggle(isOn: $pair.workspace.allReposInFolder) {
                         Text("All repos in this folder")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
@@ -695,13 +837,13 @@ struct RepoRowView: View {
                     Spacer()
                 }
 
-                if repo.allReposInFolder {
+                if pair.workspace.allReposInFolder {
                     HStack(spacing: 8) {
                         Text("Home")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
-                        TextField("e.g. memory", text: $repo.homeRepo)
+                            .frame(width: 56, alignment: .trailing)
+                        TextField("e.g. memory", text: $pair.workspace.homeRepo)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12, design: .monospaced))
                         Text("optional")
