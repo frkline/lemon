@@ -78,6 +78,69 @@ claude --permission-mode auto --remote-control -- '<kickoff prompt>'
 - `--remote-control` — sends push notifications to the user's phone when Claude is waiting for input.
 - `--` separator before the trailing kickoff prompt. Without it, `--remote-control` (whose `[name]` argument is optional) eats the prompt as its session name and Claude opens an empty REPL.
 
+## Running Lemon unattended (for iteration loops)
+
+When Claude is driving Lemon to test changes, you want to skip the GUI Keychain prompt and have the MCP server on at launch. Two env vars do this:
+
+```sh
+LEMON_LINEAR_KEY=$(cat path/to/linear/key) LEMON_ENABLE_MCP=1 \
+  /tmp/lemon-build/Lemon.app/Contents/MacOS/Lemon &
+```
+
+- `LEMON_LINEAR_KEY` (inline value) wins over `LEMON_LINEAR_KEY_FILE` (path on disk). Inline avoids the `~/Desktop` TCC prompt that fires every launch when the file lives there. Either way `KeychainStore.envKeyBypass()` short-circuits the Keychain read.
+- `LEMON_ENABLE_MCP=1` boots the MCP server on `127.0.0.1:8765` so a recursive Claude can `force_classify` / `send_keys` / `get_pane_log`. Known wart: the env-var-alone path doesn't always fire (see Known gaps); pair with `defaults write rocks.harpy.lemon lemon-mcp-enabled -bool true` if it doesn't bind.
+- Direct exec (`Lemon.app/Contents/MacOS/Lemon &`) propagates env vars more reliably than `open Lemon.app` on macOS 26.
+
+The build → kill → relaunch loop:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
+  -project app/Lemon.xcodeproj -scheme Lemon -configuration Debug \
+  ONLY_ACTIVE_ARCH=YES CONFIGURATION_BUILD_DIR=/tmp/lemon-build \
+  OTHER_SWIFT_FLAGS="-warnings-as-errors" build
+pkill -f 'Lemon.app/Contents/MacOS/Lemon'; sleep 2
+LEMON_LINEAR_KEY=$(cat path) LEMON_ENABLE_MCP=1 \
+  /tmp/lemon-build/Lemon.app/Contents/MacOS/Lemon &
+```
+
+## Iterating on autonomous behavior
+
+When a session wedges in a way Gemma *should* handle but doesn't, the fix is almost always one of:
+
+1. **Add an example to the Gemma classify system prompt** in `LocalLLM.swift:classify(...)`. The prompt has worked examples for the MCP picker, Bash perm picker (1./2./3.), git push perm, file edit confirmation, and Linear MCP tool-use perm. New picker shapes go here. Keep `summary` and `notify_user.message` under 80 chars — token budget is 300 and truncated JSON fails to parse.
+2. **Fix the silence-detector input** in `WorktreeRunner.pollUntilDone(...)` — line count, not byte count; ANSI cursor redraws don't add newlines, so byte deltas lie.
+3. **Adjust `LEMON_CONTEXT.md`** in `WorktreeRunner.writeContext(...)` so Claude has the context to self-handle instead of asking.
+
+Watching what Gemma is doing in real time:
+
+```sh
+# Verdicts as SwiftLM emits them:
+grep "srv  generate" /tmp/lemon-swiftlm.log | tail -10 \
+  | sed 's/srv  generate: id 0 | //'
+
+# Per-session classify timing + summary from Lemon's os.Logger:
+log show --predicate 'subsystem == "com.lemon.app"' --last 5m --info \
+  | grep -E 'gemma|Retrigger|Poll'
+```
+
+When Lemon's MCP is up, the same questions go via the protocol:
+
+```sh
+# Read-only: what does Gemma think right now?
+curl -sS -X POST http://127.0.0.1:8765/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"force_classify","arguments":{"id":"HRP-37"}}}'
+```
+
+`force_classify`, `get_pane_log`, `get_session`, `list_sessions`, `get_swiftlm_log` are all read-shaped tools fit for the observe-only diagnostic role.
+
+## Known gaps (deferred — don't re-discover)
+
+- **MCP enable env var, alone, can miss its window.** `LEMON_ENABLE_MCP=1` is read inside the `@State` initializer's `Task { @MainActor in ... }` block in `LemonApp.swift`. In some launch paths the Task fires before the View loads or after a UserDefault has clamped the toggle. UserDefault `lemon-mcp-enabled = true` is reliable; env var alone isn't. Workaround: set both.
+- **Re-trigger fires on already-shipped revisions.** `hasNewComment(afterMarker)` returns true for *any* comment posted after the Lemon Report — including one Lemon itself already addressed in an earlier re-run. Right fix: post a *new* Lemon Report comment after each re-trigger completes so the marker advances. Until then, manually setting `🍋 Complete` and removing the trigger label after a re-run is required to stop the loop.
+- **SwiftLM prompt cache full-hit returns empty content.** Identical input to `LocalLLM.classify()` produces zero output tokens, which decodes as `LocalLLMError.invalidResponse`. The error now has a descriptive `errorDescription`, but the structural fix is to cache-bust the user message (e.g. append a short timestamp suffix) when the caller wants a fresh verdict.
+
 ## Build
 
 ```sh
