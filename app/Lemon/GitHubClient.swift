@@ -433,8 +433,31 @@ extension GitHubClient: IssueSourceClient {
         return CredentialIdentity(
             id: String(user.id),
             displayName: user.name ?? user.login,
+            handle: user.login,          // GitHub login, used as the assignee filter
             avatarUrl: user.avatar_url
         )
+    }
+
+    /// Count of open issues currently assigned to the user. Uses the search
+    /// API's `total_count` so we get a real number without paginating.
+    func countAssignedOpenIssues(token: String, host: String?, principalId: String) async throws -> Int {
+        // principalId here is the user's `login` (handle) — GitHub's search
+        // syntax wants `assignee:LOGIN`, not the numeric id.
+        let query = "assignee:\(principalId) is:issue is:open"
+        let req = authedRequest(
+            "GET",
+            path: "/search/issues",
+            query: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "per_page", value: "1"),
+            ],
+            token: token,
+            host: host
+        )
+        let (_, data) = try await send(req)
+        struct CountDTO: Decodable { let total_count: Int }
+        let parsed = try decode(data, as: CountDTO.self)
+        return parsed.total_count
     }
 
     /// Fetch the authenticated user's repositories (public + private the PAT

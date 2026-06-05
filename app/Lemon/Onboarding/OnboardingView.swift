@@ -38,6 +38,7 @@ struct DraftPair: Identifiable, Equatable {
         let label: String
         let principalId: String
         let surfaces: [Surface]
+        let assignedIssueCount: Int
     }
 
     var isSavable: Bool {
@@ -87,7 +88,8 @@ struct OnboardingView: View {
                 .id(step.rawValue)
                 .animation(LD.slide, value: step)
         }
-        .frame(width: 520, height: 580)
+        .frame(width: 520)
+        .frame(minHeight: 580)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: LD.r14))
     }
@@ -304,11 +306,13 @@ private struct StepShell<Content: View>: View {
 
             Spacer().frame(height: 22)
 
-            ScrollView(showsIndicators: false) {
-                content
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 16)
-            }
+            // Intrinsic-height content — the wizard window grows to fit
+            // (OnboardingView uses minHeight, not fixed height). For steps
+            // that genuinely have unbounded content (LemonMd's editor),
+            // the step wraps its own scrolling internally.
+            content
+                .padding(.horizontal, 28)
+                .padding(.bottom, 16)
 
             HStack(spacing: 10) {
                 Button("Quit") { NSApp.terminate(nil) }
@@ -596,6 +600,12 @@ private struct TrackersStep: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
+            // contentShape forces the entire pill (including the
+            // background fill / negative space around the icon + label)
+            // into the hit-test region. Without this, only the actual
+            // text + mark are clickable and the empty padding reads as
+            // dead space.
+            .contentShape(Capsule())
             .background(
                 selected
                     ? AnyShapeStyle(kind.accent.opacity(0.14))
@@ -651,18 +661,16 @@ private struct TrackersStep: View {
         }
     }
 
-    /// Direct link to the right token creation page per source. For GitHub we
-    /// pre-fill the classic `repo` scope + a "Lemon" description so the user
-    /// just clicks Generate. Classic > fine-grained for Lemon's use case
-    /// (broad access via one scope checkbox instead of selecting individual
-    /// repos at creation time, which is friction for a tool that polls
-    /// multiple identities' repos).
+    /// Direct link to the right token creation page per source.
     private var tokenProviderURL: URL {
         switch draft.sourceKind {
         case .linear:
             return URL(string: "https://linear.app/settings/api")!
         case .github:
-            return URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=Lemon")!
+            // Fine-grained PAT page. Lemon needs Issues (read/write) on the
+            // repos you want polled; the page lets you scope to specific
+            // repos which is the safer default.
+            return URL(string: "https://github.com/settings/personal-access-tokens/new")!
         }
     }
 
@@ -671,7 +679,7 @@ private struct TrackersStep: View {
         case .linear:
             return "Personal API Key. Workspace-scoped; never leaves Keychain."
         case .github:
-            return "Classic PAT, `repo` scope. The link pre-fills it. Fine-grained tokens work too if you'd rather lock to specific repos."
+            return "Fine-grained PAT. Grant Issues (read + write) on the repos Lemon should watch."
         }
     }
 
@@ -747,7 +755,7 @@ private struct TrackersStep: View {
                     Image(systemName: "checkmark.seal.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(LD.statusDone)
-                    Text("@\(v.handle) · \(v.surfaces.count) surface\(v.surfaces.count == 1 ? "" : "s")")
+                    Text("@\(v.handle) · \(v.assignedIssueCount) issue\(v.assignedIssueCount == 1 ? "" : "s") assigned")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(LD.statusDone)
                 }
@@ -924,17 +932,23 @@ private struct TrackersStep: View {
         let kind = draft.sourceKind
         let token = draft.newIdentityToken.trimmingCharacters(in: .whitespacesAndNewlines)
         let host  = draft.newIdentityHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedHost = host.isEmpty ? nil : host
 
         do {
-            let client: any IssueSourceClient = kind == .linear ? LinearClient() : GitHubClient()
-            let cred = try await client.verifyCredential(token: token, host: host.isEmpty ? nil : host)
-            let surfaces = (try? await client.listSurfaces(token: token, host: host.isEmpty ? nil : host)) ?? []
+            let cli = kind == .linear ? (LinearClient() as any IssueSourceClient) : (GitHubClient() as any IssueSourceClient)
+            let cred = try await cli.verifyCredential(token: token, host: resolvedHost)
+            let surfaces = (try? await cli.listSurfaces(token: token, host: resolvedHost)) ?? []
+            let principal: String = (kind == .linear) ? cred.id : cred.handle
+            let assignedCount = (try? await cli.countAssignedOpenIssues(
+                token: token, host: resolvedHost, principalId: principal
+            )) ?? 0
             let snap = DraftPair.VerifiedSnapshot(
                 identityId: UUID(),
-                handle: cred.displayName,
+                handle: cred.handle,
                 label: "\(kind.displayName) · \(cred.displayName)",
                 principalId: cred.id,
-                surfaces: surfaces
+                surfaces: surfaces,
+                assignedIssueCount: assignedCount
             )
             await MainActor.run {
                 draft.newIdentityVerified = snap

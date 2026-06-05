@@ -86,6 +86,10 @@ struct LemonApp: App {
             }
             .onReceive(NotificationCenter.default.publisher(for: .lemonRerunSetup)) { _ in
                 onboardingComplete = false
+                // Re-running setup pops the wizard window back open so the
+                // user lands in the right surface immediately.
+                NSApp.activate(ignoringOtherApps: true)
+                LemonApp.presentOnboardingWindow()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 LocalLLM.shared.stop()
@@ -96,5 +100,63 @@ struct LemonApp: App {
                 .accessibilityLabel("Lemon")
         }
         .menuBarExtraStyle(.window)
+
+        // Standalone onboarding window — opens automatically at launch when
+        // nothing's configured, so the user lands inside the wizard instead
+        // of having to discover the menu-bar icon and click into a popover.
+        // .defaultLaunchBehavior is evaluated once at process start; the
+        // window stays out of the way for already-configured users.
+        Window("Welcome to Lemon", id: "lemon-onboarding") {
+            OnboardingWindowContents(
+                onboardingComplete: $onboardingComplete,
+                orchestrator: orchestrator,
+                nav: nav
+            )
+        }
+        .defaultSize(width: 520, height: 720)
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(
+            KeychainStore.shared.isConfigured ? .suppressed : .presented
+        )
+    }
+
+    /// Called from rerunSetup so the wizard window pops back into view even
+    /// if the user closed it during the session.
+    @MainActor
+    static func presentOnboardingWindow() {
+        // The Window-id contract is "lemon-onboarding"; SwiftUI surfaces it
+        // via OpenWindowAction inside views. From AppKit space we hit
+        // NSApp.windows directly and re-show whichever NSWindow is hosting
+        // the SwiftUI surface.
+        for window in NSApp.windows where window.identifier?.rawValue == "lemon-onboarding"
+            || window.title == "Welcome to Lemon" {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+    }
+}
+
+/// Hosting content for the standalone onboarding window. Pulled into its own
+/// view so we can use @Environment(\.dismissWindow) to close the window
+/// once the wizard reports complete.
+private struct OnboardingWindowContents: View {
+    @Binding var onboardingComplete: Bool
+    let orchestrator: Orchestrator
+    let nav: AppNavigation
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        OnboardingView(isComplete: $onboardingComplete)
+            .environment(orchestrator)
+            .environment(nav)
+            .onChange(of: onboardingComplete) { _, complete in
+                if complete {
+                    // Configured — start the polling loop and dismiss the
+                    // wizard window. The popover takes over from here.
+                    orchestrator.start()
+                    LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
+                    dismissWindow(id: "lemon-onboarding")
+                }
+            }
     }
 }

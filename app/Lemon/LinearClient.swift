@@ -501,7 +501,12 @@ extension LinearClient: IssueSourceClient {
         // Linear ignores host — its API is single-tenant.
         _ = host
         let viewer = try await fetchViewer(apiKey: token)
-        return CredentialIdentity(id: viewer.id, displayName: viewer.name, avatarUrl: viewer.avatarUrl)
+        return CredentialIdentity(
+            id: viewer.id,
+            displayName: viewer.name,
+            handle: viewer.name,
+            avatarUrl: viewer.avatarUrl
+        )
     }
 
     /// Discover every team this API key can see. Maps to `Surface` so the
@@ -511,5 +516,55 @@ extension LinearClient: IssueSourceClient {
         _ = host
         let teams = try await fetchTeams(apiKey: token)
         return teams.map { Surface(id: $0.key, key: $0.key, displayName: $0.name) }
+    }
+
+    /// Count of open issues currently assigned to the user. Replaces the
+    /// abstract "surfaces" count after verify — gives the user a concrete
+    /// sense of what Lemon will be polling on their behalf.
+    func countAssignedOpenIssues(token: String, host: String?, principalId: String) async throws -> Int {
+        _ = host
+        let query = """
+        query AssignedCount($userId: ID!, $closed: [String!]!) {
+          issues(
+            filter: {
+              assignee: { id: { eq: $userId } }
+              state: { type: { nin: $closed } }
+            }
+            first: 1
+          ) { nodes { id } pageInfo { hasNextPage } }
+        }
+        """
+        // Linear doesn't expose a totalCount on the filter; we ask for one node
+        // and then page through if hasNextPage is true. For the editor chip a
+        // bounded count (capped at, say, 200) is plenty.
+        var cursor: String? = nil
+        var total = 0
+        let cap = 200
+        repeat {
+            let pagedQuery = """
+            query AssignedCount($userId: ID!, $closed: [String!]!, $after: String) {
+              issues(
+                filter: {
+                  assignee: { id: { eq: $userId } }
+                  state: { type: { nin: $closed } }
+                }
+                first: 50
+                after: $after
+              ) { nodes { id } pageInfo { hasNextPage endCursor } }
+            }
+            """
+            var vars: [String: Any] = ["userId": principalId, "closed": ["completed", "cancelled"]]
+            if let cursor { vars["after"] = cursor }
+            let json = try await graphql(query: pagedQuery, variables: vars, apiKey: token)
+            let issues = (json["data"] as? [String: Any])?["issues"] as? [String: Any]
+            let nodes = (issues?["nodes"] as? [[String: Any]]) ?? []
+            total += nodes.count
+            let pageInfo = issues?["pageInfo"] as? [String: Any]
+            let hasNext = (pageInfo?["hasNextPage"] as? Bool) ?? false
+            cursor = hasNext ? (pageInfo?["endCursor"] as? String) : nil
+            if total >= cap { return cap }
+        } while cursor != nil
+        _ = query
+        return total
     }
 }

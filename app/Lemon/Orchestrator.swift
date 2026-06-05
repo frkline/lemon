@@ -67,20 +67,39 @@ final class Orchestrator {
     }
 
     /// Result of a verify-credential pass on a new identity. The identity
-    /// surface includes the verified login + a fresh surface list so the
-    /// editor can pre-populate the routing dropdown without a second hop.
+    /// surface includes the verified login, a fresh surface list, and a
+    /// count of open issues currently assigned to the user — the editor
+    /// shows that count instead of the abstract "surfaces" number so the
+    /// user gets concrete proof the credential reaches actual work.
     struct IdentityVerifyResult {
         let credential: CredentialIdentity
         let surfaces: [Surface]
+        let assignedIssueCount: Int
     }
 
-    /// Verify a credential + pull the user's known surfaces in one shot.
-    /// Used by the identity-add flow in Settings.
+    /// Verify a credential + pull the user's known surfaces + assigned-issue
+    /// count in one shot. Used by the identity-add flow in Settings.
     func verifyAndDiscover(kind: IdentityKind, token: String, host: String?) async throws -> IdentityVerifyResult {
         let cli = client(for: kind)
         let credential = try await cli.verifyCredential(token: token, host: host)
         let surfaces = (try? await cli.listSurfaces(token: token, host: host)) ?? []
-        return IdentityVerifyResult(credential: credential, surfaces: surfaces)
+        // For Linear, the assigned-count query uses the user node id; for
+        // GitHub, the search expects the `login` (handle). The credential
+        // exposes both via `id` and `handle` so we pick the right one per kind.
+        let principal: String = {
+            switch kind {
+            case .linear: return credential.id
+            case .github: return credential.handle
+            }
+        }()
+        let assignedCount = (try? await cli.countAssignedOpenIssues(
+            token: token, host: host, principalId: principal
+        )) ?? 0
+        return IdentityVerifyResult(
+            credential: credential,
+            surfaces: surfaces,
+            assignedIssueCount: assignedCount
+        )
     }
 
     /// Re-fetch surfaces for an existing identity and persist the updated

@@ -45,6 +45,12 @@ protocol IssueSourceClient: Sendable {
     /// PAT can see. Results populate `Identity.knownSurfaces` so the editor's
     /// routing dropdowns are pre-filled from real data rather than free text.
     func listSurfaces(token: String, host: String?) async throws -> [Surface]
+
+    /// Count of issues currently assigned to the principal (open, not closed
+    /// / cancelled / completed). Surfaced after verify as user-meaningful
+    /// proof that the credential reaches actual work — replaces the
+    /// abstract "surfaces" count in the UI.
+    func countAssignedOpenIssues(token: String, host: String?, principalId: String) async throws -> Int
 }
 
 extension IssueSourceClient {
@@ -74,8 +80,9 @@ enum SourceAuth: Sendable, Hashable {
 // Returned from verifyCredential. Powers the "Connected as X" affordance in
 // onboarding + the Settings connection badge.
 struct CredentialIdentity: Equatable {
-    let id: String
-    let displayName: String
+    let id: String                  // principal id (Linear node id, GitHub numeric id)
+    let displayName: String         // user-facing name ("Frank Kline III")
+    let handle: String              // login / username — Linear's name, GitHub's login
     let avatarUrl: String?
 }
 

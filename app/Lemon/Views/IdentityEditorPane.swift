@@ -20,7 +20,7 @@ struct IdentityEditorPane: View {
     enum VerifyState: Equatable {
         case idle
         case verifying
-        case ok(handle: String, surfaceCount: Int)
+        case ok(handle: String, assignedCount: Int)
         case failed(String)
     }
 
@@ -161,7 +161,7 @@ struct IdentityEditorPane: View {
         case .linear:
             return URL(string: "https://linear.app/settings/api")!
         case .github:
-            return URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=Lemon")!
+            return URL(string: "https://github.com/settings/personal-access-tokens/new")!
         }
     }
 
@@ -170,7 +170,7 @@ struct IdentityEditorPane: View {
         case .linear:
             return "Personal API Key. Workspace-scoped; never leaves Keychain."
         case .github:
-            return "Classic PAT, `repo` scope. The link pre-fills it. Fine-grained tokens also work if you'd rather lock to specific repos."
+            return "Fine-grained PAT. Grant Issues (read + write) on the repos Lemon should watch."
         }
     }
 
@@ -244,7 +244,7 @@ struct IdentityEditorPane: View {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(LD.statusDone)
-                Text("@\(handle) · \(count) surface\(count == 1 ? "" : "s")")
+                Text("@\(handle) · \(count) issue\(count == 1 ? "" : "s") assigned")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(LD.statusDone)
             }
@@ -266,13 +266,15 @@ struct IdentityEditorPane: View {
 
     private var surfacesSummary: some View {
         let surfaces = currentSurfaces
+        let label = (kind == .linear) ? "TEAMS" : "REPOS"
+        let unit  = (kind == .linear) ? "team" : "repo"
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("SURFACES")
+                Text(label)
                     .font(.system(size: 8, weight: .bold))
                     .kerning(1.4)
                     .foregroundStyle(.tertiary)
-                Text("\(surfaces.count) visible")
+                Text("\(surfaces.count) \(unit)\(surfaces.count == 1 ? "" : "s") visible")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
@@ -468,7 +470,10 @@ struct IdentityEditorPane: View {
             host = ident.host ?? ""
             // Token is intentionally not pre-filled — Keychain reads happen on
             // demand and we want re-verification to be explicit.
-            verifyState = .ok(handle: ident.handle, surfaceCount: ident.knownSurfaces.count)
+            // No re-verify needed for an existing identity — we don't have
+            // a fresh assigned-issues count cached. Show 0 to indicate
+            // "click Re-verify to refresh" rather than lying about a number.
+            verifyState = .ok(handle: ident.handle, assignedCount: 0)
         }
     }
 
@@ -482,7 +487,7 @@ struct IdentityEditorPane: View {
                 token: trimmedToken,
                 host: trimmedHost.isEmpty ? nil : trimmedHost
             )
-            verifyState = .ok(handle: result.credential.displayName, surfaceCount: result.surfaces.count)
+            verifyState = .ok(handle: result.credential.handle, assignedCount: result.assignedIssueCount)
             // Mutate the in-memory identity record so the surfaces panel can
             // render the freshly fetched list immediately. Persistence happens
             // on Save.
