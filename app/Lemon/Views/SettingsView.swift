@@ -64,28 +64,32 @@ struct SettingsView: View {
     private var generalSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("General")
-            HStack(spacing: 12) {
-                iconBox("arrow.up.circle.fill", tint: LD.statusDone)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Launch at Login")
-                        .font(.system(size: 13))
-                    Text("Start Lemon automatically when you log in")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                Toggle("", isOn: $launchAtLogin)
-                    .labelsHidden()
-                    .onChange(of: launchAtLogin) { _, enabled in
-                        do {
-                            if enabled { try SMAppService.mainApp.register() }
-                            else { try SMAppService.mainApp.unregister() }
-                        } catch {
-                            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    configGlyph("power", tint: launchAtLogin ? LD.statusDone : .secondary.opacity(0.6))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("Launch at Login")
+                                .font(.system(size: 12, weight: .semibold))
+                            Spacer()
                         }
+                        Text("Start Lemon automatically when you log in.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
                     }
+                    Toggle("", isOn: $launchAtLogin)
+                        .labelsHidden()
+                        .onChange(of: launchAtLogin) { _, enabled in
+                            do {
+                                if enabled { try SMAppService.mainApp.register() }
+                                else { try SMAppService.mainApp.unregister() }
+                            } catch {
+                                launchAtLogin = (SMAppService.mainApp.status == .enabled)
+                            }
+                        }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 11)
             }
-            .padding(14)
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
         }
     }
