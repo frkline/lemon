@@ -841,6 +841,15 @@ final class WorktreeRunner: @unchecked Sendable {
             }
         }
 
+        // Clean up intermediate state labels — without this, finished
+        // issues accumulate 🍋 (trigger) + 🍋 In Progress + 🍋 Waiting
+        // alongside 🍋 Complete. GitHub doesn't auto-remove labels when
+        // a new one is applied (Linear's source-state machinery does,
+        // GH doesn't), so we have to be explicit at the transition.
+        try? await client.clearState(ref: ref, state: .trigger,    auth: auth)
+        try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+        try? await client.clearState(ref: ref, state: .waiting,    auth: auth)
+
         await cleanupWorktrees(repos: repos, sessionPath: sessionPath, isMultiRepo: isMultiRepo,
                                slug: ref.pathSlug)
         onStatusChange?(.done)

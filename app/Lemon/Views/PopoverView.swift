@@ -56,8 +56,10 @@ struct PopoverView: View {
             }
             // Stable floor so the popover doesn't shrink to a sliver
             // mid-transition (the "just Quit visible" frame). Panes
-            // taller than the floor get to grow.
-            .frame(maxWidth: .infinity, minHeight: 380, alignment: .top)
+            // taller than the floor get to grow. No alignment override
+            // — the inner pane (listPane → emptyState) handles its
+            // own vertical centering via Spacers.
+            .frame(maxWidth: .infinity, minHeight: 380)
             .animation(LD.slide, value: nav.showingSettings)
             .animation(LD.slide, value: nav.selectedSession?.id)
             .animation(LD.slide, value: nav.editingIdentity)
@@ -248,19 +250,27 @@ struct PopoverView: View {
         let identities = keychain.identities
         let workspaces = keychain.workspaces
 
-        return VStack(spacing: 14) {
-            if identities.isEmpty || workspaces.isEmpty {
-                // Genuinely nothing connected — point at Settings.
-                unconfiguredEmptyState
-            } else {
-                // Configured but no triggers yet — show what's being watched
-                // so the user knows where to tag a 🍋.
-                watchingEmptyState(identities: identities, workspaces: workspaces)
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(spacing: 14) {
+                if identities.isEmpty || workspaces.isEmpty {
+                    // Genuinely nothing connected — point at Settings.
+                    unconfiguredEmptyState
+                } else {
+                    // Configured but no triggers yet — show what's being watched
+                    // so the user knows where to tag a 🍋.
+                    watchingEmptyState(identities: identities, workspaces: workspaces)
+                }
             }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
+        // maxHeight: .infinity makes the empty pane absorb the popover's
+        // minHeight floor so the content centers vertically (instead of
+        // clumping at the top with the footer floating mid-popover).
+        // Quit row pins to the bottom of listPane below this view.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 18)
-        .padding(.vertical, 32)
+        .padding(.vertical, 24)
         .accessibilityIdentifier("empty-state")
     }
 
