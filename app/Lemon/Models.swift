@@ -21,6 +21,118 @@ struct WorkspaceRepo: Codable, Identifiable {
     var homeRepo: String = ""      // subdirectory to launch Claude in (e.g. "memory"); empty = session root
 }
 
+// MARK: - Source-agnostic issue model
+//
+// `IssueRef` is the lingua franca between Orchestrator/WorktreeRunner and the
+// per-source clients (LinearClient, GitHubClient). Each client maps its own
+// raw response into IssueRef at the boundary; downstream code never sees the
+// source-specific shape.
+
+enum IssueSource: String, Codable, Hashable {
+    case linear
+    case github
+
+    var displayName: String {
+        switch self {
+        case .linear: return "Linear"
+        case .github: return "GitHub"
+        }
+    }
+}
+
+enum IssueScope: Codable, Equatable, Hashable {
+    case linearTeam(id: String)
+    case githubRepo(owner: String, repo: String, number: Int)
+}
+
+struct IssueRef: Identifiable, Codable, Equatable, Hashable {
+    let id: String                  // opaque source-side id (Linear node id, or "owner/repo#n")
+    let displayIdentifier: String   // human-facing label, e.g. "HRP-42" or "acme/widgets#7"
+    let title: String
+    let description: String?
+    let labelNames: [String]
+    let scope: IssueScope
+
+    var source: IssueSource {
+        switch scope {
+        case .linearTeam:  return .linear
+        case .githubRepo:  return .github
+        }
+    }
+
+    // Namespaced so Linear node IDs and GitHub identifiers can't collide in
+    // SessionStore.isTracking — see plan §5.
+    var trackingKey: String { "\(source.rawValue):\(id)" }
+
+    // Drives /tmp/lemon-{slug} worktree paths. Linear: "lem-42". GitHub:
+    // "acme-widgets-7" — slashes flatten to dashes, lowercased so filesystem
+    // case-insensitivity on APFS doesn't bite.
+    var pathSlug: String {
+        switch scope {
+        case .linearTeam:
+            return displayIdentifier.lowercased()
+        case .githubRepo(let owner, let repo, let number):
+            return "\(owner)-\(repo)-\(number)"
+                .lowercased()
+                .replacingOccurrences(of: "/", with: "-")
+        }
+    }
+}
+
+// Source-agnostic comment used by both LinearClient and GitHubClient. The
+// shared LemonMarkerExtractor consumes these.
+struct IssueComment: Identifiable, Equatable {
+    let id: String
+    let body: String
+    let createdAt: Date
+}
+
+// MARK: - Workspace pairs (replacement for WorkspaceRepo array)
+//
+// One WorkspacePair = one source identity + one local workspace mapping. The
+// pair list lives in KeychainStore under "lemon-workspace-pairs", capped at 10.
+
+struct SourceConfig: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var source: IssueSource
+    var displayName: String
+    var linearTeamKeys: [String]?   // optional allowlist; nil = all teams
+    var githubRepos: [String]?      // "owner/repo" entries
+}
+
+struct WorkspaceMapping: Codable, Hashable {
+    var matchKey: String            // Linear team key ("HRP") or GH "owner/repo"
+    var path: String
+    var allReposInFolder: Bool = false
+    var homeRepo: String = ""
+}
+
+struct WorkspacePair: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var source: SourceConfig
+    var workspace: WorkspaceMapping
+}
+
+// Lemon label state, mapped through each client to its source-specific
+// representation (Linear label ID, GitHub label name).
+enum LemonState: String, CaseIterable, Equatable {
+    case trigger
+    case inProgress
+    case waiting
+    case complete
+
+    var labelName: String {
+        switch self {
+        case .trigger:    return "🍋"
+        case .inProgress: return "🍋 In Progress"
+        case .waiting:    return "🍋 Waiting"
+        case .complete:   return "🍋 Complete"
+        }
+    }
+
+    static let active: Set<LemonState> = [.inProgress, .waiting, .complete]
+}
+
 enum SessionStatus: Equatable {
     case planning    // worktree setup
     case executing   // claude session running
@@ -48,11 +160,14 @@ enum SessionStatus: Equatable {
     }
 }
 
-struct LemonMarker {
+struct LemonMarker: Equatable {
     let branch: String
     let prNumber: String
     let commentId: String
     let repoPath: String
+    // Pre-upgrade comments omit this line; nil parses as .linear so existing
+    // re-trigger flows keep working after the multi-source migration.
+    let source: IssueSource?
 }
 
 @Observable

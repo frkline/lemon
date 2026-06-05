@@ -137,13 +137,7 @@ final class LinearClient: Sendable {
 
     // MARK: - Comments
 
-    struct Comment {
-        let id: String
-        let body: String
-        let createdAt: Date
-    }
-
-    func fetchComments(issueId: String, apiKey: String) async throws -> [Comment] {
+    func fetchComments(issueId: String, apiKey: String) async throws -> [IssueComment] {
         // Use `first: 25, orderBy: createdAt` — Linear returns nodes newest-first
         // by default. The previous query used `last: 25` which is valid Linear
         // syntax but the resulting JSON parse-chain in this method was broken
@@ -172,79 +166,38 @@ final class LinearClient: Sendable {
         // Fractional seconds in Linear timestamps (e.g. "...537Z") — the default
         // ISO8601 formatter rejects them. Opt in so we don't silently drop comments.
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let parsed = nodes.compactMap { node -> Comment? in
+        let parsed = nodes.compactMap { node -> IssueComment? in
             guard
                 let id   = node["id"]   as? String,
                 let body = node["body"] as? String,
                 let ts   = node["createdAt"] as? String,
                 let date = iso.date(from: ts)
             else { return nil }
-            return Comment(id: id, body: body, createdAt: date)
+            return IssueComment(id: id, body: body, createdAt: date)
         }
         // Normalize to chronological order (oldest first). Linear returns
-        // newest-first by default — every downstream consumer (findLemonMarker
-        // iterates reversed; hasNewComment / fetchCommentsAfter compare indices)
-        // breaks subtly if the input order shifts. Sorting here once means the
-        // re-trigger pipeline reasons about time, not API quirks.
+        // newest-first by default — every downstream consumer
+        // (LemonMarkerExtractor walks reversed; hasNewComment / bodiesAfter
+        // compare indices) breaks subtly if the input order shifts. Sorting
+        // here once means the re-trigger pipeline reasons about time, not API quirks.
         return parsed.sorted { $0.createdAt < $1.createdAt }
     }
 
-    // Returns true if there is any comment on the issue that was created
-    // after the comment with the given ID (exclusive).
+    // Re-trigger detection helpers — thin wrappers over LemonMarkerExtractor
+    // so LinearClient and GitHubClient share one parser.
     func hasNewComment(issueId: String, afterCommentId: String, apiKey: String) async throws -> Bool {
         let comments = try await fetchComments(issueId: issueId, apiKey: apiKey)
-        guard let idx = comments.firstIndex(where: { $0.id == afterCommentId }) else {
-            return false
-        }
-        return idx < comments.count - 1
+        return LemonMarkerExtractor.hasNewComment(in: comments, afterCommentId: afterCommentId)
     }
 
-    // Returns the bodies of all comments posted after the given comment ID
-    // (exclusive). Used on re-trigger to surface human revision requests into
-    // LEMON_CONTEXT.md — without this, Claude reads only the original issue
-    // body on a re-run and concludes the task is already done.
     func fetchCommentsAfter(issueId: String, afterCommentId: String, apiKey: String) async throws -> [String] {
         let comments = try await fetchComments(issueId: issueId, apiKey: apiKey)
-        guard let idx = comments.firstIndex(where: { $0.id == afterCommentId }) else {
-            return []
-        }
-        let after = comments.suffix(from: comments.index(after: idx))
-        return after.map { $0.body }
+        return LemonMarkerExtractor.bodiesAfter(in: comments, afterCommentId: afterCommentId)
     }
 
-    // Finds the Lemon HTML marker in the issue's comments and parses it.
     func findLemonMarker(issueId: String, apiKey: String) async throws -> LemonMarker? {
         let comments = try await fetchComments(issueId: issueId, apiKey: apiKey)
-        for comment in comments.reversed() {
-            if let marker = parseLemonMarker(from: comment.body, commentId: comment.id) {
-                return marker
-            }
-        }
-        return nil
-    }
-
-    // Exposed for tests; treat as private otherwise.
-    func parseLemonMarker(from body: String, commentId: String) -> LemonMarker? {
-        guard
-            let start = body.range(of: "<!-- lemon\n"),
-            let end   = body.range(of: "\n-->", range: start.upperBound..<body.endIndex)
-        else { return nil }
-
-        let block = String(body[start.upperBound..<end.lowerBound])
-        var fields: [String: String] = [:]
-        for line in block.components(separatedBy: "\n") {
-            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            if parts.count == 2 { fields[parts[0]] = parts[1] }
-        }
-
-        guard
-            let branch   = fields["branch"],
-            let pr       = fields["pr"],
-            let repo     = fields["repo"]
-        else { return nil }
-
-        let storedCommentId = fields["comment"] ?? commentId
-        return LemonMarker(branch: branch, prNumber: pr, commentId: storedCommentId, repoPath: repo)
+        return LemonMarkerExtractor.findLatest(in: comments)
     }
 
     // MARK: - Mutations: post comment
