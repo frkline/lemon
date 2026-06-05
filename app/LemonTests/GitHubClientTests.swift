@@ -138,6 +138,54 @@ final class GitHubClientTests: XCTestCase {
                       "LinearClient palette stores '#'-prefixed values; GitHubClient strips it on send.")
     }
 
+    // MARK: - bootstrapLabels
+    //
+    // Regression: the trigger label (bare "🍋") was getting silently
+    // dropped because the older ensureLabel did a GET-then-POST and the
+    // GET path for a bare-emoji label name didn't reliably 404 — the
+    // request fell through `try?` in the bootstrap loop and the POST
+    // never ran. The new ensureLabel just POSTs and treats 422 as
+    // already-exists. This test locks in that every state lands a POST
+    // /labels with a bare-hex color.
+
+    func testBootstrapLabelsPostsAllFourStates() async throws {
+        var posted: [(name: String, color: String, description: String)] = []
+        GitHubStubURLProtocol.onRequest = { req in
+            guard req.httpMethod == "POST",
+                  let path = req.url?.path,
+                  path.hasSuffix("/labels") else { return }
+            guard let data = req.httpBody,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
+            posted.append((
+                name:        (json["name"] as? String) ?? "",
+                color:       (json["color"] as? String) ?? "",
+                description: (json["description"] as? String) ?? ""
+            ))
+        }
+        GitHubStubURLProtocol.respond(json: "{}", statusCode: 201)
+
+        let cfg = SourceConfig(source: .github, displayName: "g", githubRepos: ["acme/widgets"])
+        try await client().bootstrapLabels(config: cfg, auth: auth())
+
+        let names = Set(posted.map(\.name))
+        XCTAssertEqual(names,
+                       Set(["🍋", "🍋 In Progress", "🍋 Waiting", "🍋 Complete"]),
+                       "Bootstrap must POST all four Lemon labels — the bare 🍋 trigger label was getting dropped.")
+        XCTAssertTrue(posted.allSatisfy { !$0.color.hasPrefix("#") },
+                      "GitHub expects bare hex colors without leading '#'.")
+        XCTAssertTrue(posted.allSatisfy { !$0.description.isEmpty },
+                      "Each Lemon label should ship with a description GitHub renders in tooltips.")
+    }
+
+    func testBootstrapLabelsTreats422AsAlreadyExists() async throws {
+        // Pre-existing labels return 422; ensureLabel should swallow that
+        // and bootstrapLabels should not throw.
+        GitHubStubURLProtocol.respond(json: "{\"message\":\"Validation Failed\"}", statusCode: 422)
+        let cfg = SourceConfig(source: .github, displayName: "g", githubRepos: ["acme/widgets"])
+        try await client().bootstrapLabels(config: cfg, auth: auth())
+    }
+
     // MARK: - Enterprise host
 
     func testEnterpriseHostRoutesAPIRequestsCorrectly() async throws {

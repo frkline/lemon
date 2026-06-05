@@ -208,20 +208,18 @@ final class GitHubClient: Sendable {
     // MARK: - Label ensure / mutate
 
     private func ensureLabel(owner: String, repo: String, state: LemonState, token: String, host: String?) async throws {
-        // Quick GET; on 404, POST it. Idempotent so concurrent triggers don't race.
-        let getReq = authedRequest(
-            "GET",
-            path: "/repos/\(owner)/\(repo)/labels/\(encodePathSegment(state.labelName))",
-            token: token,
-            host: host
-        )
-        let (status, _) = try await send(getReq, allow404: true)
-        if status == 200 { return }
+        // Always POST; treat 422 (label already exists) as success. The
+        // earlier GET-then-POST flow was missing the plain "🍋" trigger
+        // label intermittently — GET on a bare-emoji label name doesn't
+        // reliably return 200 when the label exists, and a stray 4xx on
+        // GET fell through the bootstrap's `try?` and never created it.
+        // Just POST and let GitHub return 422 if it's already there;
+        // simpler and proven idempotent.
         struct CreateBody: Encodable { let name: String; let color: String; let description: String? }
         let body = try JSONEncoder().encode(CreateBody(
             name: state.labelName,
             color: Self.bareHexColor(for: state),
-            description: "Lemon state label"
+            description: Self.labelDescription(for: state)
         ))
         let createReq = authedRequest(
             "POST",
@@ -230,11 +228,22 @@ final class GitHubClient: Sendable {
             host: host,
             body: body
         )
-        // Treat 422 (already exists, race) as success.
         do {
             _ = try await send(createReq)
         } catch GitHubError.http(let code, _) where code == 422 {
             return
+        }
+    }
+
+    /// Per-state label description rendered by GitHub on the labels page
+    /// and in label tooltips. Tells the user (and any teammates) what
+    /// each Lemon label means.
+    private static func labelDescription(for state: LemonState) -> String {
+        switch state {
+        case .trigger:    return "Lemon: add this label to queue an issue for Claude"
+        case .inProgress: return "Lemon: Claude is working on this in a worktree"
+        case .waiting:    return "Lemon: Claude paused — needs your input"
+        case .complete:   return "Lemon: PR open — reply to the Lemon comment to re-trigger"
         }
     }
 
@@ -360,7 +369,11 @@ extension GitHubClient: IssueSourceClient {
         let memoKey = "\(host ?? Self.defaultHost):\(owner)/\(repo)"
         if Self.bootstrappedRepos.insertIfAbsent(memoKey) {
             for s in LemonState.allCases {
-                try? await ensureLabel(owner: owner, repo: repo, state: s, token: token, host: host)
+                do {
+                    try await ensureLabel(owner: owner, repo: repo, state: s, token: token, host: host)
+                } catch {
+                    Logger.orchestrator.error("GH lazy bootstrap \(owner)/\(repo) label '\(s.labelName)' failed: \(error.localizedDescription)")
+                }
             }
         }
         try await ensureLabel(owner: owner, repo: repo, state: state, token: token, host: host)
@@ -419,8 +432,16 @@ extension GitHubClient: IssueSourceClient {
             let parts = repoFullName.split(separator: "/", maxSplits: 1)
             guard parts.count == 2 else { continue }
             let owner = String(parts[0]); let repo = String(parts[1])
+            // Per-label failures are logged but don't abort — the other
+            // three still need to land. Without explicit logging, the
+            // earlier silent swallow hid the trigger-label miss for a
+            // long time.
             for state in LemonState.allCases {
-                try? await ensureLabel(owner: owner, repo: repo, state: state, token: token, host: host)
+                do {
+                    try await ensureLabel(owner: owner, repo: repo, state: state, token: token, host: host)
+                } catch {
+                    Logger.orchestrator.error("GH bootstrap \(owner)/\(repo) label '\(state.labelName)' failed: \(error.localizedDescription)")
+                }
             }
             _ = Self.bootstrappedRepos.insertIfAbsent("\(host ?? Self.defaultHost):\(owner)/\(repo)")
         }
