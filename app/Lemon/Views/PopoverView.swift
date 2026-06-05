@@ -54,6 +54,10 @@ struct PopoverView: View {
                         ))
                 }
             }
+            // Stable floor so the popover doesn't shrink to a sliver
+            // mid-transition (the "just Quit visible" frame). Panes
+            // taller than the floor get to grow.
+            .frame(maxWidth: .infinity, minHeight: 380, alignment: .top)
             .animation(LD.slide, value: nav.showingSettings)
             .animation(LD.slide, value: nav.selectedSession?.id)
             .animation(LD.slide, value: nav.editingIdentity)
@@ -61,6 +65,14 @@ struct PopoverView: View {
             .clipped()
         }
         .frame(width: 480)
+        // Resize snaps instead of animating — popover height changes
+        // were running through SwiftUI's implicit layout animation and
+        // pulsed the window noticeably as content swapped. Wrapping the
+        // outer VStack in `.animation(nil, value: ...)` for any layout
+        // signals is the wrong shape; the cleanest fix is to forbid
+        // implicit animation on the container's geometry directly.
+        .animation(nil, value: orchestrator.sessions.active.count)
+        .animation(nil, value: orchestrator.sessions.recent.count)
         .background(.regularMaterial)
         .onAppear {
             withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
