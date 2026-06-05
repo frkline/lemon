@@ -51,6 +51,7 @@ struct IdentityEditorPane: View {
                 if isGitHub { hostField }
                 verifyRow
                 if verified { surfacesSummary }
+                if !isNew { routedBySummary }
                 Spacer(minLength: 4)
                 actionsRow
             }
@@ -275,6 +276,81 @@ struct IdentityEditorPane: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    /// Workspaces that route through this identity. Surfaced so the user
+    /// understands what would break if they delete the identity, and as a
+    /// quick jump-back to the workspace editor.
+    private var routedBySummary: some View {
+        let routed = KeychainStore.shared.workspaces.filter {
+            $0.routing.identityId == existingIdentity?.id
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("ROUTED BY")
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                Text("\(routed.count) workspace\(routed.count == 1 ? "" : "s")")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            if routed.isEmpty {
+                Text("Not routed by any workspace yet. Delete is safe.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.quaternary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(routed.prefix(6), id: \.id) { ws in
+                        Button {
+                            nav.editWorkspace(ws.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(URL(fileURLWithPath: ws.path).lastPathComponent.isEmpty
+                                     ? "Unnamed"
+                                     : URL(fileURLWithPath: ws.path).lastPathComponent)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                Text("·")
+                                    .foregroundStyle(.quaternary)
+                                Text(ws.routing.surfaceId)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.quaternary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if routed.count > 6 {
+                        Text("+ \(routed.count - 6) more")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.quaternary)
+                    }
+                    if deleteArmed {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(LD.coral)
+                            Text("\(routed.count) workspace\(routed.count == 1 ? "" : "s") will lose their routing.")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(LD.coral)
+                        }
+                        .padding(.top, 2)
+                        .transition(.opacity)
+                    }
+                }
+                .padding(12)
+                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            }
         }
     }
 
