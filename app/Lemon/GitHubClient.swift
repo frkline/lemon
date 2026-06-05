@@ -130,14 +130,15 @@ final class GitHubClient: Sendable {
 
     // MARK: - Search
 
-    // Builds `repo:o/r is:issue is:open label:LABEL (assignee:LOGIN no:assignee)`-style query.
+    // Builds `repo:o/r is:issue is:open label:LABEL (assignee:LOGIN OR no:assignee)`-style query.
     // Multiple repos collapse to multiple `repo:` terms (OR semantics).
     private func buildSearchQuery(label: String, repos: [String], login: String) -> String {
         let repoTerms = repos.map { "repo:\($0)" }.joined(separator: " ")
         // GitHub search OR: either assigned to the user OR unassigned.
-        // The `no:assignee` qualifier captures unassigned; for OR with
-        // `assignee:` we need parens.
-        let assigneeClause = "(assignee:\(login) no:assignee)"
+        // The OR keyword is required — a bare space is AND, so
+        // `(assignee:LOGIN no:assignee)` asks GH for issues both
+        // assigned-to-LOGIN AND unassigned, which never matches.
+        let assigneeClause = "(assignee:\(login) OR no:assignee)"
         return "\(repoTerms) is:issue is:open label:\"\(label)\" \(assigneeClause)"
     }
 

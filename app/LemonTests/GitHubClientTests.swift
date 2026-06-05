@@ -177,6 +177,26 @@ final class GitHubClientTests: XCTestCase {
                       "Each Lemon label should ship with a description GitHub renders in tooltips.")
     }
 
+    func testSearchQueryUsesORBetweenAssigneeAndNoAssignee() async throws {
+        // Regression: the original query was `(assignee:LOGIN no:assignee)`
+        // which GitHub parses as AND, so it asked for issues both
+        // assigned to the user AND unassigned — impossible. The poll
+        // loop logged total_count:0 against repos that visibly had 🍋
+        // Lemon issues. Lock the OR keyword into the query.
+        var observed: URLRequest?
+        GitHubStubURLProtocol.onRequest = { observed = $0 }
+        GitHubStubURLProtocol.respond(json: "{\"total_count\":0,\"items\":[]}")
+
+        let cfg = SourceConfig(source: .github, displayName: "g", githubRepos: ["frkline/lemon"])
+        _ = try await client().fetchTriggerQueue(config: cfg, auth: auth())
+
+        let q = observed?.url?.query(percentEncoded: false) ?? ""
+        XCTAssertTrue(q.contains("(assignee:frkline OR no:assignee)"),
+                      "Search must explicitly OR the assignee/no:assignee branches — bare space is AND. Got: \(q)")
+        XCTAssertTrue(q.contains("label:\"🍋 Lemon\""),
+                      "Trigger search must hit the renamed GH-side label '🍋 Lemon'.")
+    }
+
     func testIncomingTriggerLabelIsNormalizedToCanonical() async throws {
         // GH returns "🍋 Lemon" on an issue; downstream code (WorktreeRunner,
         // state checks) compares against LemonState.trigger.labelName which
