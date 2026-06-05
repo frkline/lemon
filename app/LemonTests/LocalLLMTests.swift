@@ -31,9 +31,10 @@ final class LocalLLMTests: XCTestCase {
         return "\"\(escaped)\""
     }
 
-    private func issue() -> LinearIssue {
-        LinearIssue(id: "t1", identifier: "TEST-1", title: "Test issue",
-                    description: "Do something", labelNames: [], teamId: "team1")
+    private func issue() -> IssueRef {
+        IssueRef(id: "t1", identifier: "TEST-1", title: "Test issue",
+                 description: "Do something", labelNames: [],
+                 scope: .linearTeam(id: "team1"))
     }
 
     // MARK: - classify()

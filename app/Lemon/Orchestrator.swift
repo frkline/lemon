@@ -164,7 +164,7 @@ final class Orchestrator {
 
     @MainActor
     private func startSession(for issue: LinearIssue, repo: WorkspaceRepo, retrigger: LemonMarker?) async {
-        let session = Session(issue: issue)
+        let session = Session(issue: IssueRef(linearIssue: issue))
         session.worktreePath = "/tmp/lemon-\(issue.identifier.lowercased())"
         session.terminalWindowName = "Lemon · \(issue.identifier)"
         sessions.add(session)
@@ -219,11 +219,11 @@ final class Orchestrator {
         // Fixed anchor: pins all relative timestamps so screenshots are stable across runs
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
-        let active1 = Session(issue: LinearIssue(
+        let active1 = Session(issue: IssueRef(
             id: "mock-1", identifier: "DEMO-42",
             title: "Add dark mode to dashboard cards",
             description: "All card components need a dark variant matching the system appearance.",
-            labelNames: ["🍋 In Progress"], teamId: "mock-team"
+            labelNames: ["🍋 In Progress"], scope: .linearTeam(id: "mock-team")
         ), startedAt: now.addingTimeInterval(-180))
         active1.status = .executing
         active1.aiSummary = "Updating ColorScheme tokens in CardView and running snapshot tests"
@@ -237,29 +237,29 @@ final class Orchestrator {
             "[gemma] Session active — modifying color tokens across 4 files"
         ] { active1.appendLog(line) }
 
-        let active2 = Session(issue: LinearIssue(
-            id: "mock-2", identifier: "DEMO-39",
+        let active2 = Session(issue: IssueRef(
+            id: "mock-2", identifier: "acme/widgets#39",
             title: "Fix auth redirect loop on token expiry",
             description: "Users are stuck in a redirect loop when their JWT expires mid-session.",
-            labelNames: ["🍋 In Progress"], teamId: "mock-team"
+            labelNames: ["🍋 In Progress"], scope: .githubRepo(owner: "acme", repo: "widgets", number: 39)
         ), startedAt: now.addingTimeInterval(-420))
         active2.status = .waiting
         active2.aiSummary = "Needs decision: refresh token silently or redirect to login?"
         active2.pendingAction = "Accepting MCP servers… (Cancel to abort)"
         for line in [
-            "[lemon] Starting session for DEMO-39",
-            "[lemon] Worktree ready at /tmp/lemon-demo-39",
+            "[lemon] Starting session for acme/widgets#39",
+            "[lemon] Worktree ready at /tmp/lemon-acme-widgets-39",
             "Reviewing AuthMiddleware.swift...",
             "Found expired token handling at line 84",
             "[error] Multiple redirect paths detected — needs clarification",
             "[gemma] Session waiting for input — ambiguous auth strategy"
         ] { active2.appendLog(line) }
 
-        let recent = Session(issue: LinearIssue(
+        let recent = Session(issue: IssueRef(
             id: "mock-3", identifier: "DEMO-31",
             title: "Migrate user table to UUID primary keys",
             description: nil,
-            labelNames: ["🍋 Complete"], teamId: "mock-team"
+            labelNames: ["🍋 Complete"], scope: .linearTeam(id: "mock-team")
         ), startedAt: now.addingTimeInterval(-5400))
         recent.status = .done
         recent.prUrl = "https://github.com/example/repo/pull/201"

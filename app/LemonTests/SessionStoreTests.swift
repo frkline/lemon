@@ -2,8 +2,9 @@ import XCTest
 @testable import Lemon
 
 final class SessionStoreTests: XCTestCase {
-    private func issue(id: String = "i1") -> LinearIssue {
-        LinearIssue(id: id, identifier: "DEMO-1", title: "Test", description: nil, labelNames: [], teamId: "team1")
+    private func issue(id: String = "i1") -> IssueRef {
+        IssueRef(id: id, identifier: "DEMO-1", title: "Test", description: nil,
+                 labelNames: [], scope: .linearTeam(id: "team1"))
     }
 
     func testAddAppendsToActive() {

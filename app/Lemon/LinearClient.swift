@@ -395,3 +395,110 @@ final class LinearClient: Sendable {
         }
     }
 }
+
+// MARK: - IssueSourceClient conformance
+
+extension LinearClient: IssueSourceClient {
+
+    private func linearAuth(_ auth: SourceAuth) throws -> (apiKey: String, userId: String) {
+        guard case .linear(let apiKey, let userId) = auth else {
+            throw IssueSourceError.authMismatch(expected: .linear, got: auth.source)
+        }
+        return (apiKey, userId)
+    }
+
+    private func linearScope(_ ref: IssueRef) throws -> String {
+        guard case .linearTeam(let teamId) = ref.scope else {
+            throw IssueSourceError.authMismatch(expected: .linear, got: ref.source)
+        }
+        return teamId
+    }
+
+    func fetchTriggerQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
+        let (apiKey, userId) = try linearAuth(auth)
+        let issues = try await fetchLemonQueue(apiKey: apiKey, userId: userId)
+        // Linear team allowlist is by team key (e.g. "HRP"); filter post-fetch
+        // since Linear's filter API takes IDs, and we surface keys in onboarding.
+        if let allow = config.linearTeamKeys, !allow.isEmpty {
+            let lowered = Set(allow.map { $0.lowercased() })
+            return issues
+                .filter { lowered.contains($0.identifierPrefix.lowercased()) }
+                .map { IssueRef(linearIssue: $0) }
+        }
+        return issues.map { IssueRef(linearIssue: $0) }
+    }
+
+    func fetchCompleteQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
+        let (apiKey, userId) = try linearAuth(auth)
+        let issues = try await fetchCompleteIssues(apiKey: apiKey, userId: userId)
+        if let allow = config.linearTeamKeys, !allow.isEmpty {
+            let lowered = Set(allow.map { $0.lowercased() })
+            return issues
+                .filter { lowered.contains($0.identifierPrefix.lowercased()) }
+                .map { IssueRef(linearIssue: $0) }
+        }
+        return issues.map { IssueRef(linearIssue: $0) }
+    }
+
+    func fetchIssueLabels(ref: IssueRef, auth: SourceAuth) async throws -> [String]? {
+        let (apiKey, _) = try linearAuth(auth)
+        return try await fetchIssueLabels(issueId: ref.id, apiKey: apiKey)
+    }
+
+    func applyState(ref: IssueRef, state: LemonState, auth: SourceAuth) async throws {
+        let (apiKey, _) = try linearAuth(auth)
+        let teamId = try linearScope(ref)
+        let labelId = try await ensureLabelId(name: state.labelName, teamId: teamId, apiKey: apiKey)
+        try await addLabel(issueId: ref.id, labelId: labelId, apiKey: apiKey)
+    }
+
+    func clearState(ref: IssueRef, state: LemonState, auth: SourceAuth) async throws {
+        let (apiKey, _) = try linearAuth(auth)
+        let teamId = try linearScope(ref)
+        let labelId = try await ensureLabelId(name: state.labelName, teamId: teamId, apiKey: apiKey)
+        try await removeLabel(issueId: ref.id, labelId: labelId, apiKey: apiKey)
+    }
+
+    @discardableResult
+    func postComment(ref: IssueRef, body: String, auth: SourceAuth) async throws -> String {
+        let (apiKey, _) = try linearAuth(auth)
+        return try await postComment(issueId: ref.id, body: body, apiKey: apiKey)
+    }
+
+    func fetchComments(ref: IssueRef, auth: SourceAuth) async throws -> [IssueComment] {
+        let (apiKey, _) = try linearAuth(auth)
+        return try await fetchComments(issueId: ref.id, apiKey: apiKey)
+    }
+
+    func hasNewComment(ref: IssueRef, afterCommentId: String, auth: SourceAuth) async throws -> Bool {
+        let (apiKey, _) = try linearAuth(auth)
+        return try await hasNewComment(issueId: ref.id, afterCommentId: afterCommentId, apiKey: apiKey)
+    }
+
+    func fetchCommentsAfter(ref: IssueRef, afterCommentId: String, auth: SourceAuth) async throws -> [String] {
+        let (apiKey, _) = try linearAuth(auth)
+        return try await fetchCommentsAfter(issueId: ref.id, afterCommentId: afterCommentId, apiKey: apiKey)
+    }
+
+    func findLemonMarker(ref: IssueRef, auth: SourceAuth) async throws -> LemonMarker? {
+        let (apiKey, _) = try linearAuth(auth)
+        return try await findLemonMarker(issueId: ref.id, apiKey: apiKey)
+    }
+
+    func bootstrapLabels(config: SourceConfig, auth: SourceAuth) async throws {
+        let (apiKey, _) = try linearAuth(auth)
+        let teams = try await fetchTeams(apiKey: apiKey)
+        let allow = config.linearTeamKeys.map { Set($0.map { $0.lowercased() }) }
+        for team in teams {
+            if let allow, !allow.contains(team.key.lowercased()) { continue }
+            for state in LemonState.allCases {
+                _ = try? await ensureLabelId(name: state.labelName, teamId: team.id, apiKey: apiKey)
+            }
+        }
+    }
+
+    func verifyCredential(token: String) async throws -> CredentialIdentity {
+        let viewer = try await fetchViewer(apiKey: token)
+        return CredentialIdentity(id: viewer.id, displayName: viewer.name, avatarUrl: viewer.avatarUrl)
+    }
+}

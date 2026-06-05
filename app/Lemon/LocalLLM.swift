@@ -226,7 +226,7 @@ final class LocalLLM: @unchecked Sendable {
 
     // MARK: - Inference
 
-    func classify(issue: LinearIssue, logLines: [String]) async throws -> GemmaResponse {
+    func classify(issue: IssueRef, logLines: [String]) async throws -> GemmaResponse {
         let systemPrompt = """
         You monitor a running Claude Code coding session for Lemon. Given the last \
         terminal output, classify the session and decide whether to act.

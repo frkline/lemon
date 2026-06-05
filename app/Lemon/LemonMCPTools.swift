@@ -172,7 +172,7 @@ enum LemonMCPTools {
                 // Resolve the session and snapshot the issue + log lines on
                 // MainActor so we can leave the actor before the (potentially
                 // slow) network round-trip to SwiftLM.
-                let snapshot = await MainActor.run { () -> (LinearIssue, [String])? in
+                let snapshot = await MainActor.run { () -> (IssueRef, [String])? in
                     guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg) else { return nil }
                     let tail = readPaneLogTail(identifier: session.issue.identifier, lines: lines)
                     return (session.issue, tail)

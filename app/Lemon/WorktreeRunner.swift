@@ -570,7 +570,7 @@ final class WorktreeRunner: @unchecked Sendable {
         let lines = tailLog(issue.identifier, last: 100)
         Logger.worktree.info("[gemma] classifying \(issue.identifier) with \(lines.count) log lines")
         do {
-            let response = try await LocalLLM.shared.classify(issue: issue, logLines: lines)
+            let response = try await LocalLLM.shared.classify(issue: IssueRef(linearIssue: issue), logLines: lines)
             Logger.worktree.info("[gemma] state=\(response.state) action=\(response.action?.type ?? "nil") summary=\(response.summary, privacy: .public)")
 
             onAiSummary?(response.summary)

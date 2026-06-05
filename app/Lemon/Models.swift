@@ -46,8 +46,8 @@ enum IssueScope: Codable, Equatable, Hashable {
 }
 
 struct IssueRef: Identifiable, Codable, Equatable, Hashable {
-    let id: String                  // opaque source-side id (Linear node id, or "owner/repo#n")
-    let displayIdentifier: String   // human-facing label, e.g. "HRP-42" or "acme/widgets#7"
+    let id: String              // opaque source-side id (Linear node id, or "owner/repo#n")
+    let identifier: String      // human-facing label, e.g. "HRP-42" or "acme/widgets#7"
     let title: String
     let description: String?
     let labelNames: [String]
@@ -60,6 +60,13 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
         }
     }
 
+    // Linear-style prefix ("HRP" for "HRP-42"). For GitHub identifiers this
+    // returns whatever leading-letters happen to be there; routing for GH
+    // pairs goes through scope, not prefix, so the value is unused in that path.
+    var identifierPrefix: String {
+        String(identifier.prefix(while: { $0.isLetter }))
+    }
+
     // Namespaced so Linear node IDs and GitHub identifiers can't collide in
     // SessionStore.isTracking — see plan §5.
     var trackingKey: String { "\(source.rawValue):\(id)" }
@@ -70,12 +77,33 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
     var pathSlug: String {
         switch scope {
         case .linearTeam:
-            return displayIdentifier.lowercased()
+            return identifier.lowercased()
         case .githubRepo(let owner, let repo, let number):
             return "\(owner)-\(repo)-\(number)"
                 .lowercased()
                 .replacingOccurrences(of: "/", with: "-")
         }
+    }
+
+    // Adapter from the Linear-specific issue shape used by LinearClient
+    // internals. Mirrors LinearIssue field-for-field.
+    init(linearIssue i: LinearIssue) {
+        self.id = i.id
+        self.identifier = i.identifier
+        self.title = i.title
+        self.description = i.description
+        self.labelNames = i.labelNames
+        self.scope = .linearTeam(id: i.teamId)
+    }
+
+    init(id: String, identifier: String, title: String, description: String?,
+         labelNames: [String], scope: IssueScope) {
+        self.id = id
+        self.identifier = identifier
+        self.title = title
+        self.description = description
+        self.labelNames = labelNames
+        self.scope = scope
     }
 }
 
@@ -173,7 +201,7 @@ struct LemonMarker: Equatable {
 @Observable
 final class Session: Identifiable {
     let id: UUID = UUID()
-    let issue: LinearIssue
+    let issue: IssueRef
     let startedAt: Date
     var status: SessionStatus = .planning
     var logLines: [String] = []
@@ -184,13 +212,13 @@ final class Session: Identifiable {
     var aiSummary: String?
     var pendingAction: String?
 
-    init(issue: LinearIssue) {
+    init(issue: IssueRef) {
         self.issue = issue
         self.startedAt = Date()
     }
 
     #if DEBUG
-    init(issue: LinearIssue, startedAt: Date) {
+    init(issue: IssueRef, startedAt: Date) {
         self.issue = issue
         self.startedAt = startedAt
     }

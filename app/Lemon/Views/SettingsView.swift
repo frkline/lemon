@@ -462,13 +462,13 @@ struct SettingsView: View {
             }
             await MainActor.run { aiTestState = .classifying }
 
-            let fixture = LinearIssue(
+            let fixture = IssueRef(
                 id: "test-id",
                 identifier: "TEST-1",
                 title: "Self-test",
                 description: "Lemon settings self-test — verifies SwiftLM + Gemma respond correctly.",
                 labelNames: [],
-                teamId: "test"
+                scope: .linearTeam(id: "test")
             )
             let logs = [
                 "$ claude --permission-mode auto --remote-control",
