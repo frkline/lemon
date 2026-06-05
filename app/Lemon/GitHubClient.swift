@@ -145,6 +145,10 @@ final class GitHubClient: Sendable {
     private func searchIssues(label: String, repos: [String], token: String, login: String, host: String?) async throws -> [IssueRef] {
         guard !repos.isEmpty else { return [] }
         let q = buildSearchQuery(label: label, repos: repos, login: login)
+        // Log the literal query so we can debug "0 results when there
+        // are obviously matches" cases — GitHub's lexical search type
+        // can swallow label-with-emoji queries silently.
+        Logger.linear.debug("[gh] search q=\(q)")
         let req = authedRequest(
             "GET",
             path: "/search/issues",
