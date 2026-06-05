@@ -18,6 +18,7 @@ struct WorkspaceEditorPane: View {
     @State private var deleteTask: Task<Void, Never>?
     @State private var existing: Workspace?
     @State private var suggestion: PathSuggestion? = nil
+    @State private var typingCustomKey: Bool = false
 
     struct PathSuggestion: Equatable {
         let identityId: UUID
@@ -288,6 +289,16 @@ struct WorkspaceEditorPane: View {
                     Text("No surfaces cached yet. Re-verify the identity to fetch them, or type a key here.")
                         .font(.system(size: 10))
                         .foregroundStyle(.quaternary)
+                } else if typingCustomKey {
+                    surfaceFreeText
+                    Button {
+                        withAnimation(LD.snappy) { typingCustomKey = false }
+                    } label: {
+                        Text("← Pick from \(ident.knownSurfaces.count) known surface\(ident.knownSurfaces.count == 1 ? "" : "s")")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(LD.lemon)
+                    }
+                    .buttonStyle(.plain)
                 } else {
                     Menu {
                         ForEach(ident.knownSurfaces) { s in
@@ -317,10 +328,14 @@ struct WorkspaceEditorPane: View {
                         )
                     }
                     .menuStyle(.borderlessButton)
-                    Text("Pick from \(ident.knownSurfaces.count) known surface\(ident.knownSurfaces.count == 1 ? "" : "s") — or type a custom key below.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.quaternary)
-                    surfaceFreeText
+                    Button {
+                        withAnimation(LD.snappy) { typingCustomKey = true }
+                    } label: {
+                        Text("Type a custom key →")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         } else {
