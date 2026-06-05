@@ -423,7 +423,7 @@ struct PopoverView: View {
     }
 
     private func joinSession(_ session: Session) {
-        let name = "lemon-\(session.issue.identifier.lowercased())"
+        let name = "lemon-\(session.issue.pathSlug)"
         // The user explicitly clicked Join — they want the window to appear AND
         // come to the front. Try iTerm2 first (tmux -CC native tabs), then
         // Terminal.app (always present), and only fall back to clipboard if

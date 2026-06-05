@@ -11,9 +11,18 @@ final class Orchestrator {
     var isPolling = false
     var aiState: LocalLLM.AIState = .notConfigured
 
-    private let linear = LinearClient()
+    // Per-source clients, lazily created on first use per process.
+    private let linearClient = LinearClient()
+    private let githubClient = GitHubClient()
     private var pollTask: Task<Void, Never>?
     private var runners: [UUID: WorktreeRunner] = [:]
+
+    private func client(for pair: WorkspacePair) -> any IssueSourceClient {
+        switch pair.source.source {
+        case .linear: return linearClient
+        case .github: return githubClient
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -52,80 +61,82 @@ final class Orchestrator {
             aiState = LocalLLM.shared.state()
         }
 
-        let apiKey = keychain.linearApiKey
+        let pairs = keychain.pairs
+        guard !pairs.isEmpty else {
+            lastPollError = "No workspace pairs configured."
+            return
+        }
 
+        lastPollError = nil
+
+        // Bootstrap labels once per process, per pair. Failures don't abort
+        // polling — bootstrapLabels logs and retries on the next poll.
+        await bootstrapLabels(pairs: pairs, keychain: keychain)
+
+        // Iterate pairs sequentially: avoids GitHub rate-limit bursts on
+        // first poll and keeps log lines easy to follow per source.
+        for pair in pairs {
+            guard let auth = keychain.authFor(pair: pair) else {
+                Logger.orchestrator.info("Skip pair \(pair.workspace.matchKey): missing credentials")
+                continue
+            }
+            let cli = client(for: pair)
+            await pollPair(pair: pair, client: cli, auth: auth)
+        }
+    }
+
+    @MainActor
+    private func pollPair(pair: WorkspacePair, client: any IssueSourceClient, auth: SourceAuth) async {
         do {
-            let userId = keychain.linearUserId
+            // 1. New 🍋-labeled issues → start a session.
+            let newIssues = try await client.fetchTriggerQueue(config: pair.source, auth: auth)
+            Logger.orchestrator.info("Poll[\(pair.source.source.rawValue)/\(pair.workspace.matchKey)]: \(newIssues.count) queued, \(self.sessions.active.count) active")
 
-            // Ensure 🍋 labels exist in all teams on first poll.
-            await bootstrapLabels(apiKey: apiKey)
-
-            // 1. New 🍋-labeled issues assigned to this user → start a session.
-            let newIssues = try await linear.fetchLemonQueue(apiKey: apiKey, userId: userId)
-            lastPollError = nil
-            Logger.orchestrator.info("Poll: \(newIssues.count) queued, \(self.sessions.active.count) active")
-
-            for issue in newIssues {
-                guard !sessions.isTracking(issueId: issue.id) else { continue }
+            for ref in newIssues {
+                guard !sessions.isTracking(ref: ref) else { continue }
                 guard sessions.active.count < maxConcurrent else {
-                    Logger.orchestrator.info("At max concurrent sessions, skipping \(issue.identifier)")
+                    Logger.orchestrator.info("At max concurrent sessions, skipping \(ref.identifier)")
                     break
                 }
-                guard let repo = keychain.repoFor(issuePrefix: issue.identifierPrefix) else {
-                    let msg = "No workspace configured for prefix \(issue.identifierPrefix)"
-                    Logger.orchestrator.error("\(msg)")
-                    lastPollError = msg
-                    continue
-                }
-                Logger.orchestrator.info("Starting session for \(issue.identifier): \(issue.title)")
-                await startSession(for: issue, repo: repo, retrigger: nil)
+                Logger.orchestrator.info("Starting session for \(ref.identifier): \(ref.title)")
+                await startSession(ref: ref, pair: pair, client: client, auth: auth, retrigger: nil)
             }
 
-            // 2. 🍋 Complete issues assigned to this user → check for human replies to re-trigger.
-            let completeIssues = try await linear.fetchCompleteIssues(apiKey: apiKey, userId: userId)
-            Logger.orchestrator.info("Poll: \(completeIssues.count) complete issues to check for replies")
-            for issue in completeIssues {
-                if sessions.isTracking(issueId: issue.id) {
-                    Logger.orchestrator.info("Retrigger skip \(issue.identifier): already tracking")
+            // 2. 🍋 Complete issues → check for human replies to re-trigger.
+            let completeIssues = try await client.fetchCompleteQueue(config: pair.source, auth: auth)
+            Logger.orchestrator.info("Poll[\(pair.source.source.rawValue)]: \(completeIssues.count) complete issues to check for replies")
+            for ref in completeIssues {
+                if sessions.isTracking(ref: ref) {
+                    Logger.orchestrator.info("Retrigger skip \(ref.identifier): already tracking")
                     continue
                 }
                 let maybeMarker: LemonMarker?
                 do {
-                    maybeMarker = try await linear.findLemonMarker(issueId: issue.id, apiKey: apiKey)
+                    maybeMarker = try await client.findLemonMarker(ref: ref, auth: auth)
                 } catch {
-                    Logger.orchestrator.error("Retrigger skip \(issue.identifier): findLemonMarker error: \(error.localizedDescription)")
+                    Logger.orchestrator.error("Retrigger skip \(ref.identifier): findLemonMarker error: \(error.localizedDescription)")
                     continue
                 }
                 guard let marker = maybeMarker else {
-                    // Diagnostic: also dump comment count + first 80 chars of last body
-                    let count = (try? await linear.fetchComments(issueId: issue.id, apiKey: apiKey).count) ?? -1
-                    Logger.orchestrator.info("Retrigger skip \(issue.identifier): no Lemon marker found (\(count) comments visible)")
+                    Logger.orchestrator.info("Retrigger skip \(ref.identifier): no Lemon marker found")
                     continue
                 }
                 let hasReply: Bool
                 do {
-                    hasReply = try await linear.hasNewComment(
-                        issueId: issue.id,
-                        afterCommentId: marker.commentId,
-                        apiKey: apiKey
-                    )
+                    hasReply = try await client.hasNewComment(ref: ref, afterCommentId: marker.commentId, auth: auth)
                 } catch {
-                    Logger.orchestrator.error("Retrigger \(issue.identifier) hasNewComment failed: \(error)")
+                    Logger.orchestrator.error("Retrigger \(ref.identifier) hasNewComment failed: \(error)")
                     continue
                 }
                 if !hasReply {
-                    Logger.orchestrator.info("Retrigger skip \(issue.identifier): no new comment after marker \(marker.commentId)")
+                    Logger.orchestrator.info("Retrigger skip \(ref.identifier): no new comment after marker \(marker.commentId)")
                     continue
                 }
-                guard let repo = keychain.repoFor(issuePrefix: issue.identifierPrefix) else {
-                    Logger.orchestrator.error("Retrigger skip \(issue.identifier): no repo configured for prefix \(issue.identifierPrefix)")
-                    continue
-                }
-                Logger.orchestrator.info("Re-triggering \(issue.identifier) from reply")
-                await startSession(for: issue, repo: repo, retrigger: marker)
+                Logger.orchestrator.info("Re-triggering \(ref.identifier) from reply")
+                await startSession(ref: ref, pair: pair, client: client, auth: auth, retrigger: marker)
             }
         } catch {
-            Logger.orchestrator.error("Poll error: \(error)")
+            Logger.orchestrator.error("Poll error for pair \(pair.workspace.matchKey): \(error)")
             lastPollError = error.localizedDescription
         }
     }
@@ -134,39 +145,31 @@ final class Orchestrator {
 
     // MARK: - Label bootstrapping
 
-    private var labelsBootstrapped = false
+    private var bootstrappedPairs: Set<UUID> = []
 
-    private func bootstrapLabels(apiKey: String) async {
-        guard !labelsBootstrapped else { return }
-        do {
-            let teams = try await linear.fetchTeams(apiKey: apiKey)
-            Logger.orchestrator.info("Bootstrapping Lemon labels for \(teams.count) team(s)")
-            for team in teams {
-                for label in [LinearClient.labelTrigger, LinearClient.labelInProgress,
-                              LinearClient.labelWaiting, LinearClient.labelComplete] {
-                    _ = try? await linear.ensureLabelId(name: label, teamId: team.id, apiKey: apiKey)
-                }
+    private func bootstrapLabels(pairs: [WorkspacePair], keychain: KeychainStore) async {
+        for pair in pairs {
+            if bootstrappedPairs.contains(pair.id) { continue }
+            guard let auth = keychain.authFor(pair: pair) else { continue }
+            let cli = client(for: pair)
+            do {
+                try await cli.bootstrapLabels(config: pair.source, auth: auth)
+                bootstrappedPairs.insert(pair.id)
+                Logger.orchestrator.info("Bootstrapped labels for pair \(pair.workspace.matchKey)")
+            } catch {
+                Logger.orchestrator.error("Label bootstrap failed for \(pair.workspace.matchKey): \(error) — will retry on next poll")
             }
-            // Mark complete only after the fetch + ensure loop ran. The previous
-            // code set this guard before the network call, so a transient
-            // fetchTeams failure on first launch would permanently skip the
-            // eager bootstrap. WorktreeRunner.run still calls ensureLabelId
-            // lazily, but the eager pass is what makes onboarding's "Labels
-            // ready in N teams" indicator green; better to retry on next poll.
-            labelsBootstrapped = true
-            Logger.orchestrator.info("Label bootstrap complete")
-        } catch {
-            Logger.orchestrator.error("Label bootstrap failed: \(error) — will retry on next poll")
         }
     }
 
     // MARK: - Session management
 
     @MainActor
-    private func startSession(for issue: LinearIssue, repo: WorkspaceRepo, retrigger: LemonMarker?) async {
-        let session = Session(issue: IssueRef(linearIssue: issue))
-        session.worktreePath = "/tmp/lemon-\(issue.identifier.lowercased())"
-        session.terminalWindowName = "Lemon · \(issue.identifier)"
+    private func startSession(ref: IssueRef, pair: WorkspacePair, client: any IssueSourceClient,
+                              auth: SourceAuth, retrigger: LemonMarker?) async {
+        let session = Session(issue: ref)
+        session.worktreePath = "/tmp/lemon-\(ref.pathSlug)"
+        session.terminalWindowName = "Lemon · \(ref.identifier)"
         sessions.add(session)
 
         let runner = WorktreeRunner()
@@ -195,7 +198,7 @@ final class Orchestrator {
         }
 
         Task.detached(priority: .background) {
-            await runner.run(issue: issue, workspace: repo, retrigger: retrigger)
+            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger)
         }
     }
 
@@ -243,6 +246,8 @@ final class Orchestrator {
             description: "Users are stuck in a redirect loop when their JWT expires mid-session.",
             labelNames: ["🍋 In Progress"], scope: .githubRepo(owner: "acme", repo: "widgets", number: 39)
         ), startedAt: now.addingTimeInterval(-420))
+        active2.worktreePath = "/tmp/lemon-\(active2.issue.pathSlug)"
+        active2.terminalWindowName = "Lemon · \(active2.issue.identifier)"
         active2.status = .waiting
         active2.aiSummary = "Needs decision: refresh token silently or redirect to login?"
         active2.pendingAction = "Accepting MCP servers… (Cancel to abort)"

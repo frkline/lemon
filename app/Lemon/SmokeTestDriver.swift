@@ -56,7 +56,7 @@ final class SmokeTestDriver {
         // When iTerm is absent the Join button copies "tmux attach -t lemon-{id}" to clipboard.
         if let s = orchestrator.sessions.active.first(where: { $0.pendingAction == nil }),
            !FileManager.default.fileExists(atPath: "/Applications/iTerm.app") {
-            let expectedSession = "lemon-\(s.issue.identifier.lowercased())"
+            let expectedSession = "lemon-\(s.issue.pathSlug)"
             let expectedCmd = "tmux attach -t \(expectedSession)"
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(expectedCmd, forType: .string)

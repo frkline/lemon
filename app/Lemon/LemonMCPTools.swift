@@ -71,7 +71,7 @@ enum LemonMCPTools {
                         throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
                     }
                     var detail = sessionSummary(session)
-                    detail["log_tail"] = readPaneLogTail(identifier: session.issue.identifier, lines: lines)
+                    detail["log_tail"] = readPaneLogTail(slug: session.issue.pathSlug, lines: lines)
                     if let summary = session.aiSummary { detail["last_ai_summary"] = summary }
                     if let pending = session.pendingAction { detail["pending_action"] = pending }
                     if let pr = session.prUrl { detail["pr_url"] = pr }
@@ -105,7 +105,7 @@ enum LemonMCPTools {
                     let payload: [String: Any] = [
                         "identifier": session.issue.identifier,
                         "log_path": "/tmp/lemon-log-\(session.issue.identifier.lowercased()).txt",
-                        "tail": readPaneLogTail(identifier: session.issue.identifier, lines: lines)
+                        "tail": readPaneLogTail(slug: session.issue.pathSlug, lines: lines)
                     ]
                     return LemonMCPServer.encode(payload)
                 }
@@ -174,7 +174,7 @@ enum LemonMCPTools {
                 // slow) network round-trip to SwiftLM.
                 let snapshot = await MainActor.run { () -> (IssueRef, [String])? in
                     guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg) else { return nil }
-                    let tail = readPaneLogTail(identifier: session.issue.identifier, lines: lines)
+                    let tail = readPaneLogTail(slug: session.issue.pathSlug, lines: lines)
                     return (session.issue, tail)
                 }
                 guard let (issue, tail) = snapshot else {
@@ -239,13 +239,15 @@ enum LemonMCPTools {
                     throw MCPError(code: -32602, message: "missing 'keys' argument")
                 }
                 let appendEnter = (args["append_enter"] as? Bool) ?? true
-                let identifier = await MainActor.run { () -> String? in
-                    findSession(orchestrator: orchestrator, idOrIdentifier: idArg)?.issue.identifier
+                let resolved = await MainActor.run { () -> (identifier: String, slug: String)? in
+                    guard let s = findSession(orchestrator: orchestrator, idOrIdentifier: idArg) else { return nil }
+                    return (s.issue.identifier, s.issue.pathSlug)
                 }
-                guard let identifier else {
+                guard let resolved else {
                     throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
                 }
-                let sessionName = "lemon-\(identifier.lowercased())"
+                let identifier = resolved.identifier
+                let sessionName = "lemon-\(resolved.slug)"
                 // Verify the tmux session is actually alive — silent failure
                 // here would just look like "I sent keys but nothing happened"
                 // and waste the caller's debugging time.
@@ -342,8 +344,8 @@ enum LemonMCPTools {
         return all.first { $0.issue.identifier.lowercased() == needle }
     }
 
-    private static func readPaneLogTail(identifier: String, lines: Int) -> [String] {
-        let path = "/tmp/lemon-log-\(identifier.lowercased()).txt"
+    private static func readPaneLogTail(slug: String, lines: Int) -> [String] {
+        let path = "/tmp/lemon-log-\(slug).txt"
         guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
         let split = content.split(separator: "\n", omittingEmptySubsequences: false)
         return split.suffix(lines).map(String.init)

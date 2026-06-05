@@ -1,10 +1,10 @@
 import Foundation
 import os
 
-// Manages git worktrees and a claude --auto --remote-control session for one Linear issue.
-// Supports single-repo and multi-repo (all git repos in a folder) modes.
+// Manages git worktrees and a claude --auto --remote-control session for one
+// issue (Linear or GitHub). Supports single-repo and multi-repo (all git
+// repos in a folder) modes.
 final class WorktreeRunner: @unchecked Sendable {
-    private let linear = LinearClient()
     private var pollTask: Task<Void, Never>?
     private var stopped = false
     private var pendingActionTask: Task<Void, Never>?
@@ -23,24 +23,17 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Entry point
 
-    func run(issue: LinearIssue, workspace: WorkspaceRepo, retrigger: LemonMarker? = nil) async {
-        let apiKey = KeychainStore.shared.linearApiKey
-        let identifier = issue.identifier
-        let branch = retrigger?.branch ?? "lemon/\(identifier.lowercased())"
-        let sessionPath = "/tmp/lemon-\(identifier.lowercased())"
+    func run(ref: IssueRef, pair: WorkspacePair, client: any IssueSourceClient,
+             auth: SourceAuth, retrigger: LemonMarker? = nil) async {
+        let workspace = pair.workspace
+        let identifier = ref.identifier
+        let slug = ref.pathSlug
+        let branch = retrigger?.branch ?? "lemon/\(slug)"
+        let sessionPath = "/tmp/lemon-\(slug)"
         let homeRepo = workspace.homeRepo.trimmingCharacters(in: .whitespacesAndNewlines)
 
         log("[lemon] starting session for \(identifier)")
         onStatusChange?(.planning)
-
-        // Resolve label IDs, creating any that don't exist yet.
-        var labelIds: [String: String] = [:]
-        for labelName in [LinearClient.labelTrigger, LinearClient.labelInProgress,
-                          LinearClient.labelWaiting, LinearClient.labelComplete] {
-            if let lid = try? await linear.ensureLabelId(name: labelName, teamId: issue.teamId, apiKey: apiKey) {
-                labelIds[labelName] = lid
-            }
-        }
 
         // Discover repos to include in this session.
         let repos: [(name: String, repoPath: String)]
@@ -69,18 +62,14 @@ final class WorktreeRunner: @unchecked Sendable {
         } catch {
             let msg = error.localizedDescription
             log("[lemon] worktree setup failed: \(msg)", level: .error)
-            // Clean up Linear so the issue is in a neutral state.
+            // Clean up source so the issue is in a neutral state.
             // User can retry by re-adding the 🍋 label.
-            if let triggerId = labelIds[LinearClient.labelTrigger] {
-                try? await linear.removeLabel(issueId: issue.id, labelId: triggerId, apiKey: apiKey)
-            }
-            if let inProgressId = labelIds[LinearClient.labelInProgress] {
-                try? await linear.removeLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
-            }
-            _ = try? await linear.postComment(
-                issueId: issue.id,
+            try? await client.clearState(ref: ref, state: .trigger, auth: auth)
+            try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+            _ = try? await client.postComment(
+                ref: ref,
                 body: "🍋 Session failed to start: \(msg)\n\nRe-add the 🍋 label to retry.",
-                apiKey: apiKey
+                auth: auth
             )
             onStatusChange?(.failed)
             return
@@ -97,10 +86,10 @@ final class WorktreeRunner: @unchecked Sendable {
         var revisionComments: [String] = []
         if let marker = retrigger {
             do {
-                revisionComments = try await linear.fetchCommentsAfter(
-                    issueId: issue.id,
+                revisionComments = try await client.fetchCommentsAfter(
+                    ref: ref,
                     afterCommentId: marker.commentId,
-                    apiKey: apiKey
+                    auth: auth
                 )
                 if !revisionComments.isEmpty {
                     log("[lemon] re-trigger with \(revisionComments.count) revision comment(s)")
@@ -112,65 +101,58 @@ final class WorktreeRunner: @unchecked Sendable {
 
         writeContext(
             to: sessionPath,
-            issue: issue,
+            ref: ref,
             repos: workspace.allReposInFolder ? repos : [],
             lemonMdPath: lemonMdPath,
             devPort: devPort,
             revisionComments: revisionComments
         )
 
-        // Update Linear labels.
-        if let triggerId = labelIds[LinearClient.labelTrigger] {
-            try? await linear.removeLabel(issueId: issue.id, labelId: triggerId, apiKey: apiKey)
+        // Update source state labels.
+        try? await client.clearState(ref: ref, state: .trigger, auth: auth)
+        if retrigger != nil {
+            try? await client.clearState(ref: ref, state: .complete, auth: auth)
         }
-        if retrigger != nil, let completeId = labelIds[LinearClient.labelComplete] {
-            try? await linear.removeLabel(issueId: issue.id, labelId: completeId, apiKey: apiKey)
-        }
-        if let inProgressId = labelIds[LinearClient.labelInProgress] {
-            try? await linear.addLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
-        }
+        try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
 
         // Launch Claude inside a tmux session, starting in homeRepo if configured.
         let launchPath = homeRepo.isEmpty ? sessionPath : "\(sessionPath)/\(homeRepo)"
-        let sentinelPath = "/tmp/lemon-exit-\(identifier.lowercased())"
+        let sentinelPath = "/tmp/lemon-exit-\(slug)"
         // Remove any leftover sentinel and log from a prior run.
         try? FileManager.default.removeItem(atPath: sentinelPath)
-        try? FileManager.default.removeItem(atPath: logPath(identifier))
+        try? FileManager.default.removeItem(atPath: logPath(slug: slug))
 
         // Pre-merge .mcp.json files so Claude skips the interactive MCP discovery prompt.
         let mcpConfigPath = prepareMcpConfig(sessionPath: sessionPath, repos: repos,
                                              isMultiRepo: workspace.allReposInFolder,
-                                             identifier: identifier)
+                                             slug: slug)
 
-        guard launchTmux(sessionPath: launchPath, identifier: identifier,
+        guard launchTmux(sessionPath: launchPath, slug: slug,
                          sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath) else {
             log("[lemon] tmux launch failed — session aborted", level: .error)
-            if let triggerId = labelIds[LinearClient.labelTrigger] {
-                try? await linear.removeLabel(issueId: issue.id, labelId: triggerId, apiKey: apiKey)
-            }
-            if let inProgressId = labelIds[LinearClient.labelInProgress] {
-                try? await linear.removeLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
-            }
-            _ = try? await linear.postComment(
-                issueId: issue.id,
+            try? await client.clearState(ref: ref, state: .trigger, auth: auth)
+            try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+            _ = try? await client.postComment(
+                ref: ref,
                 body: "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry.",
-                apiKey: apiKey
+                auth: auth
             )
             onStatusChange?(.failed)
             return
         }
         onStatusChange?(.executing)
-        log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(identifier))")
+        log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(slug: slug))")
 
         await pollUntilDone(
-            issue: issue,
+            ref: ref,
+            pair: pair,
+            client: client,
+            auth: auth,
             sessionPath: sessionPath,
             repos: repos,
             isMultiRepo: workspace.allReposInFolder,
             branch: branch,
-            labelIds: labelIds,
             retrigger: retrigger,
-            apiKey: apiKey,
             workspacePath: workspace.path,
             sentinelPath: sentinelPath
         )
@@ -250,7 +232,7 @@ final class WorktreeRunner: @unchecked Sendable {
         repos: [(name: String, repoPath: String)],
         sessionPath: String,
         isMultiRepo: Bool,
-        identifier: String
+        slug: String
     ) async {
         if isMultiRepo {
             for repo in repos {
@@ -276,13 +258,12 @@ final class WorktreeRunner: @unchecked Sendable {
         // Kill tmux session and remove all per-session artefacts in /tmp so
         // repeated runs don't leak launcher scripts, sentinel files, merged
         // MCP configs, or pane logs.
-        runSync("tmux kill-session -t '\(tmuxSessionName(identifier))' 2>/dev/null || true")
-        let id = identifier.lowercased()
+        runSync("tmux kill-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null || true")
         let leftovers = [
-            logPath(identifier),
-            "/tmp/lemon-launch-\(id).sh",
-            "/tmp/lemon-exit-\(id)",
-            "/tmp/lemon-mcp-\(id).json",
+            logPath(slug: slug),
+            "/tmp/lemon-launch-\(slug).sh",
+            "/tmp/lemon-exit-\(slug)",
+            "/tmp/lemon-mcp-\(slug).json",
         ]
         for path in leftovers {
             try? FileManager.default.removeItem(atPath: path)
@@ -315,7 +296,7 @@ final class WorktreeRunner: @unchecked Sendable {
 
     private func writeContext(
         to sessionPath: String,
-        issue: LinearIssue,
+        ref: IssueRef,
         repos: [(name: String, repoPath: String)],
         lemonMdPath: String?,
         devPort: Int,
@@ -333,8 +314,8 @@ final class WorktreeRunner: @unchecked Sendable {
         }
 
         // Issue details.
-        content += "# Issue: \(issue.identifier) — \(issue.title)\n\n"
-        if let desc = issue.description, !desc.isEmpty {
+        content += "# \(ref.source.displayName) Issue: \(ref.identifier) — \(ref.title)\n\n"
+        if let desc = ref.description, !desc.isEmpty {
             content += desc.trimmingCharacters(in: .whitespacesAndNewlines)
             content += "\n\n"
         }
@@ -373,7 +354,16 @@ final class WorktreeRunner: @unchecked Sendable {
         // (Next.js, databases, deploy targets) belongs in the team's LEMON.md.
         content += "### Session Environment\n"
         content += "- **Reserved dev-server port:** `\(devPort)` — use this if you launch a dev server so concurrent Lemon sessions don't collide.\n"
-        content += "- **Worktree:** you're in a fresh git worktree on branch `lemon/\(issue.identifier)`. Don't switch branches.\n\n"
+        content += "- **Worktree:** you're in a fresh git worktree on branch `\(ref.identifier.hasPrefix("lemon/") ? ref.identifier : "lemon/\(ref.pathSlug)")`. Don't switch branches.\n\n"
+
+        // Source-specific completion instructions. The label set is identical
+        // (🍋 / 🍋 In Progress / 🍋 Waiting / 🍋 Complete); the verb differs.
+        let completeInstruction: String = {
+            switch ref.source {
+            case .linear: return "Apply the Linear label **🍋 Complete** to issue \(ref.identifier) via `gh`, the Linear MCP, or any Linear client."
+            case .github: return "Apply the GitHub label **🍋 Complete** to issue \(ref.identifier) via `gh issue edit \(ref.identifier.components(separatedBy: "#").last ?? "") --add-label '🍋 Complete'` (run inside the worktree where `gh` knows the repo)."
+            }
+        }()
 
         // Completion checklist — universal across stacks.
         content += """
@@ -381,7 +371,7 @@ final class WorktreeRunner: @unchecked Sendable {
         ## Completion checklist
 
         When the PR is open and ready for review:
-        1. Apply the Linear label **🍋 Complete** to issue \(issue.identifier) via `gh` or the Linear MCP.
+        1. \(completeInstruction)
         2. Write a brief summary of what you did to `.lemon-summary.md` in this worktree (referenced by the Lemon Report comment).
         3. Kill any dev servers, background tasks, or external resources you started.
 
@@ -413,13 +403,18 @@ final class WorktreeRunner: @unchecked Sendable {
     }
 
     // MARK: - Session naming helpers
+    //
+    // Paths/tmux names are keyed off the IssueRef.pathSlug, not the human-facing
+    // identifier — slashes and `#` in GitHub identifiers ("acme/widgets#7")
+    // break shell quoting + filesystem paths. Slug is already
+    // lowercased + slash-flattened ("acme-widgets-7").
 
-    func tmuxSessionName(_ identifier: String) -> String {
-        "lemon-\(identifier.lowercased())"
+    func tmuxSessionName(slug: String) -> String {
+        "lemon-\(slug)"
     }
 
-    func logPath(_ identifier: String) -> String {
-        "/tmp/lemon-log-\(identifier.lowercased()).txt"
+    func logPath(slug: String) -> String {
+        "/tmp/lemon-log-\(slug).txt"
     }
 
     // MARK: - MCP config preparation
@@ -428,7 +423,7 @@ final class WorktreeRunner: @unchecked Sendable {
     // Returns the path to the merged file, or nil if no MCP servers were found.
     // Passing this via --mcp-config bypasses Claude's interactive MCP discovery prompt.
     private func prepareMcpConfig(sessionPath: String, repos: [(name: String, repoPath: String)],
-                                  isMultiRepo: Bool, identifier: String) -> String? {
+                                  isMultiRepo: Bool, slug: String) -> String? {
         var mcpServers: [String: Any] = [:]
         var sourceOf: [String: String] = [:]   // server name → repo it came from (for conflict logging)
         let searchPaths: [(label: String, path: String)] = isMultiRepo
@@ -448,7 +443,7 @@ final class WorktreeRunner: @unchecked Sendable {
             }
         }
         guard !mcpServers.isEmpty else { return nil }
-        let configPath = "/tmp/lemon-mcp-\(identifier.lowercased()).json"
+        let configPath = "/tmp/lemon-mcp-\(slug).json"
         guard let data = try? JSONSerialization.data(withJSONObject: ["mcpServers": mcpServers],
                                                      options: .prettyPrinted) else { return nil }
         do {
@@ -467,7 +462,7 @@ final class WorktreeRunner: @unchecked Sendable {
     // The launcher script writes sentinelPath when claude exits so pollUntilDone
     // can detect early exits without waiting for the 8h deadline.
     @discardableResult
-    private func launchTmux(sessionPath: String, identifier: String,
+    private func launchTmux(sessionPath: String, slug: String,
                              sentinelPath: String, mcpConfigPath: String? = nil) -> Bool {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
@@ -475,8 +470,8 @@ final class WorktreeRunner: @unchecked Sendable {
             return false
         }
 
-        let sessionName  = tmuxSessionName(identifier)
-        let launcherPath = "/tmp/lemon-launch-\(identifier.lowercased()).sh"
+        let sessionName  = tmuxSessionName(slug: slug)
+        let launcherPath = "/tmp/lemon-launch-\(slug).sh"
         let mcpFlag      = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
 
         // Trailing positional kickoff prompt — `claude [options] [--] [prompt]`.
@@ -525,7 +520,7 @@ final class WorktreeRunner: @unchecked Sendable {
         }
 
         // Pipe all pane output to the log file for Gemma to read.
-        runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(identifier))'")
+        runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
 
         // Open a visible terminal so the user can watch and join. Prefer iTerm2
         // (native tmux control mode via tmux -CC) and fall back to Terminal.app,
@@ -562,15 +557,15 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Gemma orchestration
 
-    private func invokeGemma(issue: LinearIssue) async {
+    private func invokeGemma(ref: IssueRef) async {
         guard LocalLLM.shared.isReady() else {
-            Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(issue.identifier)")
+            Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(ref.identifier)")
             return
         }
-        let lines = tailLog(issue.identifier, last: 100)
-        Logger.worktree.info("[gemma] classifying \(issue.identifier) with \(lines.count) log lines")
+        let lines = tailLog(slug: ref.pathSlug, last: 100)
+        Logger.worktree.info("[gemma] classifying \(ref.identifier) with \(lines.count) log lines")
         do {
-            let response = try await LocalLLM.shared.classify(issue: IssueRef(linearIssue: issue), logLines: lines)
+            let response = try await LocalLLM.shared.classify(issue: ref, logLines: lines)
             Logger.worktree.info("[gemma] state=\(response.state) action=\(response.action?.type ?? "nil") summary=\(response.summary, privacy: .public)")
 
             onAiSummary?(response.summary)
@@ -579,7 +574,7 @@ final class WorktreeRunner: @unchecked Sendable {
             guard let action = response.action else { return }
             switch action.type {
             case "send_keys":
-                handleSendKeys(keys: action.keys ?? "", identifier: issue.identifier,
+                handleSendKeys(keys: action.keys ?? "", slug: ref.pathSlug,
                                reason: response.summary)
             case "notify_user":
                 // Route through the existing push-notification / 🍋 Waiting path via log line.
@@ -589,7 +584,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 Logger.worktree.error("[gemma] unknown action type=\(action.type)")
             }
         } catch {
-            Logger.worktree.error("[gemma] classify failed for \(issue.identifier): \(error.localizedDescription)")
+            Logger.worktree.error("[gemma] classify failed for \(ref.identifier): \(error.localizedDescription)")
         }
     }
 
@@ -597,7 +592,7 @@ final class WorktreeRunner: @unchecked Sendable {
     // Safety: only an allowlist of low-risk confirmations is permitted. Anything
     // outside the list is logged and dropped — we'd rather miss a prompt than
     // type arbitrary text into a running Claude session.
-    private func handleSendKeys(keys: String, identifier: String, reason: String) {
+    private func handleSendKeys(keys: String, slug: String, reason: String) {
         let trimmed = keys.trimmingCharacters(in: .whitespacesAndNewlines)
         guard WorktreeRunner.isSafeSendKeys(trimmed) else {
             Logger.worktree.error("[gemma] dropping unsafe send_keys=\(trimmed, privacy: .public) reason=\(reason, privacy: .public)")
@@ -615,10 +610,10 @@ final class WorktreeRunner: @unchecked Sendable {
             // Letter keys still get an auto-Enter suffix to confirm.
             let cmd: String
             if WorktreeRunner.specialKeys.contains(trimmed) {
-                cmd = "tmux send-keys -t '\(tmuxSessionName(identifier))' \(trimmed)"
+                cmd = "tmux send-keys -t '\(tmuxSessionName(slug: slug))' \(trimmed)"
             } else {
                 let escaped = trimmed.replacingOccurrences(of: "'", with: "'\\''")
-                cmd = "tmux send-keys -t '\(tmuxSessionName(identifier))' '\(escaped)' Enter"
+                cmd = "tmux send-keys -t '\(tmuxSessionName(slug: slug))' '\(escaped)' Enter"
             }
             runSync(cmd)
             log("[gemma] resolved: \(reason) (sent: \(trimmed.isEmpty ? "Enter" : trimmed))")
@@ -652,8 +647,8 @@ final class WorktreeRunner: @unchecked Sendable {
         return content.split(separator: "\n", omittingEmptySubsequences: true).count
     }
 
-    private func tailLog(_ identifier: String, last n: Int) -> [String] {
-        guard let content = try? String(contentsOfFile: logPath(identifier), encoding: .utf8) else {
+    private func tailLog(slug: String, last n: Int) -> [String] {
+        guard let content = try? String(contentsOfFile: logPath(slug: slug), encoding: .utf8) else {
             return []
         }
         let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
@@ -683,18 +678,20 @@ final class WorktreeRunner: @unchecked Sendable {
     // MARK: - Label polling
 
     private func pollUntilDone(
-        issue: LinearIssue,
+        ref: IssueRef,
+        pair: WorkspacePair,
+        client: any IssueSourceClient,
+        auth: SourceAuth,
         sessionPath: String,
         repos: [(name: String, repoPath: String)],
         isMultiRepo: Bool,
         branch: String,
-        labelIds: [String: String],
         retrigger: LemonMarker?,
-        apiKey: String,
         workspacePath: String,
         sentinelPath: String
     ) async {
         let deadline = Date().addingTimeInterval(8 * 3600)  // 8h max; prevents forever-stuck icon
+        let slug = ref.pathSlug
         var lastLineCount: Int = 0
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
@@ -708,22 +705,32 @@ final class WorktreeRunner: @unchecked Sendable {
                 onPRUrl?(prUrl)
             }
 
-            // Check for 🍋 Complete label.
-            let userId = KeychainStore.shared.linearUserId
-            if let completes = try? await linear.fetchCompleteIssues(apiKey: apiKey, userId: userId),
-               completes.first(where: { $0.id == issue.id }) != nil {
-                await handleComplete(
-                    issue: issue,
-                    sessionPath: sessionPath,
-                    repos: repos,
-                    isMultiRepo: isMultiRepo,
-                    branch: branch,
-                    labelIds: labelIds,
-                    retrigger: retrigger,
-                    apiKey: apiKey,
-                    workspacePath: workspacePath
-                )
-                return
+            // Check for 🍋 Complete label directly on this issue. We don't use
+            // fetchCompleteQueue() here because it's scoped to the assignee and
+            // would miss issues completed by someone else; fetchIssueLabels
+            // targets the single ref and is cheaper too.
+            if let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth) {
+                if labels.contains(LemonState.complete.labelName) {
+                    await handleComplete(
+                        ref: ref,
+                        pair: pair,
+                        client: client,
+                        auth: auth,
+                        sessionPath: sessionPath,
+                        repos: repos,
+                        isMultiRepo: isMultiRepo,
+                        branch: branch,
+                        retrigger: retrigger,
+                        workspacePath: workspacePath
+                    )
+                    return
+                }
+                // Infer waiting vs executing from the current label set.
+                if labels.contains(LemonState.waiting.labelName) {
+                    onStatusChange?(.waiting)
+                } else if labels.contains(LemonState.inProgress.labelName) {
+                    onStatusChange?(.executing)
+                }
             }
 
             // Two ways the session can have ended without 🍋 Complete:
@@ -737,7 +744,7 @@ final class WorktreeRunner: @unchecked Sendable {
             // would happily poll for hours after the user closed the window,
             // showing "Executing" forever.
             let sentinelExists = FileManager.default.fileExists(atPath: sentinelPath)
-            let tmuxAlive = runSync("tmux has-session -t '\(tmuxSessionName(issue.identifier))' 2>/dev/null")
+            let tmuxAlive = runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
             if sentinelExists || !tmuxAlive {
                 let exitCode: String
                 let cause: String
@@ -749,34 +756,18 @@ final class WorktreeRunner: @unchecked Sendable {
                     exitCode = "no-tmux"
                     cause = "tmux session disappeared (window closed or killed)"
                 }
-                Logger.worktree.warning("\(cause) without setting 🍋 Complete on \(issue.identifier)")
+                Logger.worktree.warning("\(cause) without setting 🍋 Complete on \(ref.identifier)")
                 log("[lemon] session ended without completing — \(cause)", level: .error)
-                _ = try? await linear.postComment(
-                    issueId: issue.id,
+                _ = try? await client.postComment(
+                    ref: ref,
                     body: "🍋 Session ended without completing — \(cause). Re-add the 🍋 label to retry.",
-                    apiKey: apiKey
+                    auth: auth
                 )
-                if let inProgressId = labelIds[LinearClient.labelInProgress] {
-                    try? await linear.removeLabel(issueId: issue.id, labelId: inProgressId, apiKey: apiKey)
-                }
-                if let waitingId = labelIds[LinearClient.labelWaiting] {
-                    try? await linear.removeLabel(issueId: issue.id, labelId: waitingId, apiKey: apiKey)
-                }
+                try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+                try? await client.clearState(ref: ref, state: .waiting, auth: auth)
                 _ = exitCode
                 onStatusChange?(.failed)
                 return
-            }
-
-            // Infer waiting vs executing from the issue's current labels.
-            // fetchLemonQueue filters by the 🍋 trigger label, which we removed
-            // when the session started — so it won't see the issue mid-session.
-            // fetchIssueLabels targets the single issue and works after handoff.
-            if let labels = try? await linear.fetchIssueLabels(issueId: issue.id, apiKey: apiKey) {
-                if labels.contains(LinearClient.labelWaiting) {
-                    onStatusChange?(.waiting)
-                } else if labels.contains(LinearClient.labelInProgress) {
-                    onStatusChange?(.executing)
-                }
             }
 
             // Silence detection: track LINE-count growth, not byte count.
@@ -784,19 +775,19 @@ final class WorktreeRunner: @unchecked Sendable {
             // even when Claude is wedged on an interactive prompt — byte count
             // keeps inflating and the silence timer never trips. Line count
             // only grows when actual output arrives.
-            let currentLines = countLogLines(at: logPath(issue.identifier))
+            let currentLines = countLogLines(at: logPath(slug: slug))
             if currentLines > lastLineCount {
                 lastLineCount = currentLines
                 lastActivityAt = Date()
             }
             if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
                 lastGemmaAt = Date()
-                await invokeGemma(issue: issue)
+                await invokeGemma(ref: ref)
             }
         }
         // Loop exited without completing — either stopped externally or timed out.
         if !stopped {
-            Logger.worktree.warning("Session for \(issue.identifier) timed out after 8h")
+            Logger.worktree.warning("Session for \(ref.identifier) timed out after 8h")
             onStatusChange?(.failed)
         }
     }
@@ -804,21 +795,22 @@ final class WorktreeRunner: @unchecked Sendable {
     // MARK: - Completion handler
 
     private func handleComplete(
-        issue: LinearIssue,
+        ref: IssueRef,
+        pair: WorkspacePair,
+        client: any IssueSourceClient,
+        auth: SourceAuth,
         sessionPath: String,
         repos: [(name: String, repoPath: String)],
         isMultiRepo: Bool,
         branch: String,
-        labelIds: [String: String],
         retrigger: LemonMarker?,
-        apiKey: String,
         workspacePath: String
     ) async {
         onStatusChange?(.reviewing)
-        log("[lemon] 🍋 Complete detected for \(issue.identifier)")
+        log("[lemon] 🍋 Complete detected for \(ref.identifier)")
 
-        // Final Gemma summary before posting the Linear comment.
-        await invokeGemma(issue: issue)
+        // Final Gemma summary before posting the report comment.
+        await invokeGemma(ref: ref)
 
         let prUrl = await detectPR(branch: branch, repos: repos)
         let prNumber = prUrl.flatMap { URL(string: $0)?.lastPathComponent } ?? ""
@@ -828,7 +820,7 @@ final class WorktreeRunner: @unchecked Sendable {
         let markerPath = workspacePath
 
         let commentBody = buildLemonComment(
-            issue: issue,
+            ref: ref,
             prUrl: prUrl,
             prNumber: prNumber,
             branch: branch,
@@ -836,36 +828,35 @@ final class WorktreeRunner: @unchecked Sendable {
             repoPath: markerPath
         )
 
-        if let existingCommentId = retrigger?.commentId {
+        if retrigger != nil {
             let replyBody = buildReplyComment(prUrl: prUrl, summary: summary)
             do {
-                try await linear.postComment(issueId: issue.id, body: replyBody, apiKey: apiKey)
+                _ = try await client.postComment(ref: ref, body: replyBody, auth: auth)
             } catch {
-                Logger.worktree.error("Failed to post reply comment for \(issue.identifier): \(error)")
+                Logger.worktree.error("Failed to post reply comment for \(ref.identifier): \(error)")
             }
-            _ = existingCommentId
         } else {
-            if let commentId = try? await linear.postComment(issueId: issue.id, body: commentBody, apiKey: apiKey) {
+            if let commentId = try? await client.postComment(ref: ref, body: commentBody, auth: auth) {
                 log("[lemon] posted Lemon comment \(commentId)")
             }
         }
 
         await cleanupWorktrees(repos: repos, sessionPath: sessionPath, isMultiRepo: isMultiRepo,
-                               identifier: issue.identifier)
+                               slug: ref.pathSlug)
         onStatusChange?(.done)
     }
 
     // MARK: - Comment builders
 
     private func buildLemonComment(
-        issue: LinearIssue,
+        ref: IssueRef,
         prUrl: String?,
         prNumber: String,
         branch: String,
         summary: String,
         repoPath: String
     ) -> String {
-        var md = "## 🍋 Lemon Report — \(issue.identifier)\n\n"
+        var md = "## 🍋 Lemon Report — \(ref.identifier)\n\n"
         if let url = prUrl {
             md += "**PR:** [#\(prNumber)](\(url))\n"
         }
@@ -876,9 +867,14 @@ final class WorktreeRunner: @unchecked Sendable {
         md += "\n---\n*Reply to this comment to ask Lemon to revise. Lemon will update the branch and PR.*\n\n"
         // No `comment:` field here on purpose. The Lemon Report comment is the
         // marker itself, so its ID is unknown until commentCreate returns.
-        // LinearClient.parseLemonMarker falls back to the host comment's own ID
+        // LemonMarkerExtractor.parse falls back to the host comment's own ID
         // when the field is absent, which is exactly what we want for re-trigger.
-        md += "<!-- lemon\nbranch: \(branch)\npr: \(prNumber)\nrepo: \(repoPath)\n-->"
+        //
+        // `source: github` is written on GitHub-source reports so the parser
+        // can route re-triggers correctly post-upgrade. Linear stays
+        // unlabelled (treated as the default by the extractor).
+        let sourceLine = ref.source == .github ? "\nsource: github" : ""
+        md += "<!-- lemon\nbranch: \(branch)\npr: \(prNumber)\nrepo: \(repoPath)\(sourceLine)\n-->"
         return md
     }
 

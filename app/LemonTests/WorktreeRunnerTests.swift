@@ -38,17 +38,33 @@ final class WorktreeRunnerTests: XCTestCase {
 
     // MARK: - tmuxSessionName
 
-    func testTmuxSessionNameLowercases() {
+    func testTmuxSessionNameFromSlug() {
         let runner = WorktreeRunner()
-        XCTAssertEqual(runner.tmuxSessionName("DEMO-42"),  "lemon-demo-42")
-        XCTAssertEqual(runner.tmuxSessionName("LEM-100"), "lemon-lem-100")
+        XCTAssertEqual(runner.tmuxSessionName(slug: "demo-42"),  "lemon-demo-42")
+        XCTAssertEqual(runner.tmuxSessionName(slug: "lem-100"),  "lemon-lem-100")
+        XCTAssertEqual(runner.tmuxSessionName(slug: "acme-widgets-7"), "lemon-acme-widgets-7",
+                       "GitHub slugs flatten slashes; tmux name must not contain '/'.")
     }
 
     // MARK: - logPath
 
     func testLogPathFormat() {
         let runner = WorktreeRunner()
-        XCTAssertEqual(runner.logPath("DEMO-42"), "/tmp/lemon-log-demo-42.txt")
+        XCTAssertEqual(runner.logPath(slug: "demo-42"), "/tmp/lemon-log-demo-42.txt")
+    }
+
+    // MARK: - IssueRef.pathSlug end-to-end
+
+    func testIssueRefPathSlugForLinear() {
+        let ref = IssueRef(id: "n", identifier: "HRP-42", title: "x", description: nil,
+                           labelNames: [], scope: .linearTeam(id: "team1"))
+        XCTAssertEqual(ref.pathSlug, "hrp-42")
+    }
+
+    func testIssueRefPathSlugForGitHub() {
+        let ref = IssueRef(id: "x", identifier: "acme/widgets#7", title: "x", description: nil,
+                           labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 7))
+        XCTAssertEqual(ref.pathSlug, "acme-widgets-7")
     }
 
     // MARK: - shouldInvokeGemma (silence detector)
