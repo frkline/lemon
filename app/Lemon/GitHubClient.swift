@@ -10,11 +10,20 @@ import os
 // Polling, not webhooks — Lemon has no public endpoint. Webhook support
 // (Linear + GitHub) is tracked separately as #4.
 final class GitHubClient: Sendable {
-    private let baseURL = URL(string: "https://api.github.com")!
+    static let defaultHost = "api.github.com"
     private let session: URLSession
 
     init(session: URLSession = .shared) {
         self.session = session
+    }
+
+    /// Resolves the API base URL for an auth payload. github.com defaults
+    /// when host is nil/empty; otherwise treats the host as the API host
+    /// (e.g. `api.github.acmecorp.com`).
+    private static func baseURL(host: String?) -> URL {
+        let resolved = host?.trimmingCharacters(in: .whitespaces)
+        let h = (resolved?.isEmpty == false) ? resolved! : Self.defaultHost
+        return URL(string: "https://\(h)")!
     }
 
     // MARK: - Public errors
@@ -35,8 +44,10 @@ final class GitHubClient: Sendable {
 
     // MARK: - REST plumbing
 
-    private func authedRequest(_ method: String, path: String, query: [URLQueryItem] = [], token: String, body: Data? = nil) -> URLRequest {
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+    private func authedRequest(_ method: String, path: String, query: [URLQueryItem] = [],
+                               token: String, host: String? = nil, body: Data? = nil) -> URLRequest {
+        let base = Self.baseURL(host: host)
+        var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         var req = URLRequest(url: components.url!)
         req.httpMethod = method
@@ -130,14 +141,15 @@ final class GitHubClient: Sendable {
         return "\(repoTerms) is:issue is:open label:\"\(label)\" \(assigneeClause)"
     }
 
-    private func searchIssues(label: String, repos: [String], token: String, login: String) async throws -> [IssueRef] {
+    private func searchIssues(label: String, repos: [String], token: String, login: String, host: String?) async throws -> [IssueRef] {
         guard !repos.isEmpty else { return [] }
         let q = buildSearchQuery(label: label, repos: repos, login: login)
         let req = authedRequest(
             "GET",
             path: "/search/issues",
             query: [URLQueryItem(name: "q", value: q), URLQueryItem(name: "per_page", value: "100")],
-            token: token
+            token: token,
+            host: host
         )
         let (_, data) = try await send(req)
         let result = try decode(data, as: SearchIssuesDTO.self)
@@ -166,11 +178,11 @@ final class GitHubClient: Sendable {
         config.githubRepos ?? []
     }
 
-    private func ghAuth(_ auth: SourceAuth) throws -> (token: String, login: String) {
-        guard case .github(let pat, let login) = auth else {
+    private func ghAuth(_ auth: SourceAuth) throws -> (token: String, login: String, host: String?) {
+        guard case .github(let pat, let login, let host) = auth else {
             throw IssueSourceError.authMismatch(expected: .github, got: auth.source)
         }
-        return (pat, login)
+        return (pat, login, host)
     }
 
     private func ghScope(_ ref: IssueRef) throws -> (owner: String, repo: String, number: Int) {
@@ -195,12 +207,13 @@ final class GitHubClient: Sendable {
 
     // MARK: - Label ensure / mutate
 
-    private func ensureLabel(owner: String, repo: String, state: LemonState, token: String) async throws {
+    private func ensureLabel(owner: String, repo: String, state: LemonState, token: String, host: String?) async throws {
         // Quick GET; on 404, POST it. Idempotent so concurrent triggers don't race.
         let getReq = authedRequest(
             "GET",
             path: "/repos/\(owner)/\(repo)/labels/\(encodePathSegment(state.labelName))",
-            token: token
+            token: token,
+            host: host
         )
         let (status, _) = try await send(getReq, allow404: true)
         if status == 200 { return }
@@ -214,6 +227,7 @@ final class GitHubClient: Sendable {
             "POST",
             path: "/repos/\(owner)/\(repo)/labels",
             token: token,
+            host: host,
             body: body
         )
         // Treat 422 (already exists, race) as success.
@@ -229,23 +243,25 @@ final class GitHubClient: Sendable {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s
     }
 
-    private func addLabel(owner: String, repo: String, number: Int, name: String, token: String) async throws {
+    private func addLabel(owner: String, repo: String, number: Int, name: String, token: String, host: String?) async throws {
         struct Body: Encodable { let labels: [String] }
         let body = try JSONEncoder().encode(Body(labels: [name]))
         let req = authedRequest(
             "POST",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/labels",
             token: token,
+            host: host,
             body: body
         )
         _ = try await send(req)
     }
 
-    private func removeLabel(owner: String, repo: String, number: Int, name: String, token: String) async throws {
+    private func removeLabel(owner: String, repo: String, number: Int, name: String, token: String, host: String?) async throws {
         let req = authedRequest(
             "DELETE",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/labels/\(encodePathSegment(name))",
-            token: token
+            token: token,
+            host: host
         )
         // 404 = already absent → idempotent.
         _ = try await send(req, allow404: true)
@@ -255,7 +271,7 @@ final class GitHubClient: Sendable {
     //
     // GET sort=created direction=asc matches the chronological invariant
     // LemonMarkerExtractor relies on (and LinearClient also enforces).
-    private func fetchCommentsRaw(owner: String, repo: String, number: Int, token: String) async throws -> [IssueComment] {
+    private func fetchCommentsRaw(owner: String, repo: String, number: Int, token: String, host: String?) async throws -> [IssueComment] {
         let req = authedRequest(
             "GET",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/comments",
@@ -264,7 +280,8 @@ final class GitHubClient: Sendable {
                 URLQueryItem(name: "sort", value: "created"),
                 URLQueryItem(name: "direction", value: "asc")
             ],
-            token: token
+            token: token,
+            host: host
         )
         let (_, data) = try await send(req)
         let dtos = try decode(data, as: [CommentDTO].self)
@@ -299,9 +316,9 @@ final class LockedSet: @unchecked Sendable {
 extension GitHubClient: IssueSourceClient {
 
     func fetchTriggerQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
-        let (token, login) = try ghAuth(auth)
+        let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
-        let allWithTrigger = try await searchIssues(label: LemonState.trigger.labelName, repos: repos, token: token, login: login)
+        let allWithTrigger = try await searchIssues(label: LemonState.trigger.labelName, repos: repos, token: token, login: login, host: host)
         // Exclude issues that already carry any active Lemon state label —
         // mirrors LinearClient.fetchLemonQueue's client-side filter.
         let activeNames = Set(LemonState.active.map(\.labelName))
@@ -309,18 +326,19 @@ extension GitHubClient: IssueSourceClient {
     }
 
     func fetchCompleteQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
-        let (token, login) = try ghAuth(auth)
+        let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
-        return try await searchIssues(label: LemonState.complete.labelName, repos: repos, token: token, login: login)
+        return try await searchIssues(label: LemonState.complete.labelName, repos: repos, token: token, login: login, host: host)
     }
 
     func fetchIssueLabels(ref: IssueRef, auth: SourceAuth) async throws -> [String]? {
-        let (token, _) = try ghAuth(auth)
+        let (token, _, host) = try ghAuth(auth)
         let (owner, repo, number) = try ghScope(ref)
         let req = authedRequest(
             "GET",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/labels",
-            token: token
+            token: token,
+            host: host
         )
         do {
             let (_, data) = try await send(req, allow404: true)
@@ -333,29 +351,31 @@ extension GitHubClient: IssueSourceClient {
     }
 
     func applyState(ref: IssueRef, state: LemonState, auth: SourceAuth) async throws {
-        let (token, _) = try ghAuth(auth)
+        let (token, _, host) = try ghAuth(auth)
         let (owner, repo, number) = try ghScope(ref)
         // Lazy per-repo bootstrap: ensure all four Lemon labels exist before
         // we attempt to attach one. Idempotent + memoized so the first
-        // applyState per repo per process does the work.
-        if Self.bootstrappedRepos.insertIfAbsent("\(owner)/\(repo)") {
+        // applyState per repo per process does the work. Memo key includes
+        // the host so Enterprise and github.com don't share a memo entry.
+        let memoKey = "\(host ?? Self.defaultHost):\(owner)/\(repo)"
+        if Self.bootstrappedRepos.insertIfAbsent(memoKey) {
             for s in LemonState.allCases {
-                try? await ensureLabel(owner: owner, repo: repo, state: s, token: token)
+                try? await ensureLabel(owner: owner, repo: repo, state: s, token: token, host: host)
             }
         }
-        try await ensureLabel(owner: owner, repo: repo, state: state, token: token)
-        try await addLabel(owner: owner, repo: repo, number: number, name: state.labelName, token: token)
+        try await ensureLabel(owner: owner, repo: repo, state: state, token: token, host: host)
+        try await addLabel(owner: owner, repo: repo, number: number, name: state.labelName, token: token, host: host)
     }
 
     func clearState(ref: IssueRef, state: LemonState, auth: SourceAuth) async throws {
-        let (token, _) = try ghAuth(auth)
+        let (token, _, host) = try ghAuth(auth)
         let (owner, repo, number) = try ghScope(ref)
-        try await removeLabel(owner: owner, repo: repo, number: number, name: state.labelName, token: token)
+        try await removeLabel(owner: owner, repo: repo, number: number, name: state.labelName, token: token, host: host)
     }
 
     @discardableResult
     func postComment(ref: IssueRef, body: String, auth: SourceAuth) async throws -> String {
-        let (token, _) = try ghAuth(auth)
+        let (token, _, host) = try ghAuth(auth)
         let (owner, repo, number) = try ghScope(ref)
         struct Body: Encodable { let body: String }
         let payload = try JSONEncoder().encode(Body(body: body))
@@ -363,6 +383,7 @@ extension GitHubClient: IssueSourceClient {
             "POST",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/comments",
             token: token,
+            host: host,
             body: payload
         )
         let (_, data) = try await send(req)
@@ -372,9 +393,9 @@ extension GitHubClient: IssueSourceClient {
     }
 
     func fetchComments(ref: IssueRef, auth: SourceAuth) async throws -> [IssueComment] {
-        let (token, _) = try ghAuth(auth)
+        let (token, _, host) = try ghAuth(auth)
         let (owner, repo, number) = try ghScope(ref)
-        return try await fetchCommentsRaw(owner: owner, repo: repo, number: number, token: token)
+        return try await fetchCommentsRaw(owner: owner, repo: repo, number: number, token: token, host: host)
     }
 
     func hasNewComment(ref: IssueRef, afterCommentId: String, auth: SourceAuth) async throws -> Bool {
@@ -393,20 +414,20 @@ extension GitHubClient: IssueSourceClient {
     }
 
     func bootstrapLabels(config: SourceConfig, auth: SourceAuth) async throws {
-        let (token, _) = try ghAuth(auth)
+        let (token, _, host) = try ghAuth(auth)
         for repoFullName in reposFromConfig(config) {
             let parts = repoFullName.split(separator: "/", maxSplits: 1)
             guard parts.count == 2 else { continue }
             let owner = String(parts[0]); let repo = String(parts[1])
             for state in LemonState.allCases {
-                try? await ensureLabel(owner: owner, repo: repo, state: state, token: token)
+                try? await ensureLabel(owner: owner, repo: repo, state: state, token: token, host: host)
             }
-            _ = Self.bootstrappedRepos.insertIfAbsent("\(owner)/\(repo)")
+            _ = Self.bootstrappedRepos.insertIfAbsent("\(host ?? Self.defaultHost):\(owner)/\(repo)")
         }
     }
 
-    func verifyCredential(token: String) async throws -> CredentialIdentity {
-        let req = authedRequest("GET", path: "/user", token: token)
+    func verifyCredential(token: String, host: String?) async throws -> CredentialIdentity {
+        let req = authedRequest("GET", path: "/user", token: token, host: host)
         let (_, data) = try await send(req)
         let user = try decode(data, as: UserDTO.self)
         return CredentialIdentity(
@@ -414,5 +435,26 @@ extension GitHubClient: IssueSourceClient {
             displayName: user.name ?? user.login,
             avatarUrl: user.avatar_url
         )
+    }
+
+    /// Fetch the authenticated user's repositories (public + private the PAT
+    /// can see), used to populate `Identity.knownSurfaces` for the editor.
+    /// Returns up to 100 entries; pagination is deferred until anyone runs
+    /// out of space.
+    func listUserRepos(token: String, host: String?) async throws -> [Surface] {
+        let req = authedRequest(
+            "GET",
+            path: "/user/repos",
+            query: [
+                URLQueryItem(name: "per_page", value: "100"),
+                URLQueryItem(name: "sort", value: "pushed"),
+            ],
+            token: token,
+            host: host
+        )
+        let (_, data) = try await send(req)
+        struct RepoDTO: Decodable { let full_name: String; let name: String }
+        let repos = try decode(data, as: [RepoDTO].self)
+        return repos.map { Surface(id: $0.full_name, key: $0.full_name, displayName: $0.name) }
     }
 }

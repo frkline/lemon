@@ -501,7 +501,9 @@ final class KeychainStore: @unchecked Sendable {
         case .linear:
             return .linear(apiKey: secret, userId: identity.principalId)
         case .github:
-            return .github(pat: secret, login: identity.handle)
+            // GitHub Enterprise: Identity.host holds the API host
+            // ("api.github.acmecorp.com"); github.com identities leave it nil.
+            return .github(pat: secret, login: identity.handle, host: identity.host)
         }
     }
 

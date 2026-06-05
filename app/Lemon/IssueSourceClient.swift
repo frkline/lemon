@@ -36,14 +36,26 @@ protocol IssueSourceClient: Sendable {
 
     // Used by the onboarding "Verify" buttons + Settings connection state.
     // Takes a raw token because the user id / login isn't known yet at
-    // verification time — verifyCredential populates it.
-    func verifyCredential(token: String) async throws -> CredentialIdentity
+    // verification time — verifyCredential populates it. Optional `host`
+    // for GitHub Enterprise; Linear ignores it.
+    func verifyCredential(token: String, host: String?) async throws -> CredentialIdentity
+}
+
+extension IssueSourceClient {
+    /// Back-compat shim — most callers don't need a host.
+    func verifyCredential(token: String) async throws -> CredentialIdentity {
+        try await verifyCredential(token: token, host: nil)
+    }
 }
 
 // Per-source credential.
+//
+// GitHub carries an optional `host` for Enterprise installations. Nil or
+// "api.github.com" routes to public github.com; an Enterprise host looks
+// like "api.github.acmecorp.com". The client uses it as the API base.
 enum SourceAuth: Sendable, Hashable {
     case linear(apiKey: String, userId: String)
-    case github(pat: String, login: String)
+    case github(pat: String, login: String, host: String? = nil)
 
     var source: IssueSource {
         switch self {

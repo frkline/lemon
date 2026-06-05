@@ -497,7 +497,9 @@ extension LinearClient: IssueSourceClient {
         }
     }
 
-    func verifyCredential(token: String) async throws -> CredentialIdentity {
+    func verifyCredential(token: String, host: String?) async throws -> CredentialIdentity {
+        // Linear ignores host — its API is single-tenant.
+        _ = host
         let viewer = try await fetchViewer(apiKey: token)
         return CredentialIdentity(id: viewer.id, displayName: viewer.name, avatarUrl: viewer.avatarUrl)
     }

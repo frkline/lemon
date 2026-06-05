@@ -137,6 +137,41 @@ final class GitHubClientTests: XCTestCase {
         XCTAssertTrue(triggerColor.hasPrefix("#"),
                       "LinearClient palette stores '#'-prefixed values; GitHubClient strips it on send.")
     }
+
+    // MARK: - Enterprise host
+
+    func testEnterpriseHostRoutesAPIRequestsCorrectly() async throws {
+        GitHubStubURLProtocol.respond(json: """
+        {"id":1,"login":"frank-acme","name":null,"avatar_url":null}
+        """)
+        var observed: URLRequest?
+        GitHubStubURLProtocol.onRequest = { observed = $0 }
+        _ = try await client().verifyCredential(token: "tok", host: "api.github.acmecorp.com")
+        XCTAssertEqual(observed?.url?.host, "api.github.acmecorp.com",
+                       "Enterprise host should replace the default api.github.com base.")
+        XCTAssertEqual(observed?.url?.path, "/user")
+    }
+
+    func testNilHostDefaultsToGithubDotCom() async throws {
+        GitHubStubURLProtocol.respond(json: """
+        {"id":1,"login":"x","name":null,"avatar_url":null}
+        """)
+        var observed: URLRequest?
+        GitHubStubURLProtocol.onRequest = { observed = $0 }
+        _ = try await client().verifyCredential(token: "tok", host: nil)
+        XCTAssertEqual(observed?.url?.host, "api.github.com")
+    }
+
+    func testEmptyHostFallsBackToGithubDotCom() async throws {
+        GitHubStubURLProtocol.respond(json: """
+        {"id":1,"login":"x","name":null,"avatar_url":null}
+        """)
+        var observed: URLRequest?
+        GitHubStubURLProtocol.onRequest = { observed = $0 }
+        _ = try await client().verifyCredential(token: "tok", host: "   ")
+        XCTAssertEqual(observed?.url?.host, "api.github.com",
+                       "Whitespace-only host treated as unset.")
+    }
 }
 
 // MARK: - URLProtocol stub (parallel to StubURLProtocol used by LinearClientTests).
