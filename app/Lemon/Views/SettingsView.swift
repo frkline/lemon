@@ -119,18 +119,10 @@ struct SettingsView: View {
                         Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Add")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.primary.opacity(0.05), in: Capsule())
+                    addAffordance
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
             }
             if allIdentities.isEmpty {
                 identitiesEmptyState
@@ -146,6 +138,23 @@ struct SettingsView: View {
                 .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
             }
         }
+    }
+
+    /// Editorial Add chip — shared by Identities and Workspaces section
+    /// headers so the affordance reads as the same control regardless of
+    /// whether it's a menu or a button underneath.
+    private var addAffordance: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "plus")
+                .font(.system(size: 9, weight: .semibold))
+            Text("Add")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(.primary.opacity(0.05), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
     }
 
     private var identityCountChip: some View {
@@ -238,16 +247,7 @@ struct SettingsView: View {
                 Button {
                     nav.addWorkspace()
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Add")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.primary.opacity(0.05), in: Capsule())
+                    addAffordance
                 }
                 .buttonStyle(.plain)
             }
@@ -1075,20 +1075,35 @@ struct SettingsView: View {
 
     private var settingsFooter: some View {
         HStack(spacing: 12) {
-            Button("Re-run setup") {
+            Button {
                 NotificationCenter.default.post(name: .lemonRerunSetup, object: nil)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Re-run setup")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(.primary.opacity(0.04), in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.tertiary)
+            .buttonStyle(.plain)
 
             Spacer()
 
             if saved {
-                Label("Saved", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LD.statusDone)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(LD.statusDone)
+                    Text("Saved")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(LD.statusDone)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
 
             Button("Save", action: save)
