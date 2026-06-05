@@ -144,20 +144,34 @@ final class LinearClient: Sendable {
     }
 
     func fetchComments(issueId: String, apiKey: String) async throws -> [Comment] {
+        // Use `first: 25, orderBy: createdAt` — Linear returns nodes newest-first
+        // by default. The previous query used `last: 25` which is valid Linear
+        // syntax but the resulting JSON parse-chain in this method was broken
+        // (Optional<Any>.flatMap path), silently returning zero comments and
+        // breaking the entire re-trigger flow. Direct + obvious is better here.
         let query = """
         query IssueComments($id: String!) {
           issue(id: $id) {
-            comments(last: 25, orderBy: createdAt) {
+            comments(first: 25, orderBy: createdAt) {
               nodes { id body createdAt }
             }
           }
         }
         """
         let json = try await graphql(query: query, variables: ["id": issueId], apiKey: apiKey)
-        let nodes = ((json["data"] as? [String: Any])?["issue"] as? [String: Any])?["comments"]
-            .flatMap { ($0 as? [String: Any])?["nodes"] as? [[String: Any]] } ?? []
+        guard
+            let data     = json["data"] as? [String: Any],
+            let issue    = data["issue"] as? [String: Any],
+            let comments = issue["comments"] as? [String: Any],
+            let nodes    = comments["nodes"] as? [[String: Any]]
+        else {
+            return []
+        }
 
         let iso = ISO8601DateFormatter()
+        // Fractional seconds in Linear timestamps (e.g. "...537Z") — the default
+        // ISO8601 formatter rejects them. Opt in so we don't silently drop comments.
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return nodes.compactMap { node -> Comment? in
             guard
                 let id   = node["id"]   as? String,

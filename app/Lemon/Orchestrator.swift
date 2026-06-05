@@ -85,15 +85,42 @@ final class Orchestrator {
             let completeIssues = try await linear.fetchCompleteIssues(apiKey: apiKey, userId: userId)
             Logger.orchestrator.info("Poll: \(completeIssues.count) complete issues to check for replies")
             for issue in completeIssues {
-                guard !sessions.isTracking(issueId: issue.id) else { continue }
-                guard let marker = try? await linear.findLemonMarker(issueId: issue.id, apiKey: apiKey) else { continue }
-                let hasReply = (try? await linear.hasNewComment(
-                    issueId: issue.id,
-                    afterCommentId: marker.commentId,
-                    apiKey: apiKey
-                )) ?? false
-                guard hasReply else { continue }
-                guard let repo = keychain.repoFor(issuePrefix: issue.identifierPrefix) else { continue }
+                if sessions.isTracking(issueId: issue.id) {
+                    Logger.orchestrator.info("Retrigger skip \(issue.identifier): already tracking")
+                    continue
+                }
+                let maybeMarker: LemonMarker?
+                do {
+                    maybeMarker = try await linear.findLemonMarker(issueId: issue.id, apiKey: apiKey)
+                } catch {
+                    Logger.orchestrator.error("Retrigger skip \(issue.identifier): findLemonMarker error: \(error.localizedDescription)")
+                    continue
+                }
+                guard let marker = maybeMarker else {
+                    // Diagnostic: also dump comment count + first 80 chars of last body
+                    let count = (try? await linear.fetchComments(issueId: issue.id, apiKey: apiKey).count) ?? -1
+                    Logger.orchestrator.info("Retrigger skip \(issue.identifier): no Lemon marker found (\(count) comments visible)")
+                    continue
+                }
+                let hasReply: Bool
+                do {
+                    hasReply = try await linear.hasNewComment(
+                        issueId: issue.id,
+                        afterCommentId: marker.commentId,
+                        apiKey: apiKey
+                    )
+                } catch {
+                    Logger.orchestrator.error("Retrigger \(issue.identifier) hasNewComment failed: \(error)")
+                    continue
+                }
+                if !hasReply {
+                    Logger.orchestrator.info("Retrigger skip \(issue.identifier): no new comment after marker \(marker.commentId)")
+                    continue
+                }
+                guard let repo = keychain.repoFor(issuePrefix: issue.identifierPrefix) else {
+                    Logger.orchestrator.error("Retrigger skip \(issue.identifier): no repo configured for prefix \(issue.identifierPrefix)")
+                    continue
+                }
                 Logger.orchestrator.info("Re-triggering \(issue.identifier) from reply")
                 await startSession(for: issue, repo: repo, retrigger: marker)
             }
