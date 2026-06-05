@@ -2,6 +2,29 @@ import Foundation
 import SwiftUI
 import os
 
+// Per-pair diagnostic snapshot — surfaced in Settings so the user can see
+// at a glance whether each configured source is healthy. Updated after every
+// pollPair call (success or failure).
+struct PairStatus: Equatable {
+    var lastPolledAt: Date?
+    var triggerCount: Int = 0
+    var completeCount: Int = 0
+    var error: String? = nil
+
+    /// One-line settings subtitle: "polled 12s ago · 0 queued · 1 complete".
+    /// Returns nil pre-first-poll so the row stays editorial-quiet.
+    var subtitle: String? {
+        guard let t = lastPolledAt else { return nil }
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        let rel = f.localizedString(for: t, relativeTo: Date())
+        if let err = error {
+            return "polled \(rel) · \(err.prefix(80))"
+        }
+        return "polled \(rel) · \(triggerCount) queued · \(completeCount) complete"
+    }
+}
+
 @Observable
 @MainActor
 final class Orchestrator {
@@ -10,6 +33,12 @@ final class Orchestrator {
     var lastPolledAt: Date?
     var isPolling = false
     var aiState: LocalLLM.AIState = .notConfigured
+
+    // Per-pair diagnostics keyed on WorkspacePair.id. Settings reads this to
+    // render each pair row's connection chip + subtitle line.
+    var pairStatuses: [UUID: PairStatus] = [:]
+
+    func pairStatus(for pairId: UUID) -> PairStatus? { pairStatuses[pairId] }
 
     // Per-source clients, lazily created on first use per process.
     private let linearClient = LinearClient()
@@ -87,9 +116,11 @@ final class Orchestrator {
 
     @MainActor
     private func pollPair(pair: WorkspacePair, client: any IssueSourceClient, auth: SourceAuth) async {
+        var status = pairStatuses[pair.id] ?? PairStatus()
         do {
             // 1. New 🍋-labeled issues → start a session.
             let newIssues = try await client.fetchTriggerQueue(config: pair.source, auth: auth)
+            status.triggerCount = newIssues.count
             Logger.orchestrator.info("Poll[\(pair.source.source.rawValue)/\(pair.workspace.matchKey)]: \(newIssues.count) queued, \(self.sessions.active.count) active")
 
             for ref in newIssues {
@@ -104,6 +135,7 @@ final class Orchestrator {
 
             // 2. 🍋 Complete issues → check for human replies to re-trigger.
             let completeIssues = try await client.fetchCompleteQueue(config: pair.source, auth: auth)
+            status.completeCount = completeIssues.count
             Logger.orchestrator.info("Poll[\(pair.source.source.rawValue)]: \(completeIssues.count) complete issues to check for replies")
             for ref in completeIssues {
                 if sessions.isTracking(ref: ref) {
@@ -135,10 +167,14 @@ final class Orchestrator {
                 Logger.orchestrator.info("Re-triggering \(ref.identifier) from reply")
                 await startSession(ref: ref, pair: pair, client: client, auth: auth, retrigger: marker)
             }
+            status.error = nil
         } catch {
             Logger.orchestrator.error("Poll error for pair \(pair.workspace.matchKey): \(error)")
+            status.error = error.localizedDescription
             lastPollError = error.localizedDescription
         }
+        status.lastPolledAt = Date()
+        pairStatuses[pair.id] = status
     }
 
     private var maxConcurrent: Int { 2 }
@@ -274,6 +310,52 @@ final class Orchestrator {
         sessions.add(active1)
         sessions.add(active2)
         sessions.finish(recent)
+
+        // Seed pairs + per-pair statuses so Settings renders a mixed-source
+        // state under --smoke-test without needing a real Linear/GitHub config.
+        seedMockPairs()
+    }
+
+    func seedMockPairs() {
+        let linearPair = WorkspacePair(
+            source: SourceConfig(source: .linear, displayName: "Linear",
+                                 linearTeamKeys: ["DEMO"], githubRepos: nil),
+            workspace: WorkspaceMapping(
+                matchKey: "DEMO",
+                path: "/Users/frank/Projects/HarpyRocks",
+                allReposInFolder: true,
+                homeRepo: "memory"
+            )
+        )
+        let githubPair = WorkspacePair(
+            source: SourceConfig(source: .github, displayName: "GitHub",
+                                 linearTeamKeys: nil, githubRepos: ["acme/widgets"]),
+            workspace: WorkspaceMapping(
+                matchKey: "acme/widgets",
+                path: "/Users/frank/Projects/widgets",
+                allReposInFolder: false,
+                homeRepo: ""
+            )
+        )
+        KeychainStore.shared.pairs = [linearPair, githubPair]
+        KeychainStore.shared.linearApiKey = "lin_mock_demo_key"
+        KeychainStore.shared.linearUserId = "user-mock"
+        KeychainStore.shared.githubToken = "ghp_mock_demo_token"
+        KeychainStore.shared.githubUser = "frkline"
+
+        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        pairStatuses[linearPair.id] = PairStatus(
+            lastPolledAt: now.addingTimeInterval(-12),
+            triggerCount: 0,
+            completeCount: 1,
+            error: nil
+        )
+        pairStatuses[githubPair.id] = PairStatus(
+            lastPolledAt: now.addingTimeInterval(-8),
+            triggerCount: 1,
+            completeCount: 0,
+            error: nil
+        )
     }
     #endif
 }

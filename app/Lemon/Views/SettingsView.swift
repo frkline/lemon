@@ -92,76 +92,137 @@ struct SettingsView: View {
     }
 
     private var linearSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("Linear")
-            HStack(alignment: .top, spacing: 12) {
-                iconBox("key.horizontal.fill", tint: LD.lemon)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text("API Key")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        if !linearApiKey.isEmpty {
-                            connectedBadge
-                        }
-                    }
-                    SecureField("Paste from linear.app/settings → API", text: $linearApiKey)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                }
-                Spacer()
-            }
-            .padding(14)
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-        }
+        sourceCredentialSection(
+            source: .linear,
+            heading: "Linear",
+            subhead: "Personal API Key",
+            placeholder: "Paste from linear.app/settings → API",
+            connected: !linearApiKey.isEmpty,
+            connectedDetail: nil,
+            keyBinding: $linearApiKey,
+            verifyAction: nil,
+            verifyState: nil
+        )
     }
 
     private var githubSection: some View {
+        let connectedDetail: String? = {
+            if case .ok(let login) = ghVerifyState { return "@\(login)" }
+            if !githubUser.isEmpty { return "@\(githubUser)" }
+            return nil
+        }()
+        return sourceCredentialSection(
+            source: .github,
+            heading: "GitHub",
+            subhead: "Personal Access Token",
+            placeholder: "ghp_… (scope: repo)",
+            connected: !githubToken.isEmpty,
+            connectedDetail: connectedDetail,
+            keyBinding: $githubToken,
+            verifyAction: { Task { await verifyGitHubToken() } },
+            verifyState: ghVerifyState
+        )
+    }
+
+    // Shared editorial credential card. Eyebrow + serif-leaning subhead,
+    // monospace token field, optional Verify action with inline state.
+    private func sourceCredentialSection(
+        source: IssueSource,
+        heading: String,
+        subhead: String,
+        placeholder: String,
+        connected: Bool,
+        connectedDetail: String?,
+        keyBinding: Binding<String>,
+        verifyAction: (() -> Void)?,
+        verifyState: VerifyState?
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("GitHub")
-            HStack(alignment: .top, spacing: 12) {
-                iconBox("key.horizontal.fill", tint: LD.statusDone)
-                VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(heading.uppercased())
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                SourceGlyph(source: source, size: 8)
+                Spacer()
+                if connected { connectedBadge }
+                if let detail = connectedDetail {
+                    Text(detail)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(subhead)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                SecureField(placeholder, text: keyBinding)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                    )
+                if let verifyAction {
                     HStack(spacing: 8) {
-                        Text("Personal Access Token")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        if case .ok(let login) = ghVerifyState {
-                            connectedBadge
-                            Text("@\(login)")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.tertiary)
-                        } else if !githubToken.isEmpty && !githubUser.isEmpty {
-                            connectedBadge
-                        }
-                    }
-                    SecureField("ghp_… (scope: repo)", text: $githubToken)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                    HStack {
-                        Button("Verify") { Task { await verifyGitHubToken() } }
+                        Button("Verify") { verifyAction() }
                             .buttonStyle(GhostButtonStyle())
-                            .disabled(githubToken.isEmpty || ghVerifyState == .verifying)
-                        if case .verifying = ghVerifyState {
-                            ProgressView().controlSize(.small)
-                        }
-                        if case .failed(let msg) = ghVerifyState {
-                            Text(msg).font(.system(size: 10)).foregroundStyle(.red)
-                        }
+                            .disabled(keyBinding.wrappedValue.isEmpty || verifyState == .verifying)
+                        verifyStateRow(verifyState)
                         Spacer()
                     }
                 }
-                Spacer()
             }
             .padding(14)
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .overlay(
+                RoundedRectangle(cornerRadius: LD.r10)
+                    .strokeBorder(source.accent.opacity(connected ? 0.20 : 0.08), lineWidth: 0.5)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func verifyStateRow(_ state: VerifyState?) -> some View {
+        switch state {
+        case .verifying:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text("verifying…")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        case .ok(let login):
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.statusDone)
+                Text("@\(login)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(LD.statusDone)
+            }
+        case .failed(let msg):
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.coral)
+                Text(msg)
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.coral)
+                    .lineLimit(1)
+            }
+        default:
+            EmptyView()
         }
     }
 
     private var workspaceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                sectionLabel("Workspace pairs (\(pairs.count) / \(KeychainStore.maxPairs))")
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                sectionLabel("Workspace pairs")
+                pairCountChip
                 Spacer()
                 Button("Edit") { editingWorkspace = true }
                     .buttonStyle(GhostButtonStyle())
@@ -169,9 +230,14 @@ struct SettingsView: View {
             if pairs.isEmpty {
                 HStack(spacing: 12) {
                     iconBox("folder.fill", tint: .secondary)
-                    Text("No pairs configured")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No pairs configured")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                        Text("Add one in the editor — Linear team or GitHub owner/repo.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.quaternary)
+                    }
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -181,7 +247,7 @@ struct SettingsView: View {
                     ForEach(pairs) { pair in
                         pairRow(pair)
                         if pair.id != pairs.last?.id {
-                            Divider().padding(.leading, 54)
+                            Divider().padding(.leading, 56).opacity(0.6)
                         }
                     }
                 }
@@ -193,54 +259,114 @@ struct SettingsView: View {
         }
     }
 
+    // Tiny "N · 10" pair count, set in monospace for editorial restraint.
+    private var pairCountChip: some View {
+        HStack(spacing: 3) {
+            Text("\(pairs.count)")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(pairs.count >= KeychainStore.maxPairs ? LD.coral : .secondary)
+            Text("·")
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
+            Text("\(KeychainStore.maxPairs)")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(.primary.opacity(0.05)))
+    }
+
     private func pairRow(_ pair: WorkspacePair) -> some View {
-        HStack(spacing: 12) {
-            iconBox(
-                pair.source.source == .github ? "chevron.left.forwardslash.chevron.right" :
-                    (pair.workspace.allReposInFolder ? "folder.fill.badge.plus" : "folder.fill"),
-                tint: pair.source.source == .github ? LD.statusDone : LD.lemon
-            )
+        let pairStatus = orchestrator.pairStatus(for: pair.id)
+        return HStack(spacing: 12) {
+            // Source ornament: a hairline-bordered glyph stack. The folder
+            // glyph below it whispers "this lives on disk" without competing
+            // with the source identity.
+            VStack(spacing: 4) {
+                SourceGlyph(source: pair.source.source, size: 9)
+                Image(systemName: pair.workspace.allReposInFolder
+                                    ? "folder.fill.badge.plus"
+                                    : "folder.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+            }
+            .frame(width: 32)
+
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(pair.source.source.displayName)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(pair.source.source == .github ? LD.statusDone : LD.citrus)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            (pair.source.source == .github ? LD.statusDone : LD.lemon).opacity(0.18),
-                            in: Capsule()
-                        )
-                    Text(pair.workspace.matchKey)
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(pair.workspace.matchKey.isEmpty ? "—" : pair.workspace.matchKey)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.primary)
                     if pair.workspace.allReposInFolder {
-                        Text("folder")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(.primary.opacity(0.05), in: Capsule())
+                        editorialChip("folder", tint: .secondary)
                     }
                     if pair.workspace.allReposInFolder && !pair.workspace.homeRepo.isEmpty {
-                        Text("→ \(pair.workspace.homeRepo)/")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(LD.lemon.opacity(0.10), in: Capsule())
+                        editorialChip("→ \(pair.workspace.homeRepo)/", tint: LD.lemon, mono: true)
                     }
+                    Spacer()
+                    pairConnectionChip(pair: pair, status: pairStatus)
                 }
-                Text(pair.workspace.path)
+                Text(pair.workspace.path.isEmpty ? "(no path set)" : pair.workspace.path)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let line = pairStatus?.subtitle {
+                    Text(line)
+                        .font(.system(size: 10))
+                        .foregroundStyle(pairStatus?.error == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(LD.coral))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    // Editorial chip — kerned uppercase or monospace, hairline border for restraint.
+    private func editorialChip(_ text: String, tint: Color, mono: Bool = false) -> some View {
+        Text(text)
+            .font(.system(
+                size: 9,
+                weight: mono ? .medium : .semibold,
+                design: mono ? .monospaced : .default
+            ))
+            .kerning(mono ? 0 : 0.4)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tint.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(tint.opacity(0.20), lineWidth: 0.5))
+    }
+
+    @ViewBuilder
+    private func pairConnectionChip(pair: WorkspacePair, status: PairStatus?) -> some View {
+        if let status, status.error != nil {
+            // Coral dot — error state needs attention.
+            HStack(spacing: 3) {
+                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Text("err")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.coral)
+            }
+        } else if status?.lastPolledAt != nil {
+            // Quiet green dot — last poll succeeded.
+            HStack(spacing: 3) {
+                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
+                Text("live")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.statusDone)
+            }
+        } else {
+            // Pre-first-poll: hush.
+            Text("idle")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.quaternary)
+        }
     }
 
     // MARK: - Local AI
@@ -698,172 +824,383 @@ struct SettingsView: View {
 }
 
 // MARK: - Workspace editor sheet
+//
+// Editorial polish: eyebrow + dateline-style metadata, generous whitespace,
+// one primary action (Done) in lemon-yellow, restrained typography. Each
+// pair row reveals its source-shaped fields (Linear → prefix, GitHub →
+// owner/repo), with inline validation hints.
 
 struct WorkspaceEditorView: View {
     @Binding var pairs: [WorkspacePair]
     let onDone: () -> Void
 
+    @State private var confirmingDeleteId: UUID? = nil
+    @State private var deleteTask: Task<Void, Never>?
+
     private var atCap: Bool { pairs.count >= KeychainStore.maxPairs }
+    private var duplicateMatchKeys: Set<String> {
+        // Helps surface "you've got two LEM rows pointing at different paths".
+        // Case-insensitive within the same source.
+        let perSource = Dictionary(grouping: pairs) { "\($0.source.source.rawValue):\($0.workspace.matchKey.lowercased())" }
+        return Set(perSource.filter { $0.value.count > 1 }.keys)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Workspace Pairs")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                Spacer()
-                Text("\(pairs.count) / \(KeychainStore.maxPairs)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                Button("Done") { onDone() }
-                    .buttonStyle(LemonButtonStyle())
+            // Eyebrow + heading + dateline metadata row, lemon.living-style.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("WORKSPACE")
+                            .font(.system(size: 9, weight: .bold))
+                            .kerning(1.6)
+                            .foregroundStyle(LD.lemon)
+                        Text("Pairs")
+                            .font(.system(size: 22, weight: .bold, design: .serif))
+                            .foregroundStyle(.primary)
+                    }
+                    Spacer()
+                    Button("Done") { onDone() }
+                        .buttonStyle(LemonButtonStyle())
+                        .keyboardShortcut(.defaultAction)
+                }
+                HStack(spacing: 10) {
+                    metaItem(label: "Configured", value: "\(pairs.count) of \(KeychainStore.maxPairs)")
+                    metaDivider
+                    metaItem(label: "Linear", value: "\(pairs.filter { $0.source.source == .linear }.count)")
+                    metaDivider
+                    metaItem(label: "GitHub", value: "\(pairs.filter { $0.source.source == .github }.count)")
+                }
             }
-            .padding(20)
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 14)
 
-            Divider()
+            Divider().opacity(0.5)
 
-            ScrollView {
-                VStack(spacing: 8) {
+            // Pair list
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 12) {
                     ForEach($pairs) { $pair in
-                        PairRowView(pair: $pair) {
-                            pairs.removeAll { $0.id == pair.id }
-                        }
+                        PairRowView(
+                            pair: $pair,
+                            isDuplicate: duplicateMatchKeys.contains(
+                                "\(pair.source.source.rawValue):\(pair.workspace.matchKey.lowercased())"
+                            ) && !pair.workspace.matchKey.isEmpty,
+                            confirmingDelete: confirmingDeleteId == pair.id,
+                            onDelete: { handleDelete(pair.id) }
+                        )
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                                removal: .opacity.combined(with: .move(edge: .leading))
+                            )
+                        )
                     }
-                    Button {
-                        let linear = SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: [""])
-                        pairs.append(WorkspacePair(
-                            source: linear,
-                            workspace: WorkspaceMapping(matchKey: "", path: "")
-                        ))
-                    } label: {
-                        Label(atCap ? "10-pair limit reached" : "Add Pair", systemImage: "plus")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .buttonStyle(GhostButtonStyle())
-                    .disabled(atCap)
-                    .padding(.top, 4)
+
+                    addPairButton
+
                     if atCap {
-                        Text("Remove a pair to add another.")
+                        Text("Soft cap. Bump it in KeychainStore.maxPairs if you genuinely need more — the limit's there to keep per-poll fan-out bounded.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 2)
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .animation(LD.snappy, value: pairs.count)
+                .animation(LD.snappy, value: confirmingDeleteId)
             }
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 560, height: 620)
         .background(.regularMaterial)
+    }
+
+    private var addPairButton: some View {
+        Button {
+            addLinearPair()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(atCap ? "10-pair limit reached" : "Add pair")
+                    .font(.system(size: 12, weight: .semibold))
+                if !atCap {
+                    Text("Linear by default — toggle the source in the row.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: LD.r10)
+                    .strokeBorder(
+                        atCap ? Color.secondary.opacity(0.15) : LD.lemon.opacity(0.35),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+            )
+            .foregroundStyle(atCap ? AnyShapeStyle(.tertiary) : AnyShapeStyle(LD.lemon))
+        }
+        .buttonStyle(.plain)
+        .disabled(atCap)
+        .opacity(atCap ? 0.55 : 1)
+    }
+
+    private func addLinearPair() {
+        withAnimation(LD.snappy) {
+            pairs.append(WorkspacePair(
+                source: SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: [""]),
+                workspace: WorkspaceMapping(matchKey: "", path: "")
+            ))
+        }
+    }
+
+    private func handleDelete(_ id: UUID) {
+        if confirmingDeleteId == id {
+            deleteTask?.cancel()
+            confirmingDeleteId = nil
+            withAnimation(LD.snappy) {
+                pairs.removeAll { $0.id == id }
+            }
+        } else {
+            confirmingDeleteId = id
+            deleteTask?.cancel()
+            deleteTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3))
+                if !Task.isCancelled {
+                    withAnimation(LD.smooth) { confirmingDeleteId = nil }
+                }
+            }
+        }
+    }
+
+    private func metaItem(label: String, value: String) -> some View {
+        HStack(spacing: 5) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var metaDivider: some View {
+        Text("·")
+            .font(.system(size: 10))
+            .foregroundStyle(.quaternary)
     }
 }
 
 struct PairRowView: View {
     @Binding var pair: WorkspacePair
+    let isDuplicate: Bool
+    let confirmingDelete: Bool
     let onDelete: () -> Void
 
+    @State private var hovered = false
+
+    private var validation: ValidationState {
+        if pair.workspace.matchKey.trimmingCharacters(in: .whitespaces).isEmpty {
+            return .missingKey
+        }
+        if pair.workspace.path.trimmingCharacters(in: .whitespaces).isEmpty {
+            return .missingPath
+        }
+        if pair.source.source == .github && !pair.workspace.matchKey.contains("/") {
+            return .ghShape
+        }
+        if isDuplicate {
+            return .duplicate
+        }
+        return .ok
+    }
+
+    enum ValidationState {
+        case ok, missingKey, missingPath, ghShape, duplicate
+
+        var hint: String? {
+            switch self {
+            case .ok:           return nil
+            case .missingKey:   return "Add a Linear team prefix or owner/repo."
+            case .missingPath:  return "Point this pair at a local repo or folder."
+            case .ghShape:      return "GitHub matchKey should be owner/repo (e.g. acme/widgets)."
+            case .duplicate:    return "Another row already claims this key."
+            }
+        }
+        var color: Color? {
+            switch self {
+            case .ok:                                          return nil
+            case .missingKey, .missingPath, .duplicate, .ghShape: return LD.coral
+            }
+        }
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text("Source")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 56, alignment: .trailing)
-                    Picker("", selection: Binding(
-                        get: { pair.source.source },
-                        set: { newSource in
-                            pair.source = SourceConfig(
-                                id: pair.source.id,
-                                source: newSource,
-                                displayName: newSource.displayName,
-                                linearTeamKeys: newSource == .linear ? [pair.workspace.matchKey] : nil,
-                                githubRepos: newSource == .github ? [pair.workspace.matchKey] : nil
-                            )
-                        })
-                    ) {
-                        Text("Linear").tag(IssueSource.linear)
-                        Text("GitHub").tag(IssueSource.github)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
+        VStack(alignment: .leading, spacing: 12) {
+            // Top: source picker + delete (delete morphs into "Remove?" when armed).
+            HStack(spacing: 10) {
+                Picker("", selection: Binding(
+                    get: { pair.source.source },
+                    set: { syncSource($0) }
+                )) {
+                    Label("Linear", systemImage: "circle.hexagongrid.fill").tag(IssueSource.linear)
+                    Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right").tag(IssueSource.github)
                 }
-                HStack(spacing: 8) {
-                    Text(pair.source.source == .github ? "Repo" : "Prefix")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 56, alignment: .trailing)
-                    TextField(
-                        pair.source.source == .github ? "owner/repo" : "e.g. HRP",
-                        text: $pair.workspace.matchKey
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
-                    .frame(width: pair.source.source == .github ? 200 : 110)
-                    .onChange(of: pair.workspace.matchKey) { _, newKey in
-                        // Keep SourceConfig allowlist in sync with matchKey so
-                        // the orchestrator's per-pair filter matches what the
-                        // user typed in this row.
-                        if pair.source.source == .linear {
-                            pair.source = SourceConfig(
-                                id: pair.source.id, source: .linear,
-                                displayName: "Linear",
-                                linearTeamKeys: [newKey], githubRepos: nil
-                            )
-                        } else {
-                            pair.source = SourceConfig(
-                                id: pair.source.id, source: .github,
-                                displayName: "GitHub",
-                                linearTeamKeys: nil, githubRepos: [newKey]
-                            )
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+
+                SourceGlyph(source: pair.source.source)
+                    .help(pair.source.source.displayName)
+
+                Spacer()
+
+                Button(action: onDelete) {
+                    HStack(spacing: 4) {
+                        Image(systemName: confirmingDelete ? "trash.fill" : "trash")
+                            .font(.system(size: 11, weight: .medium))
+                        if confirmingDelete {
+                            Text("Remove?")
+                                .font(.system(size: 10, weight: .semibold))
                         }
                     }
+                    .foregroundStyle(confirmingDelete ? .white : LD.coral)
+                    .padding(.horizontal, confirmingDelete ? 8 : 6)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(confirmingDelete ? LD.coral : LD.coral.opacity(0.10))
+                    )
+                    .animation(LD.snappy, value: confirmingDelete)
                 }
-                HStack(spacing: 8) {
-                    Text(pair.workspace.allReposInFolder ? "Folder" : "Repo")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 56, alignment: .trailing)
-                    TextField(pair.workspace.allReposInFolder ? "/path/to/projects" : "/path/to/repo",
-                              text: $pair.workspace.path)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
-                }
-                HStack(spacing: 8) {
-                    Spacer().frame(width: 64)
-                    Toggle(isOn: $pair.workspace.allReposInFolder) {
-                        Text("All repos in this folder")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    .toggleStyle(.checkbox)
-                    Spacer()
-                }
+                .buttonStyle(.plain)
+                .help(confirmingDelete ? "Click again to confirm" : "Remove this pair")
+            }
 
-                if pair.workspace.allReposInFolder {
-                    HStack(spacing: 8) {
-                        Text("Home")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 56, alignment: .trailing)
-                        TextField("e.g. memory", text: $pair.workspace.homeRepo)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                        Text("optional")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .help("Subdirectory where Claude launches. Create LEMON.md there with repo navigation instructions for this team.")
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            // Identifier field (source-aware label + placeholder).
+            field(
+                label: pair.source.source == .github ? "REPO" : "TEAM",
+                placeholder: pair.source.source == .github ? "owner/repo" : "e.g. HRP",
+                text: $pair.workspace.matchKey
+            )
+            .onChange(of: pair.workspace.matchKey) { _, newKey in
+                // Keep SourceConfig allowlist in sync with matchKey.
+                syncMatchKey(newKey)
+            }
+
+            // Path field — "PATH" for single repo, "FOLDER" for multi-repo.
+            // Distinct from the matchKey label above so GitHub's REPO / local
+            // PATH don't collide.
+            field(
+                label: pair.workspace.allReposInFolder ? "FOLDER" : "PATH",
+                placeholder: pair.workspace.allReposInFolder ? "/path/to/projects" : "/path/to/repo",
+                text: $pair.workspace.path
+            )
+
+            // Multi-repo toggle + (conditional) home subdir
+            HStack(spacing: 10) {
+                Toggle(isOn: $pair.workspace.allReposInFolder) {
+                    Text("All repos in this folder")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
+                .toggleStyle(.checkbox)
+                Spacer()
             }
-            Spacer()
-            Button(action: onDelete) {
-                Image(systemName: "minus.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(LD.coral)
+
+            if pair.workspace.allReposInFolder {
+                field(
+                    label: "HOME",
+                    placeholder: "e.g. memory",
+                    text: $pair.workspace.homeRepo,
+                    helper: "Optional — subdirectory where Claude launches. Put a LEMON.md there with team-specific guidance."
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .buttonStyle(.borderless)
-            .padding(.top, 2)
+
+            // Validation chip
+            if let hint = validation.hint, let color = validation.color {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(color)
+                    Text(hint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(color)
+                }
+                .transition(.opacity)
+            }
         }
-        .padding(12)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .padding(14)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: LD.r10)
+                    .fill(.primary.opacity(hovered ? 0.06 : 0.035))
+                RoundedRectangle(cornerRadius: LD.r10)
+                    .strokeBorder(
+                        validation.color?.opacity(0.30) ?? Color.primary.opacity(0.08),
+                        lineWidth: 0.5
+                    )
+            }
+        )
+        .onHover { hovered = $0 }
+        .animation(LD.smooth, value: hovered)
+        .animation(LD.smooth, value: pair.workspace.allReposInFolder)
+    }
+
+    // Editorial form field: eyebrow label, monospace input, optional helper line.
+    private func field(label: String, placeholder: String, text: Binding<String>, helper: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(.tertiary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(.vertical, 5)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                )
+            if let helper {
+                Text(helper)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+            }
+        }
+    }
+
+    private func syncSource(_ newSource: IssueSource) {
+        pair.source = SourceConfig(
+            id: pair.source.id,
+            source: newSource,
+            displayName: newSource.displayName,
+            linearTeamKeys: newSource == .linear ? [pair.workspace.matchKey] : nil,
+            githubRepos: newSource == .github ? [pair.workspace.matchKey] : nil
+        )
+    }
+
+    private func syncMatchKey(_ newKey: String) {
+        if pair.source.source == .linear {
+            pair.source = SourceConfig(
+                id: pair.source.id, source: .linear,
+                displayName: "Linear",
+                linearTeamKeys: [newKey], githubRepos: nil
+            )
+        } else {
+            pair.source = SourceConfig(
+                id: pair.source.id, source: .github,
+                displayName: "GitHub",
+                linearTeamKeys: nil, githubRepos: [newKey]
+            )
+        }
     }
 }

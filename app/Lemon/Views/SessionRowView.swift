@@ -16,9 +16,13 @@ struct SessionRowView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    SourceGlyph(source: session.issue.source)
+                        .help(session.issue.sourceTitle)
                     Text(session.issue.identifier)
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.tertiary)
+                        .truncationMode(.middle)
+                        .lineLimit(1)
                     Spacer()
                     StatusPill(status: session.status)
                 }

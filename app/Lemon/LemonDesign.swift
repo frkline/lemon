@@ -7,7 +7,14 @@ enum LD {
     static let lemon      = Color(r: 0.969, g: 0.784, b: 0.259)  // #F7C842
     static let lemondrop  = Color(r: 0.996, g: 0.957, b: 0.800)  // pale yellow tint
     static let coral      = Color(r: 1.000, g: 0.420, b: 0.275)  // #FF6B46
-    static let citrus     = Color(r: 0.176, g: 0.290, b: 0.118)  // deep citrus green
+    static let citrus     = Color(r: 0.176, g: 0.290, b: 0.118)  // deep citrus green (use on light)
+
+    // Source marks — bright enough to read on the warm-dark chrome. Linear
+    // gets a honey-amber that nods to lemon without competing with the
+    // primary-action yellow; GitHub gets the status-done green so the source
+    // identifier is consistent with the "complete" semantics across views.
+    static let linearMark = Color(r: 0.918, g: 0.682, b: 0.227)  // #EAAE3A — warmer than lemon, distinct
+    static let githubMark = Color(r: 0.420, g: 0.820, b: 0.500)  // brightened statusDone for chip glyphs
 
     // Status palette
     static let statusPlanning  = Color(r: 0.38, g: 0.59, b: 0.98)
@@ -153,5 +160,88 @@ struct GhostButtonStyle: ButtonStyle {
             .background(.primary.opacity(configuration.isPressed ? 0.08 : 0.05),
                         in: RoundedRectangle(cornerRadius: LD.r6))
             .animation(LD.snappy, value: configuration.isPressed)
+    }
+}
+
+// MARK: - Source surfacing
+//
+// `SourceGlyph` is the canonical way to indicate which provider (Linear or
+// GitHub) backs an `IssueRef` or `WorkspacePair`. Typographic, not chromatic —
+// quiet enough to live next to an identifier without stealing the headline.
+//
+// Rendered as a small monospace letter inside a hairline border, tinted with
+// the source's accent. Tooltip exposes the full source + matchKey.
+
+extension IssueSource {
+    /// Compact two-character marker for chips and badges.
+    var glyph: String {
+        switch self {
+        case .linear: return "L"
+        case .github: return "gh"
+        }
+    }
+
+    /// Editorial accent — used for source glyphs, dots, micro-borders.
+    /// LD.lemon stays reserved for primary actions per the discipline rule;
+    /// `linearMark` is a warmer honey-amber that reads cleanly on the warm-dark
+    /// chrome without competing with the lemon CTA. GitHub gets the bright
+    /// statusDone green so its mark is consistent with the "complete" hue
+    /// the user already learned.
+    var accent: Color {
+        switch self {
+        case .linear: return LD.linearMark
+        case .github: return LD.githubMark
+        }
+    }
+}
+
+/// Tiny typographic source marker. Width-stable across Linear / GitHub.
+struct SourceGlyph: View {
+    let source: IssueSource
+    var size: CGFloat = 9
+    var label: String? = nil  // optional matchKey-style sublabel for inline use
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(source.glyph)
+                .font(.system(size: size, weight: .bold, design: .monospaced))
+                .kerning(0.4)
+                .foregroundStyle(source.accent)
+                .frame(minWidth: 14)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule()
+                        .fill(source.accent.opacity(0.10))
+                )
+                .overlay(
+                    Capsule().strokeBorder(source.accent.opacity(0.25), lineWidth: 0.5)
+                )
+            if let label {
+                Text(label)
+                    .font(.system(size: size + 1, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .help(tooltipText)
+    }
+
+    private var tooltipText: String {
+        switch source {
+        case .linear: return "Linear" + (label.map { " · \($0)" } ?? "")
+        case .github: return "GitHub" + (label.map { " · \($0)" } ?? "")
+        }
+    }
+}
+
+extension IssueRef {
+    /// Human-readable source label used in hover tooltips + a11y.
+    var sourceTitle: String {
+        switch scope {
+        case .linearTeam:
+            return "Linear · \(identifierPrefix)"
+        case .githubRepo(let owner, let repo, _):
+            return "GitHub · \(owner)/\(repo)"
+        }
     }
 }

@@ -2,7 +2,12 @@ import Foundation
 import Security
 
 final class KeychainStore: @unchecked Sendable {
-    static let shared = KeychainStore(inMemory: false)
+    // In --mock, use in-memory storage so smoke runs / mock data don't
+    // touch real UserDefaults. Non-mock launches keep the production
+    // Keychain + UserDefaults backing.
+    static let shared = KeychainStore(
+        inMemory: ProcessInfo.processInfo.arguments.contains("--mock")
+    )
 
     // Pass --mock to enable fake-data UI mode (no Linear account needed).
     static let isMockMode: Bool = ProcessInfo.processInfo.arguments.contains("--mock")

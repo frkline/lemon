@@ -80,10 +80,16 @@ struct PopoverView: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                 Spacer()
             } else if let session = nav.selectedSession {
-                Text(session.issue.identifier)
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("detail-identifier")
+                HStack(spacing: 6) {
+                    SourceGlyph(source: session.issue.source)
+                        .help(session.issue.sourceTitle)
+                    Text(session.issue.identifier)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .truncationMode(.middle)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("detail-identifier")
+                }
                 Spacer()
                 StatusPill(status: session.status)
             } else {

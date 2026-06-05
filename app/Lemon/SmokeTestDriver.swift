@@ -72,6 +72,9 @@ final class SmokeTestDriver {
         jump { nav.showList() }
         try? await Task.sleep(for: .milliseconds(80))
 
+        // 4b — workspace pair editor sheet (rendered standalone)
+        await shotPairEditor()
+
         // 5 — empty state (clear everything, capture, restore)
         let savedActive = orchestrator.sessions.active
         let savedRecent = orchestrator.sessions.recent
@@ -133,6 +136,35 @@ final class SmokeTestDriver {
             try? await Task.sleep(for: .milliseconds(100))
         }
 
+        win.close()
+    }
+
+    // MARK: - Workspace editor sheet (separate window — sheet @State isn't reachable from here)
+
+    private func shotPairEditor() async {
+        let win = NSWindow(
+            contentRect: CGRect(x: 200, y: 200, width: 560, height: 620),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        win.isReleasedWhenClosed = false
+
+        // Seed local state with the orchestrator's mock pairs so the editor
+        // shows the real multi-source mix. The editor never persists in the
+        // smoke (we just snapshot the layout).
+        var pairs = KeychainStore.shared.pairs
+        let view = WorkspaceEditorView(
+            pairs: Binding(get: { pairs }, set: { pairs = $0 }),
+            onDone: {}
+        )
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame = CGRect(x: 0, y: 0, width: 560, height: 620)
+        win.contentView = hosting
+        win.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(300))
+        await shotWindow(win, name: "04b-pair-editor")
+        try? await Task.sleep(for: .milliseconds(100))
         win.close()
     }
 
