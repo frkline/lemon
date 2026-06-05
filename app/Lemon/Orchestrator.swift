@@ -315,6 +315,33 @@ final class Orchestrator {
         }
     }
 
+    /// User-triggered re-bootstrap of the 🍋 state labels for one
+    /// (identity, surface) scope. Used by the workspace editor's
+    /// "Re-seed 🍋 labels" action so the user can repair a repo whose
+    /// labels got deleted (or were never created — see the bare-emoji
+    /// trigger-label regression) without restarting the app.
+    /// The per-process memo is left alone — the client's POST-treat-422
+    /// flow is idempotent, so this is safe to call repeatedly.
+    @MainActor
+    func reseedLabels(identityId: UUID, surfaceId: String) async throws -> Int {
+        struct ReseedError: LocalizedError {
+            let errorDescription: String?
+            init(_ msg: String) { self.errorDescription = msg }
+        }
+        let keychain = KeychainStore.shared
+        guard let identity = keychain.identities.first(where: { $0.id == identityId }) else {
+            throw ReseedError("Identity not found")
+        }
+        guard let auth = keychain.authFor(identity: identity) else {
+            throw ReseedError("Missing credential — re-verify this identity in Settings")
+        }
+        let cli = client(for: identity)
+        let config = sourceConfig(identity: identity, surfaceId: surfaceId)
+        try await cli.bootstrapLabels(config: config, auth: auth)
+        Logger.orchestrator.info("Reseeded labels for \(identityId.uuidString)/\(surfaceId)")
+        return LemonState.allCases.count
+    }
+
     // MARK: - Session management
 
     @MainActor

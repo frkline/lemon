@@ -609,7 +609,11 @@ private struct TrackersStep: View {
             withAnimation(LD.snappy) {
                 draft.identityRef = snap.identityId
                 draft.sourceKind = kind
-                draft.surfaceId = ""
+                // Auto-pick the first known surface on this identity
+                // instead of clearing — matches the verify-success
+                // behavior so the REPO/TEAM slot is always pre-filled
+                // when there's a sensible default.
+                draft.surfaceId = snap.surfaces.first?.id ?? ""
                 draft.newIdentityToken = ""
                 draft.newIdentityVerified = nil
                 verifyState = .idle
@@ -1090,6 +1094,14 @@ private struct TrackersStep: View {
             await MainActor.run {
                 draft.newIdentityVerified = snap
                 verifyState = .ok
+                // Auto-pick the first available surface as soon as we
+                // have one — saves the user a click in the common case
+                // (single repo / single team) and gives the empty REPO
+                // slot something concrete to render. They can still
+                // change it via the dropdown.
+                if draft.surfaceId.isEmpty, let first = snap.surfaces.first {
+                    draft.surfaceId = first.id
+                }
             }
         } catch {
             await MainActor.run {

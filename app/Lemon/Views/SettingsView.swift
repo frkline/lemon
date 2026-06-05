@@ -101,28 +101,28 @@ struct SettingsView: View {
     private var allIdentities: [Identity] { KeychainStore.shared.identities }
     private var allWorkspaces: [Workspace] { KeychainStore.shared.workspaces }
 
+    @State private var addIdentityPickerShown: Bool = false
+
     private var identitiesPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 sectionLabel("Identities")
                 identityCountChip
                 Spacer()
-                Menu {
-                    Button {
-                        nav.addIdentity(kind: .linear)
-                    } label: {
-                        Label("Linear", systemImage: "circle.hexagongrid.fill")
-                    }
-                    Button {
-                        nav.addIdentity(kind: .github)
-                    } label: {
-                        Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
-                    }
+                // Button + popover instead of Menu so the addAffordance
+                // capsule background renders exactly the same as the
+                // Workspaces "+ Add" — Menu.borderlessButton was
+                // stripping the .background() modifier and the two pills
+                // read inconsistent. Same affordance, same chrome.
+                Button {
+                    addIdentityPickerShown = true
                 } label: {
                     addAffordance
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
+                .popover(isPresented: $addIdentityPickerShown, arrowEdge: .top) {
+                    addIdentityPopoverContent
+                }
             }
             if allIdentities.isEmpty {
                 identitiesEmptyState
@@ -138,6 +138,39 @@ struct SettingsView: View {
                 .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
             }
         }
+    }
+
+    /// Tiny popover surface for "Add identity" — one button per source.
+    /// Lives behind the Identities section's "+ Add" chip.
+    private var addIdentityPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            popoverRow(label: "Linear", systemImage: "circle.hexagongrid.fill") {
+                addIdentityPickerShown = false
+                nav.addIdentity(kind: .linear)
+            }
+            popoverRow(label: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right") {
+                addIdentityPickerShown = false
+                nav.addIdentity(kind: .github)
+            }
+        }
+        .padding(8)
+        .frame(minWidth: 160)
+    }
+
+    private func popoverRow(label: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11))
+                    .frame(width: 14)
+                Text(label)
+                    .font(.system(size: 12))
+                Spacer()
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Editorial Add chip — shared by Identities and Workspaces section

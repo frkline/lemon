@@ -160,7 +160,7 @@ final class GitHubClient: Sendable {
                 identifier: "\(owner)/\(repo)#\(dto.number)",
                 title: dto.title,
                 description: dto.body,
-                labelNames: dto.labels.map { $0.name },
+                labelNames: dto.labels.map { Self.normalizeIncomingLabel($0.name) },
                 scope: .githubRepo(owner: owner, repo: repo, number: dto.number)
             )
         }
@@ -197,8 +197,37 @@ final class GitHubClient: Sendable {
     // GitHub expects bare hex (no leading '#'). LinearClient.labelColors has
     // the canonical lemon palette with '#'; strip it before sending.
     private static func bareHexColor(for state: LemonState) -> String {
+        // Key off the canonical labelName ("🍋", "🍋 Complete", …) — the
+        // GH rename below only changes what we send to GitHub's API, not
+        // the lemon palette identity.
         let withHash = LinearClient.labelColors[state.labelName] ?? "#F7C842"
         return withHash.hasPrefix("#") ? String(withHash.dropFirst()) : withHash
+    }
+
+    // MARK: - GitHub label name translation
+    //
+    // GitHub rejects label names that are ONLY a native emoji
+    // ("Name must contain more than native emoji"), so the bare-🍋
+    // trigger label can't land. Map the trigger to "🍋 Lemon" on the
+    // GH wire and translate inbound labels back to the canonical
+    // labelName so downstream code (WorktreeRunner.pollUntilDone,
+    // SessionStore state checks) keeps comparing against
+    // LemonState.labelName directly. Linear has no such restriction
+    // and continues using bare "🍋".
+    private static let ghTriggerLabelName = "🍋 Lemon"
+
+    private static func ghLabelName(for state: LemonState) -> String {
+        switch state {
+        case .trigger: return ghTriggerLabelName
+        default:       return state.labelName
+        }
+    }
+
+    /// Inverse of `ghLabelName(for:)`. Use when reading label names out
+    /// of GitHub API responses to translate "🍋 Lemon" back to "🍋"
+    /// before handing the list to source-agnostic code.
+    private static func normalizeIncomingLabel(_ name: String) -> String {
+        name == ghTriggerLabelName ? LemonState.trigger.labelName : name
     }
 
     // Per-repo label bootstrap memo. Once we've ensured one state's label
@@ -217,7 +246,7 @@ final class GitHubClient: Sendable {
         // simpler and proven idempotent.
         struct CreateBody: Encodable { let name: String; let color: String; let description: String? }
         let body = try JSONEncoder().encode(CreateBody(
-            name: state.labelName,
+            name: Self.ghLabelName(for: state),
             color: Self.bareHexColor(for: state),
             description: Self.labelDescription(for: state)
         ))
@@ -327,7 +356,11 @@ extension GitHubClient: IssueSourceClient {
     func fetchTriggerQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
         let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
-        let allWithTrigger = try await searchIssues(label: LemonState.trigger.labelName, repos: repos, token: token, login: login, host: host)
+        // Search by the GH-side trigger label ("🍋 Lemon") — GitHub
+        // rejects pure-emoji label names, so the trigger label is
+        // renamed at the wire. searchIssues already maps inbound
+        // labelNames back to the canonical form.
+        let allWithTrigger = try await searchIssues(label: Self.ghLabelName(for: .trigger), repos: repos, token: token, login: login, host: host)
         // Exclude issues that already carry any active Lemon state label —
         // mirrors LinearClient.fetchLemonQueue's client-side filter.
         let activeNames = Set(LemonState.active.map(\.labelName))
@@ -337,7 +370,7 @@ extension GitHubClient: IssueSourceClient {
     func fetchCompleteQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
         let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
-        return try await searchIssues(label: LemonState.complete.labelName, repos: repos, token: token, login: login, host: host)
+        return try await searchIssues(label: Self.ghLabelName(for: .complete), repos: repos, token: token, login: login, host: host)
     }
 
     func fetchIssueLabels(ref: IssueRef, auth: SourceAuth) async throws -> [String]? {
@@ -353,7 +386,10 @@ extension GitHubClient: IssueSourceClient {
             let (_, data) = try await send(req, allow404: true)
             struct LabelDTO: Decodable { let name: String }
             let labels = try decode(data, as: [LabelDTO].self)
-            return labels.map { $0.name }
+            // Translate GH-side names (e.g. "🍋 Lemon") back to the
+            // canonical LemonState.labelName so callers can compare
+            // against state.labelName directly.
+            return labels.map { Self.normalizeIncomingLabel($0.name) }
         } catch GitHubError.http(let code, _) where code == 404 {
             return nil
         }
@@ -377,13 +413,13 @@ extension GitHubClient: IssueSourceClient {
             }
         }
         try await ensureLabel(owner: owner, repo: repo, state: state, token: token, host: host)
-        try await addLabel(owner: owner, repo: repo, number: number, name: state.labelName, token: token, host: host)
+        try await addLabel(owner: owner, repo: repo, number: number, name: Self.ghLabelName(for: state), token: token, host: host)
     }
 
     func clearState(ref: IssueRef, state: LemonState, auth: SourceAuth) async throws {
         let (token, _, host) = try ghAuth(auth)
         let (owner, repo, number) = try ghScope(ref)
-        try await removeLabel(owner: owner, repo: repo, number: number, name: state.labelName, token: token, host: host)
+        try await removeLabel(owner: owner, repo: repo, number: number, name: Self.ghLabelName(for: state), token: token, host: host)
     }
 
     @discardableResult

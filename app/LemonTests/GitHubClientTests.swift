@@ -140,13 +140,12 @@ final class GitHubClientTests: XCTestCase {
 
     // MARK: - bootstrapLabels
     //
-    // Regression: the trigger label (bare "🍋") was getting silently
-    // dropped because the older ensureLabel did a GET-then-POST and the
-    // GET path for a bare-emoji label name didn't reliably 404 — the
-    // request fell through `try?` in the bootstrap loop and the POST
-    // never ran. The new ensureLabel just POSTs and treats 422 as
-    // already-exists. This test locks in that every state lands a POST
-    // /labels with a bare-hex color.
+    // Regression: the trigger label was getting silently dropped because
+    // GitHub rejects pure-emoji label names ("Name must contain more
+    // than native emoji") and the bare "🍋" POST returned 422. The
+    // bootstrap now sends "🍋 Lemon" on the wire for the trigger state
+    // (everything else keeps its canonical name) and translates inbound
+    // labels back at read time. This test locks in the wire shape.
 
     func testBootstrapLabelsPostsAllFourStates() async throws {
         var posted: [(name: String, color: String, description: String)] = []
@@ -170,12 +169,34 @@ final class GitHubClientTests: XCTestCase {
 
         let names = Set(posted.map(\.name))
         XCTAssertEqual(names,
-                       Set(["🍋", "🍋 In Progress", "🍋 Waiting", "🍋 Complete"]),
-                       "Bootstrap must POST all four Lemon labels — the bare 🍋 trigger label was getting dropped.")
+                       Set(["🍋 Lemon", "🍋 In Progress", "🍋 Waiting", "🍋 Complete"]),
+                       "Trigger label is renamed to '🍋 Lemon' on the GH wire — GH rejects pure-emoji names.")
         XCTAssertTrue(posted.allSatisfy { !$0.color.hasPrefix("#") },
                       "GitHub expects bare hex colors without leading '#'.")
         XCTAssertTrue(posted.allSatisfy { !$0.description.isEmpty },
                       "Each Lemon label should ship with a description GitHub renders in tooltips.")
+    }
+
+    func testIncomingTriggerLabelIsNormalizedToCanonical() async throws {
+        // GH returns "🍋 Lemon" on an issue; downstream code (WorktreeRunner,
+        // state checks) compares against LemonState.trigger.labelName which
+        // is bare "🍋". The client should translate at the read boundary.
+        let item = """
+        {
+          "id": 9,
+          "number": 7,
+          "title": "Fix it",
+          "body": null,
+          "labels": [{"name":"🍋 Lemon"}],
+          "repository_url": "https://api.github.com/repos/acme/widgets",
+          "html_url": ""
+        }
+        """
+        GitHubStubURLProtocol.respond(json: "{\"total_count\":1,\"items\":[\(item)]}")
+        let cfg = SourceConfig(source: .github, displayName: "g", githubRepos: ["acme/widgets"])
+        let refs = try await client().fetchTriggerQueue(config: cfg, auth: auth())
+        XCTAssertEqual(refs.first?.labelNames, ["🍋"],
+                       "Inbound '🍋 Lemon' must be normalized back to the canonical LemonState.trigger.labelName.")
     }
 
     func testBootstrapLabelsTreats422AsAlreadyExists() async throws {

@@ -19,6 +19,13 @@ struct WorkspaceEditorPane: View {
     @State private var existing: Workspace?
     @State private var suggestion: PathSuggestion? = nil
     @State private var typingCustomKey: Bool = false
+    @State private var reseedState: ReseedState = .idle
+
+    enum ReseedState: Equatable {
+        case idle, working
+        case success(Int)
+        case failed(String)
+    }
 
     struct PathSuggestion: Equatable {
         let identityId: UUID
@@ -338,9 +345,86 @@ struct WorkspaceEditorPane: View {
                     }
                     .buttonStyle(.plain)
                 }
+                reseedRow
             }
         } else {
             EmptyView()
+        }
+    }
+
+    // MARK: - Re-seed 🍋 labels
+
+    @ViewBuilder
+    private var reseedRow: some View {
+        // Lives inside surfaceSection so it sits where the routing is
+        // already in mind. Only meaningful once the user has both an
+        // identity and a surface selected — disable otherwise.
+        let canReseed = identityId != nil
+            && !surfaceId.trimmingCharacters(in: .whitespaces).isEmpty
+            && reseedState != .working
+        HStack(spacing: 8) {
+            Button { performReseed() } label: {
+                HStack(spacing: 4) {
+                    if reseedState == .working {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 10))
+                    }
+                    Text(reseedState == .working ? "Re-seeding…" : "Re-seed 🍋 labels")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(canReseed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canReseed)
+            .help("Re-create the four 🍋 state labels (Tag · In Progress · Waiting · Complete) on this tracker. Safe to repeat.")
+
+            reseedStatusChip
+            Spacer()
+        }
+        .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private var reseedStatusChip: some View {
+        switch reseedState {
+        case .success(let n):
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.statusDone)
+                Text("\(n) labels seeded")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(LD.statusDone)
+            }
+        case .failed(let msg):
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.coral)
+                Text(msg)
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.coral)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+        case .idle, .working:
+            EmptyView()
+        }
+    }
+
+    private func performReseed() {
+        guard let id = identityId,
+              !surfaceId.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        reseedState = .working
+        let surface = surfaceId
+        Task {
+            do {
+                let count = try await orchestrator.reseedLabels(identityId: id, surfaceId: surface)
+                await MainActor.run { reseedState = .success(count) }
+            } catch {
+                await MainActor.run { reseedState = .failed(error.localizedDescription) }
+            }
         }
     }
 
