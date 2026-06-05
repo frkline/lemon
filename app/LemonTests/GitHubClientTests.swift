@@ -177,12 +177,14 @@ final class GitHubClientTests: XCTestCase {
                       "Each Lemon label should ship with a description GitHub renders in tooltips.")
     }
 
-    func testSearchQueryUsesORBetweenAssigneeAndNoAssignee() async throws {
-        // Regression: the original query was `(assignee:LOGIN no:assignee)`
-        // which GitHub parses as AND, so it asked for issues both
-        // assigned to the user AND unassigned — impossible. The poll
-        // loop logged total_count:0 against repos that visibly had 🍋
-        // Lemon issues. Lock the OR keyword into the query.
+    func testSearchQueryUsesAssigneeShapeAndOmitsLabelFilter() async throws {
+        // Regression: GitHub's lexical search engine silently swallows
+        // `label:"🍋 Lemon"` (emoji-bearing label queries return 0 even
+        // when the label is applied). The proven-working shape is the
+        // same one verifyCredential / countAssignedOpenIssues use:
+        // `repo:o/r is:issue is:open assignee:LOGIN`. Label filtering
+        // moves client-side. Lock the wire shape so we don't regress
+        // back into the lexical pothole.
         var observed: URLRequest?
         GitHubStubURLProtocol.onRequest = { observed = $0 }
         GitHubStubURLProtocol.respond(json: "{\"total_count\":0,\"items\":[]}")
@@ -191,10 +193,12 @@ final class GitHubClientTests: XCTestCase {
         _ = try await client().fetchTriggerQueue(config: cfg, auth: auth())
 
         let q = observed?.url?.query(percentEncoded: false) ?? ""
-        XCTAssertTrue(q.contains("(assignee:frkline OR no:assignee)"),
-                      "Search must explicitly OR the assignee/no:assignee branches — bare space is AND. Got: \(q)")
-        XCTAssertTrue(q.contains("label:\"🍋 Lemon\""),
-                      "Trigger search must hit the renamed GH-side label '🍋 Lemon'.")
+        XCTAssertTrue(q.contains("repo:frkline/lemon"), "Query must scope to the configured repo. Got: \(q)")
+        XCTAssertTrue(q.contains("is:issue"), "Query must filter to issues. Got: \(q)")
+        XCTAssertTrue(q.contains("is:open"), "Query must filter to open. Got: \(q)")
+        XCTAssertTrue(q.contains("assignee:frkline"), "Query must use the proven assignee:LOGIN form. Got: \(q)")
+        XCTAssertFalse(q.contains("label:"), "Query must NOT include a label filter — that's done client-side. Got: \(q)")
+        XCTAssertFalse(q.contains(" OR "), "Old OR construct should be gone. Got: \(q)")
     }
 
     func testIncomingTriggerLabelIsNormalizedToCanonical() async throws {

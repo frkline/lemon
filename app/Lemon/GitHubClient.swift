@@ -129,25 +129,24 @@ final class GitHubClient: Sendable {
     }
 
     // MARK: - Search
-
-    // Builds `repo:o/r is:issue is:open label:LABEL (assignee:LOGIN OR no:assignee)`-style query.
-    // Multiple repos collapse to multiple `repo:` terms (OR semantics).
-    private func buildSearchQuery(label: String, repos: [String], login: String) -> String {
+    //
+    // Server-side query intentionally keeps to the proven shape that GH's
+    // search engine handles reliably: assignee + repo scope + open issues.
+    // Label filtering is done client-side because GitHub's new lexical
+    // search engine silently mishandles label queries containing emoji —
+    // `label:"🍋 Lemon"` returns 0 even when the label is applied. The
+    // same engine has no trouble with `assignee:LOGIN`, which is also
+    // how `countAssignedOpenIssues` works.
+    private func buildAssignedSearchQuery(repos: [String], login: String) -> String {
         let repoTerms = repos.map { "repo:\($0)" }.joined(separator: " ")
-        // GitHub search OR: either assigned to the user OR unassigned.
-        // The OR keyword is required — a bare space is AND, so
-        // `(assignee:LOGIN no:assignee)` asks GH for issues both
-        // assigned-to-LOGIN AND unassigned, which never matches.
-        let assigneeClause = "(assignee:\(login) OR no:assignee)"
-        return "\(repoTerms) is:issue is:open label:\"\(label)\" \(assigneeClause)"
+        return "\(repoTerms) is:issue is:open assignee:\(login)"
     }
 
-    private func searchIssues(label: String, repos: [String], token: String, login: String, host: String?) async throws -> [IssueRef] {
+    /// Search for open issues assigned to `login` within the configured
+    /// repos. Caller is expected to client-filter by label name.
+    private func searchAssignedOpenIssues(repos: [String], token: String, login: String, host: String?) async throws -> [IssueRef] {
         guard !repos.isEmpty else { return [] }
-        let q = buildSearchQuery(label: label, repos: repos, login: login)
-        // Log the literal query so we can debug "0 results when there
-        // are obviously matches" cases — GitHub's lexical search type
-        // can swallow label-with-emoji queries silently.
+        let q = buildAssignedSearchQuery(repos: repos, login: login)
         Logger.linear.debug("[gh] search q=\(q)")
         let req = authedRequest(
             "GET",
@@ -361,21 +360,25 @@ extension GitHubClient: IssueSourceClient {
     func fetchTriggerQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
         let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
-        // Search by the GH-side trigger label ("🍋 Lemon") — GitHub
-        // rejects pure-emoji label names, so the trigger label is
-        // renamed at the wire. searchIssues already maps inbound
-        // labelNames back to the canonical form.
-        let allWithTrigger = try await searchIssues(label: Self.ghLabelName(for: .trigger), repos: repos, token: token, login: login, host: host)
-        // Exclude issues that already carry any active Lemon state label —
-        // mirrors LinearClient.fetchLemonQueue's client-side filter.
+        // One server-side search (proven shape: assignee + repo scope),
+        // then filter for the trigger label client-side. Inbound
+        // labelNames are already normalized from "🍋 Lemon" → "🍋", so
+        // we can compare against the canonical LemonState.labelName.
+        let assigned = try await searchAssignedOpenIssues(repos: repos, token: token, login: login, host: host)
+        let triggerName = LemonState.trigger.labelName
         let activeNames = Set(LemonState.active.map(\.labelName))
-        return allWithTrigger.filter { Set($0.labelNames).isDisjoint(with: activeNames) }
+        return assigned.filter { ref in
+            let labels = Set(ref.labelNames)
+            return labels.contains(triggerName) && labels.isDisjoint(with: activeNames)
+        }
     }
 
     func fetchCompleteQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
         let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
-        return try await searchIssues(label: Self.ghLabelName(for: .complete), repos: repos, token: token, login: login, host: host)
+        let assigned = try await searchAssignedOpenIssues(repos: repos, token: token, login: login, host: host)
+        let completeName = LemonState.complete.labelName
+        return assigned.filter { $0.labelNames.contains(completeName) }
     }
 
     func fetchIssueLabels(ref: IssueRef, auth: SourceAuth) async throws -> [String]? {
