@@ -1228,7 +1228,7 @@ private struct ReadyStep: View {
         StepShell(
             emoji: "✅",
             title: "You're all set",
-            subtitle: "Lemon is ready. Tag any Linear issue with the lemon label\nand Lemon will pick it up within 60 seconds.",
+            subtitle: "Lemon is ready. Tag any issue with the 🍋 label\nand Lemon will pick it up within 60 seconds.",
             backAction: onBack,
             nextLabel: "Start Lemon",
             nextEnabled: canStart,
@@ -1248,6 +1248,11 @@ private struct ReadyStep: View {
 
                 // Linear labels + workflow education
                 linearLabelsRow
+
+                // GitHub Issues hint — Lemon supports GitHub as a parallel
+                // trigger source too, but the onboarding wizard only collects
+                // Linear v1. Point users at Settings if they want to add it.
+                githubHintRow
 
                 // Launch at login — quiet opt-in; Lemon is workflow tooling
                 // for a dedicated Mac, so this is the recommended default for
@@ -1341,6 +1346,26 @@ private struct ReadyStep: View {
             .padding(12)
             .background(LD.coral.opacity(0.08), in: RoundedRectangle(cornerRadius: LD.r10))
         }
+    }
+
+    // MARK: - GitHub hint
+
+    private var githubHintRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .foregroundStyle(LD.statusDone).font(.system(size: 13))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Also use GitHub Issues?")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Add a GitHub PAT + an owner/repo pair in Settings after launch. Same 🍋 labels, same comment loop.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(LD.statusDone.opacity(0.06), in: RoundedRectangle(cornerRadius: LD.r10))
     }
 
     // MARK: - Label creation + workflow education
