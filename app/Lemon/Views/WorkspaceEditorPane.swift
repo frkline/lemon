@@ -377,37 +377,67 @@ struct WorkspaceEditorPane: View {
     }
 
     // MARK: - Folder options
+    //
+    // The multi-repo toggle + the home-subdir field belong together — they
+    // describe the same thing (how the workspace's filesystem is laid out
+    // underneath the path you chose). Group them in one card so they read
+    // as one decision instead of two loose controls.
 
     private var folderOptions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: $allReposInFolder) {
-                Text("All repos in this folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            .toggleStyle(.checkbox)
-            if allReposInFolder {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("HOME SUBDIR")
-                        .font(.system(size: 8, weight: .bold))
-                        .kerning(1.4)
-                        .foregroundStyle(.tertiary)
-                    TextField("e.g. memory", text: $homeRepo)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 11, design: .monospaced))
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 9)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
-                        )
-                    Text("Optional — where Claude launches inside the folder. Put a LEMON.md there with team-specific guidance.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.quaternary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("FOLDER LAYOUT")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(.tertiary)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: $allReposInFolder) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("All repos in this folder")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.primary)
+                        Text(allReposInFolder
+                             ? "Lemon discovers every git repo inside and worktrees them as siblings."
+                             : "Treat the path as a single repo.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .toggleStyle(.checkbox)
+
+                if allReposInFolder {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text("HOME SUBDIR")
+                                .font(.system(size: 8, weight: .bold))
+                                .kerning(1.4)
+                                .foregroundStyle(.tertiary)
+                            Text("optional")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.quaternary)
+                            Spacer()
+                        }
+                        TextField("e.g. memory", text: $homeRepo)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 11, design: .monospaced))
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                            )
+                        Text("Where Claude launches inside the folder. Put a LEMON.md there with team-specific guidance.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.quaternary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, 22)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
+            .padding(14)
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
         }
         .animation(LD.smooth, value: allReposInFolder)
     }
