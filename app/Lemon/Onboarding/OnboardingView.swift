@@ -1,30 +1,70 @@
 import SwiftUI
+import AppKit
 import ServiceManagement
 import os
 
 // MARK: - Step enum
+//
+// `trackers` collapses the old `linear` + `workspace` steps into a single
+// pane where you pick a source, paste a credential, point at a workspace,
+// then optionally "Add another". For repeat passes, an already-verified
+// identity becomes a reusable option in the routing list — no need to
+// re-paste a credential the user already authenticated.
 
 private enum OnboardingStep: Int, CaseIterable {
-    case linear = 0
-    case workspace
+    case trackers = 0
     case lemonMd
     case localAI
     case ready
+}
+
+// MARK: - Draft pair model
+
+struct DraftPair: Identifiable, Equatable {
+    let id = UUID()
+    var sourceKind: IssueSource = .linear
+    var identityRef: UUID?       // existing identity to route through (nil = create new)
+    var newIdentityToken: String = ""
+    var newIdentityHost: String = ""
+    var newIdentityVerified: VerifiedSnapshot? = nil
+    var surfaceId: String = ""
+    var path: String = ""
+    var allReposInFolder: Bool = false
+    var homeRepo: String = ""
+
+    struct VerifiedSnapshot: Equatable {
+        let identityId: UUID    // ID assigned at verify time so later Add-anothers can route back to it
+        let handle: String
+        let label: String
+        let principalId: String
+        let surfaces: [Surface]
+    }
+
+    var isSavable: Bool {
+        guard !path.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard !surfaceId.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if identityRef != nil { return true }
+        return newIdentityVerified != nil
+    }
 }
 
 // MARK: - Wizard host
 
 struct OnboardingView: View {
     @Binding var isComplete: Bool
-    @State private var step: OnboardingStep = .linear
+    @State private var step: OnboardingStep = .trackers
     @State private var direction: Int = 1
 
-    // Linear step state — pre-load from store so restarts don't wipe progress
+    // Trackers step state — accumulator pattern.
+    @State private var savedPairs: [DraftPair] = []
+    @State private var verifiedIdentities: [DraftPair.VerifiedSnapshot] = []
+
+    // Legacy state kept only so the smoke-test forced-step initializer +
+    // the LemonMd / Ready downstream steps keep working unchanged.
     @State private var linearApiKey = KeychainStore.shared.linearApiKey
     @State private var linearUserId = KeychainStore.shared.linearUserId
-    @State private var linearUserName = ""  // display only, re-fetched on verify
+    @State private var linearUserName = ""
 
-    // Workspace step state
     @State private var repos: [WorkspaceRepo] = {
         let saved = KeychainStore.shared.workspaceRepos
         return saved.isEmpty ? [WorkspaceRepo(issuePrefix: "", path: "")] : saved
@@ -60,23 +100,15 @@ struct OnboardingView: View {
     @ViewBuilder
     private var stepView: some View {
         switch step {
-        case .linear:
-            LinearStep(
-                apiKey: $linearApiKey,
-                userId: $linearUserId,
-                userName: $linearUserName,
+        case .trackers:
+            TrackersStep(
+                savedPairs: $savedPairs,
+                verifiedIdentities: $verifiedIdentities,
                 onNext: { advance() }
-            )
-        case .workspace:
-            WorkspaceStep(
-                apiKey: linearApiKey,
-                repos: $repos,
-                onNext: { advance() },
-                onBack: { back() }
             )
         case .lemonMd:
             LemonMdStep(
-                repos: repos,
+                repos: synthesizedRepos,
                 onNext: { advance() },
                 onBack: { back() }
             )
@@ -94,6 +126,20 @@ struct OnboardingView: View {
         }
     }
 
+    /// Adapter: project the accumulated DraftPairs into the legacy
+    /// `[WorkspaceRepo]` shape so LemonMdStep can keep its existing
+    /// surface (one LEMON.md per workspace path) without reshuffling.
+    private var synthesizedRepos: [WorkspaceRepo] {
+        savedPairs.map { pair in
+            WorkspaceRepo(
+                issuePrefix: pair.surfaceId,
+                path: pair.path,
+                allReposInFolder: pair.allReposInFolder,
+                homeRepo: pair.homeRepo
+            )
+        }
+    }
+
     private var slideTransition: AnyTransition {
         .asymmetric(
             insertion: .move(edge: direction > 0 ? .trailing : .leading).combined(with: .opacity),
@@ -103,23 +149,81 @@ struct OnboardingView: View {
 
     private func advance() {
         // Persist progress for the step we're leaving
-        let k = KeychainStore.shared
-        switch step {
-        case .linear:
-            if !linearApiKey.isEmpty { k.linearApiKey = linearApiKey }
-            if !linearUserId.isEmpty { k.linearUserId = linearUserId }
-        case .workspace:
-            let valid = repos.filter { !$0.path.isEmpty && !$0.issuePrefix.isEmpty }
-            if !valid.isEmpty { k.saveWorkspaceRepos(valid) }
-        default:
-            break
-        }
+        if step == .trackers { persistTrackers() }
 
         direction = 1
         if let next = OnboardingStep(rawValue: step.rawValue + 1) {
             withAnimation(LD.slide) { step = next }
         } else {
             finish()
+        }
+    }
+
+    /// Translate the accumulated DraftPairs + verified identities into the
+    /// new (Identity, Workspace) storage model. Each verified snapshot
+    /// becomes an Identity with its secret in Keychain; each pair becomes
+    /// a Workspace pointing at the right identity's UUID. Also seeds the
+    /// legacy linearApiKey field so downstream Ready/LemonMd steps that
+    /// still read it find something.
+    private func persistTrackers() {
+        let k = KeychainStore.shared
+
+        // Stamp the migration sentinel up front so the (legacy) workspace
+        // → pairs migration doesn't fire and overwrite us on first read.
+        k.workspaces = k.workspaces  // touches the getter, triggers no-op migration if any
+
+        var identities: [Identity] = []
+        for snap in verifiedIdentities {
+            // Only persist identities that are actually referenced by at
+            // least one saved pair — verified-but-unused gets dropped.
+            guard savedPairs.contains(where: { $0.identityRef == snap.identityId
+                                              || $0.newIdentityVerified?.identityId == snap.identityId })
+            else { continue }
+            let kind: IdentityKind = snap.label.lowercased().contains("github") ? .github : .linear
+            let identity = Identity(
+                id: snap.identityId,
+                kind: kind,
+                label: snap.label,
+                handle: snap.handle,
+                principalId: snap.principalId,
+                host: nil,
+                knownSurfaces: snap.surfaces,
+                surfacesFetchedAt: Date()
+            )
+            identities.append(identity)
+        }
+        k.identities = identities
+
+        // Secrets: only set if we have a fresh token (verifiedIdentities
+        // stores the snapshot but tokens live in the DraftPair until save).
+        for pair in savedPairs {
+            guard let snap = pair.newIdentityVerified else { continue }
+            if !pair.newIdentityToken.isEmpty {
+                k.setIdentitySecret(pair.newIdentityToken, for: snap.identityId)
+            }
+        }
+
+        let workspaces: [Workspace] = savedPairs.compactMap { pair in
+            let identityId = pair.identityRef ?? pair.newIdentityVerified?.identityId
+            guard let identityId else { return nil }
+            return Workspace(
+                path: pair.path,
+                allReposInFolder: pair.allReposInFolder,
+                homeRepo: pair.homeRepo,
+                routing: Routing(identityId: identityId, surfaceId: pair.surfaceId)
+            )
+        }
+        k.workspaces = workspaces
+
+        // Legacy fallback for code paths that haven't migrated yet.
+        if let firstLinear = identities.first(where: { $0.kind == .linear }) {
+            k.linearApiKey = k.identitySecret(for: firstLinear.id)
+            k.linearUserId = firstLinear.principalId
+            linearApiKey = k.linearApiKey
+        }
+        if let firstGithub = identities.first(where: { $0.kind == .github }) {
+            k.githubToken = k.identitySecret(for: firstGithub.id)
+            k.githubUser = firstGithub.handle
         }
     }
 
@@ -131,21 +235,30 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        let k = KeychainStore.shared
-        k.linearApiKey  = linearApiKey
-        k.linearUserId  = linearUserId
-        k.saveWorkspaceRepos(repos.filter { !$0.path.isEmpty && !$0.issuePrefix.isEmpty })
+        // Trackers already persisted on advance; nothing else to flush.
         withAnimation(LD.smooth) { isComplete = true }
     }
 }
 
 #if DEBUG
 extension OnboardingView {
-    // stepIndex: 0=linear, 1=workspace, 2=lemonMd, 3=localAI, 4=ready
+    // stepIndex: 0=trackers, 1=lemonMd, 2=localAI, 3=ready
     init(isComplete: Binding<Bool>, forcedStep stepIndex: Int) {
+        // Legacy 5-step indices map cleanly onto the new 4-step shape: 0+1
+        // both went into Trackers; 2/3/4 shift down by one.
+        let target: OnboardingStep
+        switch stepIndex {
+        case 0, 1: target = .trackers
+        case 2:    target = .lemonMd
+        case 3:    target = .localAI
+        case 4:    target = .ready
+        default:   target = OnboardingStep(rawValue: stepIndex) ?? .trackers
+        }
         self._isComplete = isComplete
-        self._step = State(initialValue: OnboardingStep(rawValue: stepIndex) ?? .linear)
+        self._step = State(initialValue: target)
         self._direction = State(initialValue: 1)
+        self._savedPairs = State(initialValue: [])
+        self._verifiedIdentities = State(initialValue: [])
         self._linearApiKey = State(initialValue: "lin_api_smoke_key")
         self._linearUserId = State(initialValue: "u_smoke")
         self._linearUserName = State(initialValue: "")
@@ -207,6 +320,468 @@ private struct StepShell<Content: View>: View {
             }
             .padding(.horizontal, 28)
             .padding(.bottom, 24)
+        }
+    }
+}
+
+// MARK: - Trackers (replaces Linear + Workspace as one combined step)
+//
+// One pane, repeatable. Each pass: pick a source (or re-use an identity
+// already verified earlier this session), enter the credential the first
+// time you connect that source, choose the surface + local path, then
+// Add another or Continue.
+//
+// Identity reuse is the keystone — once you've verified Linear once, the
+// second pair shows your existing Linear identity at the top of the
+// "Route through" list and skips the credential field entirely.
+
+private struct TrackersStep: View {
+    @Binding var savedPairs: [DraftPair]
+    @Binding var verifiedIdentities: [DraftPair.VerifiedSnapshot]
+    let onNext: () -> Void
+
+    @State private var draft = DraftPair()
+    @State private var verifyState: VerifyState = .idle
+
+    enum VerifyState: Equatable {
+        case idle, verifying, ok, failed(String)
+    }
+
+    private var canContinue: Bool { !savedPairs.isEmpty }
+    private var canAddCurrent: Bool { draft.isSavable }
+
+    var body: some View {
+        StepShell(
+            emoji: "🍋",
+            title: "Connect a tracker · pick a workspace",
+            subtitle: "Tell Lemon where your issues live and where the work happens on disk.\nAdd as many as you want; identities you've already connected stay available.",
+            nextLabel: "Continue",
+            nextEnabled: canContinue,
+            nextAction: onNext
+        ) {
+            VStack(alignment: .leading, spacing: 18) {
+                if !savedPairs.isEmpty { savedPairsList }
+                draftSection
+                if canAddCurrent { addAnotherButton }
+            }
+        }
+    }
+
+    // MARK: - Saved pairs (already added this session)
+
+    private var savedPairsList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("ADDED")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                Text("\(savedPairs.count)")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            VStack(spacing: 6) {
+                ForEach(savedPairs) { pair in
+                    savedPairRow(pair)
+                }
+            }
+        }
+    }
+
+    private func savedPairRow(_ pair: DraftPair) -> some View {
+        let identity = identityFor(pair)
+        return HStack(spacing: 10) {
+            SourceGlyph(source: pair.sourceKind, size: 9)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(identity?.label ?? pair.sourceKind.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Text(pair.surfaceId)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Text(pair.path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+            Button {
+                if let idx = savedPairs.firstIndex(where: { $0.id == pair.id }) {
+                    savedPairs.remove(at: idx)
+                }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(LD.coral.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func identityFor(_ pair: DraftPair) -> DraftPair.VerifiedSnapshot? {
+        let id = pair.identityRef ?? pair.newIdentityVerified?.identityId
+        return verifiedIdentities.first { $0.identityId == id }
+    }
+
+    // MARK: - Draft form
+
+    private var draftSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            routeThroughPicker
+            if draft.identityRef == nil { credentialBlock }
+            if currentSurfaceList.isEmpty == false { surfacePicker }
+            pathField
+            folderToggle
+        }
+    }
+
+    // Route-through picker: existing verified identities + "Connect new"
+    private var routeThroughPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("ROUTE THROUGH")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(.tertiary)
+            VStack(spacing: 6) {
+                ForEach(verifiedIdentities, id: \.identityId) { snap in
+                    routeOption(snap)
+                }
+                connectNewOption
+            }
+        }
+    }
+
+    private func routeOption(_ snap: DraftPair.VerifiedSnapshot) -> some View {
+        let selected = draft.identityRef == snap.identityId
+        return Button {
+            withAnimation(LD.snappy) {
+                draft.identityRef = snap.identityId
+                draft.sourceKind = snap.label.lowercased().contains("github") ? .github : .linear
+                draft.surfaceId = ""
+                draft.newIdentityToken = ""
+                draft.newIdentityVerified = nil
+                verifyState = .idle
+            }
+        } label: {
+            HStack(spacing: 10) {
+                SourceGlyph(source: snap.label.lowercased().contains("github") ? .github : .linear, size: 9)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(snap.label)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("@\(snap.handle) · \(snap.surfaces.count) surface\(snap.surfaces.count == 1 ? "" : "s")")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(selected ? LD.lemon.opacity(0.06) : Color.primary.opacity(0.03),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(selected ? LD.lemon.opacity(0.30) : Color.primary.opacity(0.08),
+                                  lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var connectNewOption: some View {
+        let selected = draft.identityRef == nil
+        return Button {
+            withAnimation(LD.snappy) {
+                draft.identityRef = nil
+                if draft.newIdentityVerified == nil { verifyState = .idle }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 11))
+                Text(verifiedIdentities.isEmpty ? "Connect a tracker" : "Connect another identity")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer(minLength: 0)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(selected ? LD.lemon.opacity(0.06) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(selected ? LD.lemon.opacity(0.30) : LD.lemon.opacity(0.18),
+                                  style: StrokeStyle(lineWidth: selected ? 0.5 : 1,
+                                                     dash: selected ? [] : [4, 3]))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Credential block — only when "Connect new" is the chosen route
+    private var credentialBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("", selection: $draft.sourceKind) {
+                Label("Linear", systemImage: "circle.hexagongrid.fill").tag(IssueSource.linear)
+                Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right").tag(IssueSource.github)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 220)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(draft.sourceKind == .linear ? "LINEAR API KEY" : "GITHUB PAT")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
+                            text: $draft.newIdentityToken)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .onChange(of: draft.newIdentityToken) { _, _ in
+                        draft.newIdentityVerified = nil
+                        verifyState = .idle
+                    }
+            }
+
+            if draft.sourceKind == .github {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ENTERPRISE HOST")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.4)
+                        .foregroundStyle(.tertiary)
+                    TextField("api.github.acmecorp.com (blank = github.com)",
+                              text: $draft.newIdentityHost)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await verify() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if verifyState == .verifying {
+                            ProgressView().scaleEffect(0.65)
+                        } else {
+                            Image(systemName: "bolt.fill")
+                        }
+                        Text(verifyState == .verifying ? "Verifying…" : "Verify & sync")
+                    }
+                }
+                .buttonStyle(LemonButtonStyle())
+                .disabled(draft.newIdentityToken.isEmpty || verifyState == .verifying)
+
+                switch verifyState {
+                case .ok:
+                    if let v = draft.newIdentityVerified {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(LD.statusDone)
+                            Text("@\(v.handle) · \(v.surfaces.count) surface\(v.surfaces.count == 1 ? "" : "s")")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(LD.statusDone)
+                        }
+                    }
+                case .failed(let msg):
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.octagon.fill")
+                            .foregroundStyle(LD.coral)
+                        Text(msg).font(.system(size: 10)).foregroundStyle(LD.coral).lineLimit(2)
+                    }
+                default: EmptyView()
+                }
+                Spacer()
+            }
+        }
+    }
+
+    // Surface picker — populated from the chosen identity
+    private var currentSurfaceList: [Surface] {
+        if let ref = draft.identityRef,
+           let snap = verifiedIdentities.first(where: { $0.identityId == ref }) {
+            return snap.surfaces
+        }
+        return draft.newIdentityVerified?.surfaces ?? []
+    }
+
+    private var surfacePicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(draft.sourceKind == .linear ? "TEAM" : "REPO")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(.tertiary)
+            Menu {
+                ForEach(currentSurfaceList) { s in
+                    Button(action: { draft.surfaceId = s.id }) {
+                        Text(s.key.caseInsensitiveCompare(s.displayName) == .orderedSame
+                             ? s.displayName
+                             : "\(s.key) — \(s.displayName)")
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(draft.surfaceId.isEmpty
+                         ? (draft.sourceKind == .linear ? "Pick a team…" : "Pick a repo…")
+                         : draft.surfaceId)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                )
+            }
+            .menuStyle(.borderlessButton)
+        }
+    }
+
+    // Path field with Browse
+    private var pathField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("WORKSPACE PATH")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button { pickFolder() } label: {
+                    Label("Browse…", systemImage: "folder")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            TextField("/path/to/repo", text: $draft.path)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+        }
+    }
+
+    private var folderToggle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: $draft.allReposInFolder) {
+                Text("All repos in this folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .toggleStyle(.checkbox)
+
+            if draft.allReposInFolder {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("HOME SUBDIR — optional")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.4)
+                        .foregroundStyle(.tertiary)
+                    TextField("e.g. memory", text: $draft.homeRepo)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+                .padding(.leading, 20)
+            }
+        }
+        .animation(LD.smooth, value: draft.allReposInFolder)
+    }
+
+    // MARK: - Add another
+
+    private var addAnotherButton: some View {
+        HStack {
+            Button {
+                addCurrentToSavedAndReset()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add another")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(LD.citrus)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(LD.lemon.opacity(0.85), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Text("or Continue when you've added everything.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func addCurrentToSavedAndReset() {
+        // Promote a verified-but-not-yet-saved identity into the global list so
+        // the next draft can reuse it without re-verifying.
+        if let snap = draft.newIdentityVerified,
+           !verifiedIdentities.contains(where: { $0.identityId == snap.identityId }) {
+            verifiedIdentities.append(snap)
+        }
+        savedPairs.append(draft)
+        // Reset draft, default to routing through whatever identity was just
+        // used so consecutive workspaces under the same identity are
+        // a single click apart.
+        let lastIdentity = draft.identityRef ?? draft.newIdentityVerified?.identityId
+        draft = DraftPair()
+        draft.identityRef = lastIdentity
+        verifyState = .idle
+    }
+
+    // MARK: - Verify
+
+    private func verify() async {
+        verifyState = .verifying
+        let kind = draft.sourceKind
+        let token = draft.newIdentityToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host  = draft.newIdentityHost.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            let client: any IssueSourceClient = kind == .linear ? LinearClient() : GitHubClient()
+            let cred = try await client.verifyCredential(token: token, host: host.isEmpty ? nil : host)
+            let surfaces = (try? await client.listSurfaces(token: token, host: host.isEmpty ? nil : host)) ?? []
+            let snap = DraftPair.VerifiedSnapshot(
+                identityId: UUID(),
+                handle: cred.displayName,
+                label: "\(kind.displayName) · \(cred.displayName)",
+                principalId: cred.id,
+                surfaces: surfaces
+            )
+            await MainActor.run {
+                draft.newIdentityVerified = snap
+                verifyState = .ok
+            }
+        } catch {
+            await MainActor.run {
+                verifyState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - Folder picker (NSOpenPanel — only OS surface; everything Lemon-managed stays inside the wizard)
+
+    private func pickFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = false
+        panel.title = "Choose workspace folder"
+        let cwd: URL = draft.path.isEmpty
+            ? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Projects")
+            : URL(fileURLWithPath: draft.path)
+        panel.directoryURL = cwd
+        if panel.runModal() == .OK, let url = panel.url {
+            draft.path = url.path
         }
     }
 }
