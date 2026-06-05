@@ -22,7 +22,19 @@ struct PopoverView: View {
             Divider().opacity(0.4)
 
             ZStack {
-                if nav.showingSettings {
+                if let identityTarget = nav.editingIdentity {
+                    IdentityEditorPane(target: identityTarget)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                } else if let workspaceTarget = nav.editingWorkspace {
+                    WorkspaceEditorPane(target: workspaceTarget)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                } else if nav.showingSettings {
                     SettingsView()
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -44,6 +56,8 @@ struct PopoverView: View {
             }
             .animation(LD.slide, value: nav.showingSettings)
             .animation(LD.slide, value: nav.selectedSession?.id)
+            .animation(LD.slide, value: nav.editingIdentity)
+            .animation(LD.slide, value: nav.editingWorkspace)
             .clipped()
         }
         .frame(width: 480)
@@ -61,10 +75,17 @@ struct PopoverView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 0) {
-            // Back chevron — shown in detail or settings panes
-            if nav.showingSettings || nav.selectedSession != nil {
+            // Back chevron — shown in detail / settings / editor panes
+            if nav.showingSettings || nav.selectedSession != nil
+                || nav.editingIdentity != nil || nav.editingWorkspace != nil {
                 Button {
-                    withAnimation(LD.slide) { nav.showList() }
+                    withAnimation(LD.slide) {
+                        if nav.editingIdentity != nil || nav.editingWorkspace != nil {
+                            nav.popEditor()
+                        } else {
+                            nav.showList()
+                        }
+                    }
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 11, weight: .semibold))
@@ -75,7 +96,15 @@ struct PopoverView: View {
                 Spacer().frame(width: 10)
             }
 
-            if nav.showingSettings {
+            if nav.editingIdentity != nil {
+                Text("Identity")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Spacer()
+            } else if nav.editingWorkspace != nil {
+                Text("Workspace")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Spacer()
+            } else if nav.showingSettings {
                 Text("Settings")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                 Spacer()

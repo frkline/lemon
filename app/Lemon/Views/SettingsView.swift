@@ -44,9 +44,8 @@ struct SettingsView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 28) {
                     generalSection
-                    linearSection
-                    githubSection
-                    workspaceSection
+                    identitiesPanel
+                    workspacesPanel
                     localAISection
                     mcpSection
                 }
@@ -91,18 +90,307 @@ struct SettingsView: View {
         }
     }
 
-    private var linearSection: some View {
-        sourceCredentialSection(
-            source: .linear,
-            heading: "Linear",
-            subhead: "Personal API Key",
-            placeholder: "Paste from linear.app/settings → API",
-            connected: !linearApiKey.isEmpty,
-            connectedDetail: nil,
-            keyBinding: $linearApiKey,
-            verifyAction: nil,
-            verifyState: nil
-        )
+    // MARK: - Identities panel (top-level credentials)
+
+    @Environment(AppNavigation.self) private var nav
+
+    private var allIdentities: [Identity] { KeychainStore.shared.identities }
+    private var allWorkspaces: [Workspace] { KeychainStore.shared.workspaces }
+
+    private var identitiesPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                sectionLabel("Identities")
+                identityCountChip
+                Spacer()
+                Menu {
+                    Button {
+                        nav.addIdentity(kind: .linear)
+                    } label: {
+                        Label("Linear", systemImage: "circle.hexagongrid.fill")
+                    }
+                    Button {
+                        nav.addIdentity(kind: .github)
+                    } label: {
+                        Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Add")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.primary.opacity(0.05), in: Capsule())
+                }
+                .menuStyle(.borderlessButton)
+            }
+            if allIdentities.isEmpty {
+                identitiesEmptyState
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(allIdentities) { ident in
+                        identityRow(ident)
+                        if ident.id != allIdentities.last?.id {
+                            Divider().padding(.leading, 56).opacity(0.6)
+                        }
+                    }
+                }
+                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            }
+        }
+    }
+
+    private var identityCountChip: some View {
+        Text("\(allIdentities.count)")
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(.primary.opacity(0.05)))
+    }
+
+    private var identitiesEmptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("No identities connected.")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Connect Linear, GitHub, or a GitHub Enterprise instance to start routing workspaces.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+    }
+
+    private func identityRow(_ ident: Identity) -> some View {
+        Button {
+            nav.editIdentity(ident.id)
+        } label: {
+            HStack(spacing: 12) {
+                VStack(spacing: 4) {
+                    SourceGlyph(source: ident.kind.issueSource, size: 9)
+                }
+                .frame(width: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(ident.label.isEmpty ? ident.kind.displayName : ident.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if !ident.handle.isEmpty {
+                            Text("@\(ident.handle)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.quaternary)
+                    }
+                    HStack(spacing: 6) {
+                        if let host = ident.host, !host.isEmpty {
+                            Text(host)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                            Text("·")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.quaternary)
+                        }
+                        Text("\(ident.knownSurfaces.count) surface\(ident.knownSurfaces.count == 1 ? "" : "s")")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        if let fetched = ident.surfacesFetchedAt {
+                            Text("· refreshed \(relative(fetched))")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.quaternary)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func relative(_ date: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f.localizedString(for: date, relativeTo: Date())
+    }
+
+    // MARK: - Workspaces panel (new design)
+
+    private var workspacesPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                sectionLabel("Workspaces")
+                pairCountChip
+                Spacer()
+                Button {
+                    nav.addWorkspace()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Add")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.primary.opacity(0.05), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            if allWorkspaces.isEmpty {
+                workspacesEmptyState
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(allWorkspaces) { ws in
+                        workspaceListRow(ws)
+                        if ws.id != allWorkspaces.last?.id {
+                            Divider().padding(.leading, 56).opacity(0.6)
+                        }
+                    }
+                }
+                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            }
+        }
+    }
+
+    private var workspacesEmptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("No workspaces yet.")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Add a folder + routing to start polling. Lemon needs at least one connected identity to route through.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+    }
+
+    private func workspaceListRow(_ ws: Workspace) -> some View {
+        let keychain = KeychainStore.shared
+        let ident = keychain.identity(for: ws)
+        let surface = keychain.surface(for: ws)
+        let status = orchestrator.workspaceStatus(for: ws.id)
+        let displayName = URL(fileURLWithPath: ws.path).lastPathComponent
+        return Button {
+            nav.editWorkspace(ws.id)
+        } label: {
+            HStack(spacing: 12) {
+                VStack(spacing: 4) {
+                    if let kind = ident?.kind {
+                        SourceGlyph(source: kind.issueSource, size: 9)
+                    } else {
+                        Text("?")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(LD.coral)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(LD.coral.opacity(0.10)))
+                            .overlay(Capsule().strokeBorder(LD.coral.opacity(0.30), lineWidth: 0.5))
+                    }
+                    Image(systemName: ws.allReposInFolder ? "folder.fill.badge.plus" : "folder.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.quaternary)
+                }
+                .frame(width: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(displayName.isEmpty ? "Unnamed workspace" : displayName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if ws.allReposInFolder {
+                            editorialChip("folder", tint: .secondary)
+                        }
+                        if ws.allReposInFolder && !ws.homeRepo.isEmpty {
+                            editorialChip("→ \(ws.homeRepo)/", tint: LD.lemon, mono: true)
+                        }
+                        Spacer(minLength: 0)
+                        workspaceLiveChip(status: status, ident: ident)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.quaternary)
+                    }
+                    HStack(spacing: 6) {
+                        if let ident, let surface {
+                            Text("\(ident.label) · \(surface.key)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        } else if let ident {
+                            HStack(spacing: 4) {
+                                Text("\(ident.label) · \(ws.routing.surfaceId)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                Text("· unknown surface")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(LD.coral)
+                            }
+                            .foregroundStyle(.tertiary)
+                        } else {
+                            Text("Routing missing — identity deleted")
+                                .font(.system(size: 10))
+                                .foregroundStyle(LD.coral)
+                        }
+                    }
+                    Text(ws.path.isEmpty ? "(no path set)" : ws.path)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let line = status?.subtitle {
+                        Text(line)
+                            .font(.system(size: 9))
+                            .foregroundStyle(status?.error == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(LD.coral))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func workspaceLiveChip(status: WorkspaceStatus?, ident: Identity?) -> some View {
+        if ident == nil {
+            HStack(spacing: 3) {
+                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Text("orphan")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.coral)
+            }
+        } else if let status, status.error != nil {
+            HStack(spacing: 3) {
+                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Text("err")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.coral)
+            }
+        } else if status?.lastPolledAt != nil {
+            HStack(spacing: 3) {
+                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
+                Text("live")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.statusDone)
+            }
+        } else {
+            Text("idle")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.quaternary)
+        }
     }
 
     private var githubSection: some View {
