@@ -90,7 +90,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11)
             }
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.resting)
         }
     }
 
@@ -135,7 +135,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.resting)
             }
         }
     }
@@ -186,8 +186,7 @@ struct SettingsView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(.primary.opacity(0.05), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .lemonGlassCapsule(.resting)
     }
 
     private var identityCountChip: some View {
@@ -209,7 +208,7 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.resting)
     }
 
     private func identityRow(_ ident: Identity) -> some View {
@@ -295,7 +294,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.resting)
             }
         }
     }
@@ -311,7 +310,7 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.resting)
     }
 
     private func workspaceListRow(_ ws: Workspace) -> some View {
@@ -501,7 +500,7 @@ struct SettingsView: View {
                 }
             }
             .padding(14)
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.resting)
             .overlay(
                 RoundedRectangle(cornerRadius: LD.r10)
                     .strokeBorder(source.accent.opacity(connected ? 0.20 : 0.08), lineWidth: 0.5)
@@ -566,7 +565,7 @@ struct SettingsView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.resting)
             } else {
                 VStack(spacing: 0) {
                     ForEach(pairs) { pair in
@@ -576,7 +575,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.resting)
             }
         }
         .sheet(isPresented: $editingWorkspace) {
@@ -729,7 +728,7 @@ struct SettingsView: View {
                     aiTestRow
                 }
             }
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.resting)
         }
     }
 
@@ -838,7 +837,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                 }
             }
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.resting)
         }
     }
 
@@ -1120,8 +1119,7 @@ struct SettingsView: View {
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
-                .background(.primary.opacity(0.04), in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+                .lemonGlassCapsule(.resting)
             }
             .buttonStyle(.plain)
 
@@ -1539,16 +1537,9 @@ struct PairRowView: View {
             }
         }
         .padding(14)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(.primary.opacity(hovered ? 0.06 : 0.035))
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(
-                        validation.color?.opacity(0.30) ?? Color.primary.opacity(0.08),
-                        lineWidth: 0.5
-                    )
-            }
+        .lemonGlass(
+            hovered ? .hover : .resting,
+            tint: validation.color.map { $0.opacity(0.05) }
         )
         .onHover { hovered = $0 }
         .animation(LD.smooth, value: hovered)

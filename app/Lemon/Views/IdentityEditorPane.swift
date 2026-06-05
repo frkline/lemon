@@ -61,7 +61,10 @@ struct IdentityEditorPane: View {
         .padding(.top, 18)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LD.consoleBackground.opacity(0.02))
+        // Editor panes read as a "second room" inside the popover. A faint
+        // lemon-cast layered over the inherited window glass gives the
+        // transition warmth without piling another full material on top.
+        .background(LD.glassTintLemon.opacity(0.5))
         .onAppear { hydrate() }
     }
 
@@ -287,7 +290,7 @@ struct IdentityEditorPane: View {
                     .foregroundStyle(.tertiary)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                    .lemonGlass(.resting)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(surfaces.prefix(8), id: \.id) { surface in
@@ -300,7 +303,7 @@ struct IdentityEditorPane: View {
                     }
                 }
                 .padding(12)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.resting)
             }
         }
     }
@@ -358,7 +361,7 @@ struct IdentityEditorPane: View {
                     .foregroundStyle(.quaternary)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                    .lemonGlass(.resting)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(routed.prefix(6), id: \.id) { ws in
@@ -404,7 +407,7 @@ struct IdentityEditorPane: View {
                     }
                 }
                 .padding(12)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.resting)
             }
         }
     }

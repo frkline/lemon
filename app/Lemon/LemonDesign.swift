@@ -42,6 +42,119 @@ enum LD {
     static let snappy  = Animation.spring(duration: 0.28, bounce: 0.15)
     static let smooth  = Animation.easeInOut(duration: 0.22)
     static let slide   = Animation.easeInOut(duration: 0.30)
+
+    // MARK: - Liquid Glass tokens (macOS 26)
+    //
+    // Additive overlays painted on top of the system material to give each
+    // surface an editorial cast — a hint of brand without flooding the chrome.
+    // Tint amounts are deliberately small; the system material is doing most
+    // of the work, the tint is the colour temperature.
+    static let glassTintLemon  = lemon.opacity(0.04)
+    static let glassTintCoral  = coral.opacity(0.04)
+    static let glassTintLinear = linearMark.opacity(0.06)
+    static let glassTintGitHub = githubMark.opacity(0.05)
+
+    // Quiet inner-edge highlight that gives glass surfaces depth without
+    // a visible stroke. White carries the macOS 26 lensing language better
+    // than primary.opacity, which reads as a sharp pen line on glass.
+    static let glassEdge       = Color.white.opacity(0.07)
+    static let glassEdgeHover  = Color.white.opacity(0.12)
+
+    /// Elevation drives the glass treatment for a surface.
+    ///
+    /// `.resting`   thin material, soft edge — the default card / pill state.
+    /// `.hover`     regular material + lemon-tinted overlay — the row *lifts*.
+    /// `.selected`  source-tinted material — the mark glows under the glass.
+    /// `.floating`  macOS-26 `.glassEffect()` — for chrome that should feel
+    ///              like it floats over its parent (action rows, capsules).
+    enum GlassElevation { case resting, hover, selected, floating }
+}
+
+// MARK: - LemonGlass view modifier
+//
+// Single source of truth for the liquid-glass treatment. Every chrome surface
+// in Lemon — cards, panels, panes, pills — consumes this via `lemonGlass(_:)`
+// or `lemonGlassCapsule(_:)`. Console / log surfaces are deliberately
+// excluded — those stay solid (`LD.consoleBackground`) so the workspace has
+// visual gravity against the surrounding chrome.
+
+struct LemonGlass<S: InsettableShape>: ViewModifier {
+    let elevation: LD.GlassElevation
+    let tint: Color?
+    let shape: S
+
+    func body(content: Content) -> some View {
+        switch elevation {
+        case .resting:
+            content
+                .background(.thinMaterial, in: shape)
+                .overlay(shape.fill(tint ?? Color.clear))
+                .overlay(shape.strokeBorder(LD.glassEdge, lineWidth: 0.5))
+
+        case .hover:
+            content
+                .background(.regularMaterial, in: shape)
+                .overlay(shape.fill(tint ?? LD.glassTintLemon))
+                .overlay(shape.strokeBorder(LD.glassEdgeHover, lineWidth: 0.5))
+
+        case .selected:
+            // Source-tinted glass — the provider mark whispers under the
+            // material instead of stroking a border around it.
+            content
+                .background(.regularMaterial, in: shape)
+                .overlay(shape.fill(tint ?? LD.glassTintLemon))
+                .overlay(
+                    shape.strokeBorder(
+                        (tint ?? LD.lemon).opacity(0.35),
+                        lineWidth: 0.5
+                    )
+                )
+
+        case .floating:
+            // For surfaces that should read as hovering over the parent
+            // (action rows in editor panes, pills/capsules). Uses
+            // ultraThinMaterial + a tinted glaze + a brighter top edge —
+            // composes correctly in both the production menubar popover
+            // *and* the smoke-test NSHostingView. (Plain `.glassEffect()`
+            // requires a window context with Liquid Glass support and
+            // renders as opaque white otherwise.)
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.fill(tint ?? Color.clear))
+                .overlay(shape.strokeBorder(LD.glassEdgeHover, lineWidth: 0.5))
+        }
+    }
+}
+
+extension View {
+    /// Compose a Lemon liquid-glass background for any rounded-rectangle
+    /// surface (cards, panels, panes). Defaults to the project's r10 radius
+    /// and the resting elevation; pass a tint to source-cast (linearMark,
+    /// githubMark, lemon, coral) for selected/connected states.
+    func lemonGlass(
+        _ elevation: LD.GlassElevation,
+        tint: Color? = nil,
+        cornerRadius: CGFloat = LD.r10
+    ) -> some View {
+        modifier(LemonGlass(
+            elevation: elevation,
+            tint: tint,
+            shape: RoundedRectangle(cornerRadius: cornerRadius)
+        ))
+    }
+
+    /// Capsule-shaped lemon glass — for chips, pills, source glyphs, and
+    /// other pill-shaped affordances.
+    func lemonGlassCapsule(
+        _ elevation: LD.GlassElevation,
+        tint: Color? = nil
+    ) -> some View {
+        modifier(LemonGlass(
+            elevation: elevation,
+            tint: tint,
+            shape: Capsule()
+        ))
+    }
 }
 
 // MARK: - Color initialiser
@@ -91,7 +204,8 @@ extension SessionStatus {
 
 // MARK: - Reusable components
 
-/// A pill-shaped status badge.
+/// A pill-shaped status badge. Reads as a thin sheet of glass with the
+/// status colour glowing under it — replaces the old flat opacity-0.12 fill.
 struct StatusPill: View {
     let status: SessionStatus
 
@@ -109,7 +223,7 @@ struct StatusPill: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(status.color.opacity(0.12), in: Capsule())
+        .lemonGlassCapsule(.floating, tint: status.color.opacity(0.12))
     }
 }
 
@@ -210,13 +324,7 @@ struct SourceGlyph: View {
                 .frame(minWidth: 14)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
-                .background(
-                    Capsule()
-                        .fill(source.accent.opacity(0.10))
-                )
-                .overlay(
-                    Capsule().strokeBorder(source.accent.opacity(0.25), lineWidth: 0.5)
-                )
+                .lemonGlassCapsule(.floating, tint: source.accent.opacity(0.10))
             if let label {
                 Text(label)
                     .font(.system(size: size + 1, weight: .semibold, design: .monospaced))

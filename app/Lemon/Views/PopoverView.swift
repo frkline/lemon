@@ -11,12 +11,17 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 2px lemon bar at the top edge signals active work — no emoji needed
-            Rectangle()
-                .fill(LD.lemon)
-                .frame(height: 2)
-                .opacity(working ? 1 : 0)
-                .animation(LD.smooth, value: working)
+            // Glass-tinted highlight at the top edge signals active work.
+            // Was a hard 2px LD.lemon stripe; softened into a 4px lensing
+            // gradient so it reads as light catching a glass edge rather
+            // than ink on plastic. Spike preserved, hardness gone.
+            LinearGradient(
+                colors: [LD.lemon.opacity(0.85), LD.lemon.opacity(0)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 4)
+            .opacity(working ? 1 : 0)
+            .animation(LD.smooth, value: working)
 
             header
             Divider().opacity(0.4)
@@ -61,7 +66,16 @@ struct PopoverView: View {
             .clipped()
         }
         .frame(width: 480)
-        .background(.regularMaterial)
+        // Liquid-glass root. The regular material is the system base;
+        // the faint lemon tint gives the popover a warm cast without
+        // flooding the chrome (the brand should live on the CTA, not
+        // the windowpane). containerBackground places the material at
+        // the window level so it composes against whatever's behind.
+        .background {
+            Rectangle()
+                .fill(.regularMaterial)
+                .overlay(LD.lemon.opacity(0.025))
+        }
         .onAppear {
             withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
                 pulse = true
@@ -335,7 +349,13 @@ struct PopoverView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .lemonGlass(
+            .selected,
+            tint: identity?.kind.issueSource == .github
+                ? LD.glassTintGitHub
+                : (identity != nil ? LD.glassTintLinear : LD.glassTintCoral),
+            cornerRadius: 8
+        )
         .frame(maxWidth: 340)
     }
 
@@ -548,7 +568,11 @@ struct PopoverView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.regularMaterial)
+        // Floating glass for the action row: Stop/Join hover above the
+        // console — they're chrome on top of work, not inline with it.
+        .background {
+            Rectangle().fill(.regularMaterial).overlay(LD.glassTintLemon.opacity(0.5))
+        }
     }
 
     private func joinSession(_ session: Session) {

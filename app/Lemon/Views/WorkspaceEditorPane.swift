@@ -72,7 +72,10 @@ struct WorkspaceEditorPane: View {
         .padding(.top, 18)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LD.consoleBackground.opacity(0.02))
+        // Editor panes read as a "second room" inside the popover. A faint
+        // lemon-cast layered over the inherited window glass gives the
+        // transition warmth without piling another full material on top.
+        .background(LD.glassTintLemon.opacity(0.5))
         .onAppear { hydrate() }
     }
 
@@ -249,18 +252,24 @@ struct WorkspaceEditorPane: View {
                 Spacer(minLength: 0)
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+                    .foregroundStyle(
+                        isSelected
+                            ? AnyShapeStyle(ident.kind.issueSource.accent)
+                            : AnyShapeStyle(.quaternary)
+                    )
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(isSelected ? LD.lemon.opacity(0.07) : Color.primary.opacity(0.04))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(isSelected ? LD.lemon.opacity(0.30) : Color.primary.opacity(0.08),
-                                  lineWidth: 0.5)
+            // Selected route → source-tinted glass: Linear glows honey-amber,
+            // GitHub glows green. Keeps lemon-yellow exclusive to the actual
+            // primary CTA (Save) below, per the brand discipline.
+            .lemonGlass(
+                isSelected ? .selected : .resting,
+                tint: isSelected
+                    ? (ident.kind.issueSource == .github
+                        ? LD.glassTintGitHub
+                        : LD.glassTintLinear)
+                    : nil
             )
         }
         .buttonStyle(.plain)
@@ -522,7 +531,7 @@ struct WorkspaceEditorPane: View {
                 }
             }
             .padding(14)
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.resting)
         }
         .animation(LD.smooth, value: allReposInFolder)
     }
@@ -573,7 +582,7 @@ struct WorkspaceEditorPane: View {
             }
         }
         .padding(14)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.resting)
     }
 
     // MARK: - Actions
