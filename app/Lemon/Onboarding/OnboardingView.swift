@@ -2403,15 +2403,29 @@ private struct LemonMdStep: View {
         return "\(repo.path)/LEMON.md"
     }
 
+    private var isReadyToSave: Bool {
+        if case .ready = proposalState, !saved, !editedContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return false
+    }
+
     var body: some View {
         StepShell(
             emoji: "📋",
             title: "Team Instructions",
             subtitle: "LEMON.md tells Lemon how your codebase works.\nClaude will draft one — edit before saving.",
             backAction: onBack,
-            nextLabel: saved ? "Continue" : "Skip for now",
+            // Footer reflects the actual state:
+            //  - draft ready, unsaved → Save (primary, lemon) + Skip for now (secondary, grey)
+            //  - saved              → Continue (primary, lemon)
+            //  - idle/analyzing/failed → Skip for now (primary, lemon)
+            nextLabel: isReadyToSave ? "Save" : (saved ? "Continue" : "Skip for now"),
             nextEnabled: true,
-            nextAction: onNext
+            nextAction: isReadyToSave ? { save() } : onNext,
+            addAnotherLabel: isReadyToSave ? "Skip for now" : nil,
+            addAnotherEnabled: isReadyToSave,
+            addAnotherAction: isReadyToSave ? onNext : nil
         ) {
             VStack(spacing: 14) {
                 switch proposalState {
@@ -2500,13 +2514,19 @@ private struct LemonMdStep: View {
 
     private var editorView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
                 Text("LEMON.md")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(.secondary)
+                if let path = lemonMdPath {
+                    Text("→ \(path)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.quaternary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
                 Spacer()
-                Button("Save") { save() }
-                    .buttonStyle(LemonButtonStyle())
+                // Save lives in the footer alongside "Skip for now" — see the
+                // StepShell config at the top of body. No duplicate CTA here.
             }
             TextEditor(text: $editedContent)
                 .font(.system(size: 10, design: .monospaced))
