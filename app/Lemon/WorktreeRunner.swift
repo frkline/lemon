@@ -228,6 +228,42 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Worktree cleanup
 
+    /// Multi-step force-remove for a single worktree. `git worktree remove
+    /// --force` works most of the time but fails silently when (a) Claude
+    /// left a `.git/index.lock`, (b) the worktree path is a symlink target
+    /// mismatch (`/tmp` ↔ `/private/tmp` on macOS), or (c) git's own
+    /// worktree record is out of sync. Without the fallback the directory
+    /// stays on disk and the user later hits "contains modified or
+    /// untracked files, use --force to delete it" trying to clean up
+    /// themselves.
+    ///
+    /// Strategy:
+    ///  1. `git worktree remove --force` (the happy path)
+    ///  2. If that didn't actually delete the dir, blow it away with FileManager
+    ///  3. `git worktree prune` so git's internal record matches reality
+    private func forceRemoveWorktree(repoPath: String, worktreePath: String) async {
+        do {
+            try await shell("git -C \(q(repoPath)) worktree remove \(q(worktreePath)) --force")
+        } catch {
+            Logger.worktree.warning("git worktree remove --force failed for \(worktreePath): \(error.localizedDescription) — falling back to FileManager")
+        }
+        // Step 2: if the directory still exists (git refused for whatever
+        // reason), nuke it manually. This is what the user would have to
+        // do by hand otherwise.
+        if FileManager.default.fileExists(atPath: worktreePath) {
+            do {
+                try FileManager.default.removeItem(atPath: worktreePath)
+                Logger.worktree.info("FileManager removed leftover worktree dir at \(worktreePath)")
+            } catch {
+                Logger.worktree.error("FileManager removal failed at \(worktreePath): \(error.localizedDescription)")
+            }
+        }
+        // Step 3: prune so `git worktree list` no longer shows the path
+        // and a future `git checkout <branch>` in the main repo isn't
+        // blocked by a stale record.
+        _ = try? await shell("git -C \(q(repoPath)) worktree prune")
+    }
+
     private func cleanupWorktrees(
         repos: [(name: String, repoPath: String)],
         sessionPath: String,
@@ -237,11 +273,7 @@ final class WorktreeRunner: @unchecked Sendable {
         if isMultiRepo {
             for repo in repos {
                 let worktreePath = "\(sessionPath)/\(repo.name)"
-                do {
-                    try await shell("git -C \(q(repo.repoPath)) worktree remove \(q(worktreePath)) --force")
-                } catch {
-                    Logger.worktree.warning("Worktree remove failed for \(repo.name): \(error)")
-                }
+                await forceRemoveWorktree(repoPath: repo.repoPath, worktreePath: worktreePath)
             }
             do {
                 try FileManager.default.removeItem(atPath: sessionPath)
@@ -249,11 +281,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 Logger.worktree.warning("Session dir removal failed at \(sessionPath): \(error)")
             }
         } else {
-            do {
-                try await shell("git -C \(q(repos[0].repoPath)) worktree remove \(q(sessionPath)) --force")
-            } catch {
-                Logger.worktree.warning("Worktree remove failed at \(sessionPath): \(error)")
-            }
+            await forceRemoveWorktree(repoPath: repos[0].repoPath, worktreePath: sessionPath)
         }
         // Kill tmux session and remove all per-session artefacts in /tmp so
         // repeated runs don't leak launcher scripts, sentinel files, merged
