@@ -24,7 +24,7 @@ enum LemonMCPTools {
         // ── list_sessions ──────────────────────────────────────────────────
         server.register(LemonMCPServer.Tool(
             name: "list_sessions",
-            description: "List all Lemon sessions — active (currently running) plus the most recent completed/failed. Returns each session's UUID, Linear issue identifier, status, timing, and worktree path.",
+            description: "List all Lemon sessions — active (currently running) plus the most recent completed/failed. Returns each session's UUID, issue identifier (Linear key or GitHub owner/repo#n), source, status, timing, and worktree path.",
             inputSchema: [
                 "type": "object",
                 "properties": [String: Any](),
@@ -44,13 +44,13 @@ enum LemonMCPTools {
         // ── get_session ────────────────────────────────────────────────────
         server.register(LemonMCPServer.Tool(
             name: "get_session",
-            description: "Get the detailed state of one Lemon session — Linear issue, status, last AI summary + pending action, log tail, worktree path. Pass either the session UUID or the Linear issue identifier (e.g. 'HRP-37').",
+            description: "Get the detailed state of one Lemon session — issue, status, last AI summary + pending action, log tail, worktree path. Pass either the session UUID or the issue identifier (Linear key like 'HRP-37' or GitHub 'owner/repo#n').",
             inputSchema: [
                 "type": "object",
                 "properties": [
                     "id": [
                         "type": "string",
-                        "description": "Session UUID or Linear issue identifier (e.g. HRP-37)"
+                        "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"
                     ],
                     "log_lines": [
                         "type": "integer",
@@ -83,11 +83,11 @@ enum LemonMCPTools {
         // ── get_pane_log ───────────────────────────────────────────────────
         server.register(LemonMCPServer.Tool(
             name: "get_pane_log",
-            description: "Read the tmux pane log of a session — the raw terminal output Claude has produced. ANSI escape codes are preserved. Pass the Linear issue identifier (e.g. 'HRP-37') or session UUID.",
+            description: "Read the tmux pane log of a session — the raw terminal output Claude has produced. ANSI escape codes are preserved. Pass the issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#n') or session UUID.",
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "id": ["type": "string", "description": "Session UUID or Linear identifier"],
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
                     "lines": ["type": "integer", "description": "Lines from the tail (default 100, max 2000)", "default": 100]
                 ],
                 "required": ["id"],
@@ -104,7 +104,7 @@ enum LemonMCPTools {
                     }
                     let payload: [String: Any] = [
                         "identifier": session.issue.identifier,
-                        "log_path": "/tmp/lemon-log-\(session.issue.identifier.lowercased()).txt",
+                        "log_path": "/tmp/lemon-log-\(session.issue.pathSlug).txt",
                         "tail": readPaneLogTail(slug: session.issue.pathSlug, lines: lines)
                     ]
                     return LemonMCPServer.encode(payload)
@@ -154,7 +154,7 @@ enum LemonMCPTools {
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "id": ["type": "string", "description": "Session UUID or Linear identifier"],
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
                     "log_lines": [
                         "type": "integer",
                         "description": "How many tail lines to feed Gemma (default 80, max 400). Mirrors what the silence detector normally sends.",
@@ -220,7 +220,7 @@ enum LemonMCPTools {
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "id": ["type": "string", "description": "Session UUID or Linear identifier"],
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
                     "keys": ["type": "string", "description": "Key sequence or tmux special-key name (e.g. 'Enter', 'y', '/clear')"],
                     "append_enter": [
                         "type": "boolean",
@@ -280,11 +280,11 @@ enum LemonMCPTools {
         // ── stop_session ───────────────────────────────────────────────────
         server.register(LemonMCPServer.Tool(
             name: "stop_session",
-            description: "Cancel an active Lemon session — terminates the WorktreeRunner, kills the tmux session, marks the session as failed, and moves it into recent. Does NOT clean up the worktree directory or revert Linear labels.",
+            description: "Cancel an active Lemon session — terminates the WorktreeRunner, kills the tmux session, marks the session as failed, and moves it into recent. Does NOT clean up the worktree directory or revert source labels.",
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "id": ["type": "string", "description": "Session UUID or Linear identifier"]
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"]
                 ],
                 "required": ["id"],
                 "additionalProperties": false
@@ -322,6 +322,7 @@ enum LemonMCPTools {
             "uuid": s.id.uuidString,
             "issue_id": s.issue.id,
             "identifier": s.issue.identifier,
+            "source": s.issue.source.rawValue,
             "title": s.issue.title,
             "status": s.status.displayLabel,
             "labels": s.issue.labelNames,
