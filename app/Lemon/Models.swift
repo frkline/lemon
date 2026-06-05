@@ -115,10 +115,103 @@ struct IssueComment: Identifiable, Equatable {
     let createdAt: Date
 }
 
-// MARK: - Workspace pairs (replacement for WorkspaceRepo array)
+// MARK: - Identity → Surface → Workspace
 //
-// One WorkspacePair = one source identity + one local workspace mapping. The
-// pair list lives in KeychainStore under "lemon-workspace-pairs", capped at 10.
+// The richer mental model that supersedes WorkspacePair. Three layers:
+//   • Identity  — a credential (Linear key, GitHub PAT, future MCP/Git).
+//                 Knows its own surfaces. Multiple identities are allowed
+//                 (work + oss Linear accounts; github.com + Enterprise host).
+//   • Surface   — a queryable scope under an identity (Linear team, GitHub
+//                 repo, MCP namespace). Cached on the identity so editor
+//                 pickers populate from known surfaces, not free text.
+//   • Workspace — a local folder/repo with one routing that names which
+//                 identity + which surface owns its issues.
+//
+// Existing `WorkspacePair` is kept below for migration + a thin synthesizer
+// view; the identity-aware code paths supersede it.
+
+enum IdentityKind: String, Codable, Hashable {
+    case linear
+    case github
+    // Reserved for the deferred work tracked in issue #12:
+    //   case mcp
+    //   case git
+
+    var displayName: String {
+        switch self {
+        case .linear: return "Linear"
+        case .github: return "GitHub"
+        }
+    }
+
+    var issueSource: IssueSource {
+        switch self {
+        case .linear: return .linear
+        case .github: return .github
+        }
+    }
+}
+
+/// One discoverable scope on an identity — a Linear team or a GitHub repo.
+struct Surface: Codable, Hashable, Identifiable {
+    /// Stable identifier inside the identity. For Linear: team.id. For GitHub:
+    /// "owner/repo".
+    var id: String
+    /// Short human handle used for routing lookups. Linear: team.key ("HRP").
+    /// GitHub: "owner/repo" (same as id; kept for parity).
+    var key: String
+    /// Display label shown in editor pickers ("Harpy Rocks", "frkline/lemon").
+    var displayName: String
+}
+
+/// One credential + the surfaces it can reach.
+struct Identity: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var kind: IdentityKind
+
+    /// User-facing label in the editor — "Linear · work", "GitHub · @frkline".
+    /// Defaults from the verified handle but the user can override.
+    var label: String
+
+    /// Resolved handle from `verifyCredential`. Linear: user name. GitHub: login.
+    var handle: String
+
+    /// Source-side principal id (Linear node id, GitHub user id). Used as the
+    /// assignee filter when polling.
+    var principalId: String
+
+    /// API host. nil/"api.github.com" means github.com; an Enterprise host
+    /// looks like "api.github.acmecorp.com". Linear ignores this.
+    var host: String?
+
+    /// Cache of discovered surfaces. Populated by `verifyCredential` and the
+    /// refresh action. Pickers in the editor read from this; if empty, they
+    /// fall back to free-text entry.
+    var knownSurfaces: [Surface] = []
+
+    /// Last time `knownSurfaces` was refreshed; nil pre-first-verify.
+    var surfacesFetchedAt: Date?
+}
+
+/// Where a workspace's issues come from. One per workspace (per the
+/// product decision to defer multi-routing — issue #10 thread).
+struct Routing: Codable, Hashable {
+    var identityId: UUID
+    /// `Surface.id` under the identity. The orchestrator looks up the surface
+    /// on the resolved identity at poll time.
+    var surfaceId: String
+}
+
+/// Local folder + a single routing.
+struct Workspace: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var path: String
+    var allReposInFolder: Bool = false
+    var homeRepo: String = ""
+    var routing: Routing
+}
+
+// MARK: - Legacy WorkspacePair surface (migration source)
 
 struct SourceConfig: Codable, Identifiable, Hashable {
     var id: UUID = UUID()

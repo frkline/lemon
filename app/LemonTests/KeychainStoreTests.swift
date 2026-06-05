@@ -341,4 +341,119 @@ final class KeychainStoreTests: XCTestCase {
         s.githubToken = "ghp_t"; s.githubUser = "frkline"
         XCTAssertNotNil(s.authFor(pair: pair))
     }
+
+    // MARK: - Identity refactor migration
+
+    func testMigratePairsToIdentitiesAndWorkspaces() {
+        let s = store()
+        s.linearApiKey = "lin_t"
+        s.linearUserId = "user-linear"
+        s.githubToken = "ghp_t"
+        s.githubUser = "frkline"
+        s.pairs = [
+            linearPair(matchKey: "HRP"),
+            linearPair(matchKey: "LEM"),
+            githubPair(repo: "acme/widgets"),
+        ]
+
+        // Touch identities → migration runs
+        let ids = s.identities
+        XCTAssertEqual(ids.count, 2, "One identity per source kind, regardless of pair count.")
+        XCTAssertEqual(ids.filter { $0.kind == .linear }.count, 1)
+        XCTAssertEqual(ids.filter { $0.kind == .github }.count, 1)
+
+        let linear = ids.first { $0.kind == .linear }!
+        let github = ids.first { $0.kind == .github }!
+        XCTAssertEqual(linear.handle, "user-linear")
+        XCTAssertEqual(github.handle, "frkline")
+
+        // Both HRP and LEM should land as surfaces on the linear identity.
+        let linearKeys = Set(linear.knownSurfaces.map(\.key))
+        XCTAssertEqual(linearKeys, ["HRP", "LEM"])
+
+        let workspaces = s.workspaces
+        XCTAssertEqual(workspaces.count, 3)
+        XCTAssertEqual(Set(workspaces.map { $0.routing.surfaceId }), ["HRP", "LEM", "acme/widgets"])
+        XCTAssertTrue(workspaces.allSatisfy { ws in
+            ws.routing.identityId == linear.id || ws.routing.identityId == github.id
+        })
+
+        // Per-identity secrets migrated into Keychain memory.
+        XCTAssertEqual(s.identitySecret(for: linear.id), "lin_t")
+        XCTAssertEqual(s.identitySecret(for: github.id), "ghp_t")
+    }
+
+    func testMigrationIsIdempotentAfterUserEdits() {
+        let s = store()
+        s.linearApiKey = "lin_t"; s.linearUserId = "user-linear"
+        s.pairs = [linearPair(matchKey: "HRP")]
+        _ = s.identities    // triggers migration
+        // User then mutates the identity list
+        s.identities = []
+        // Another read must NOT re-overlay the legacy migration
+        XCTAssertEqual(s.identities.count, 0)
+        XCTAssertEqual(s.workspaces.count, 1, "Workspace list survives identity edit (separate storage).")
+    }
+
+    func testIdentitySecretRoundTrip() {
+        let s = store()
+        let id = UUID()
+        XCTAssertEqual(s.identitySecret(for: id), "")
+        s.setIdentitySecret("super-secret", for: id)
+        XCTAssertEqual(s.identitySecret(for: id), "super-secret")
+        s.deleteIdentitySecret(for: id)
+        XCTAssertEqual(s.identitySecret(for: id), "")
+    }
+
+    func testAuthForIdentityReturnsCorrectShape() {
+        let s = store()
+        let linear = Identity(
+            kind: .linear, label: "Linear · work", handle: "user",
+            principalId: "user-id", host: nil
+        )
+        s.identities = [linear]
+        XCTAssertNil(s.authFor(identity: linear), "Missing secret → nil.")
+        s.setIdentitySecret("lin_secret", for: linear.id)
+        guard case .linear(let key, let userId) = s.authFor(identity: linear) else {
+            return XCTFail("Expected linear auth")
+        }
+        XCTAssertEqual(key, "lin_secret")
+        XCTAssertEqual(userId, "user-id")
+    }
+
+    func testIdentityAndSurfaceLookupForWorkspace() {
+        let s = store()
+        let identity = Identity(
+            kind: .github, label: "GitHub", handle: "frkline",
+            principalId: "frkline", host: nil,
+            knownSurfaces: [
+                Surface(id: "acme/widgets", key: "acme/widgets", displayName: "Widgets"),
+            ]
+        )
+        s.identities = [identity]
+        let workspace = Workspace(
+            path: "/tmp/repo",
+            allReposInFolder: false,
+            homeRepo: "",
+            routing: Routing(identityId: identity.id, surfaceId: "acme/widgets")
+        )
+        XCTAssertEqual(s.identity(for: workspace)?.id, identity.id)
+        XCTAssertEqual(s.surface(for: workspace)?.displayName, "Widgets")
+    }
+
+    func testStaleRoutingReturnsNilSurface() {
+        let s = store()
+        let identity = Identity(
+            kind: .linear, label: "Linear", handle: "u",
+            principalId: "u-id", host: nil,
+            knownSurfaces: []
+        )
+        s.identities = [identity]
+        let workspace = Workspace(
+            path: "/tmp/r",
+            routing: Routing(identityId: identity.id, surfaceId: "GONE")
+        )
+        XCTAssertNotNil(s.identity(for: workspace), "identity lookup still works")
+        XCTAssertNil(s.surface(for: workspace), "surface deleted upstream → nil")
+    }
 }

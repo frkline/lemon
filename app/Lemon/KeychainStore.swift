@@ -272,6 +272,253 @@ final class KeychainStore: @unchecked Sendable {
             && fm.isExecutableFile(atPath: swiftLMPath)
     }
 
+    // MARK: - Identities + Workspaces (the richer model per the
+    //         identity refactor discussion). Identities are credentials with
+    //         their cached surfaces; Workspaces are local folders with a
+    //         single routing into an identity+surface. The old `pairs` API
+    //         is kept as a synthesized read-only view during the transition.
+
+    var identities: [Identity] {
+        get {
+            migrateLegacyWorkspaceIfNeeded()
+            migrateLegacyPairsIfNeeded()
+            let json = identitiesJSON
+            guard !json.isEmpty, let data = json.data(using: .utf8) else { return [] }
+            return (try? JSONDecoder().decode([Identity].self, from: data)) ?? []
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            identitiesJSON = json
+        }
+    }
+
+    var workspaces: [Workspace] {
+        get {
+            migrateLegacyWorkspaceIfNeeded()
+            migrateLegacyPairsIfNeeded()
+            let json = workspacesJSON
+            guard !json.isEmpty, let data = json.data(using: .utf8) else { return [] }
+            return (try? JSONDecoder().decode([Workspace].self, from: data)) ?? []
+        }
+        set {
+            let clipped = Array(newValue.prefix(Self.maxPairs))
+            guard let data = try? JSONEncoder().encode(clipped),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            workspacesJSON = json
+        }
+    }
+
+    private var identitiesJSON: String {
+        get {
+            if memory != nil { return memory?["identities"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-identities") ?? ""
+        }
+        set {
+            if memory != nil { memory?["identities"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-identities")
+        }
+    }
+
+    private var workspacesJSON: String {
+        get {
+            if memory != nil { return memory?["workspaces"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-workspaces") ?? ""
+        }
+        set {
+            if memory != nil { memory?["workspaces"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-workspaces")
+        }
+    }
+
+    private var identityMigrationSentinel: String {
+        get {
+            if memory != nil { return memory?["identityMigratedAt"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-identity-migrated-at") ?? ""
+        }
+        set {
+            if memory != nil { memory?["identityMigratedAt"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-identity-migrated-at")
+        }
+    }
+
+    /// One-shot migration: pairs + legacy linearApiKey/githubToken → identities + workspaces.
+    /// Idempotent via `identityMigrationSentinel`. Runs lazily on first read of
+    /// `identities` or `workspaces`.
+    func migrateLegacyPairsIfNeeded() {
+        guard identityMigrationSentinel.isEmpty else { return }
+
+        let legacyPairs = decodedPairs()
+        guard !legacyPairs.isEmpty else {
+            identityMigrationSentinel = ISO8601DateFormatter().string(from: Date())
+            return
+        }
+
+        // Group pairs by source so we make at most one identity per source.
+        var linearIdentity: Identity?
+        var githubIdentity: Identity?
+        var newWorkspaces: [Workspace] = []
+
+        for pair in legacyPairs {
+            switch pair.source.source {
+            case .linear:
+                if linearIdentity == nil {
+                    let surfaces = (pair.source.linearTeamKeys ?? []).filter { !$0.isEmpty }.map {
+                        Surface(id: $0, key: $0, displayName: $0)
+                    }
+                    linearIdentity = Identity(
+                        kind: .linear,
+                        label: linearUserId.isEmpty ? "Linear" : "Linear · \(linearUserId.prefix(8))",
+                        handle: linearUserId,
+                        principalId: linearUserId,
+                        host: nil,
+                        knownSurfaces: surfaces,
+                        surfacesFetchedAt: surfaces.isEmpty ? nil : Date()
+                    )
+                    if !linearApiKey.isEmpty, let id = linearIdentity?.id {
+                        setIdentitySecret(linearApiKey, for: id)
+                    }
+                } else if let existing = linearIdentity, !pair.workspace.matchKey.isEmpty,
+                          !existing.knownSurfaces.contains(where: { $0.key == pair.workspace.matchKey }) {
+                    linearIdentity?.knownSurfaces.append(
+                        Surface(id: pair.workspace.matchKey,
+                                key: pair.workspace.matchKey,
+                                displayName: pair.workspace.matchKey)
+                    )
+                }
+
+                if let identityId = linearIdentity?.id {
+                    newWorkspaces.append(Workspace(
+                        path: pair.workspace.path,
+                        allReposInFolder: pair.workspace.allReposInFolder,
+                        homeRepo: pair.workspace.homeRepo,
+                        routing: Routing(
+                            identityId: identityId,
+                            surfaceId: pair.workspace.matchKey
+                        )
+                    ))
+                }
+
+            case .github:
+                if githubIdentity == nil {
+                    let surfaces = (pair.source.githubRepos ?? []).filter { !$0.isEmpty }.map {
+                        Surface(id: $0, key: $0, displayName: $0)
+                    }
+                    githubIdentity = Identity(
+                        kind: .github,
+                        label: githubUser.isEmpty ? "GitHub" : "GitHub · @\(githubUser)",
+                        handle: githubUser,
+                        principalId: githubUser,
+                        host: nil,
+                        knownSurfaces: surfaces,
+                        surfacesFetchedAt: surfaces.isEmpty ? nil : Date()
+                    )
+                    if !githubToken.isEmpty, let id = githubIdentity?.id {
+                        setIdentitySecret(githubToken, for: id)
+                    }
+                } else if let existing = githubIdentity, !pair.workspace.matchKey.isEmpty,
+                          !existing.knownSurfaces.contains(where: { $0.key == pair.workspace.matchKey }) {
+                    githubIdentity?.knownSurfaces.append(
+                        Surface(id: pair.workspace.matchKey,
+                                key: pair.workspace.matchKey,
+                                displayName: pair.workspace.matchKey)
+                    )
+                }
+
+                if let identityId = githubIdentity?.id {
+                    newWorkspaces.append(Workspace(
+                        path: pair.workspace.path,
+                        allReposInFolder: pair.workspace.allReposInFolder,
+                        homeRepo: pair.workspace.homeRepo,
+                        routing: Routing(
+                            identityId: identityId,
+                            surfaceId: pair.workspace.matchKey
+                        )
+                    ))
+                }
+            }
+        }
+
+        var migrated: [Identity] = []
+        if let l = linearIdentity { migrated.append(l) }
+        if let g = githubIdentity { migrated.append(g) }
+
+        if let data = try? JSONEncoder().encode(migrated),
+           let json = String(data: data, encoding: .utf8) {
+            identitiesJSON = json
+        }
+        if let data = try? JSONEncoder().encode(newWorkspaces),
+           let json = String(data: data, encoding: .utf8) {
+            workspacesJSON = json
+        }
+        identityMigrationSentinel = ISO8601DateFormatter().string(from: Date())
+    }
+
+    /// Read pairs directly without triggering the recursive migration chain
+    /// (used internally during migration to avoid infinite mutual recursion).
+    private func decodedPairs() -> [WorkspacePair] {
+        let json = pairsJSON
+        guard !json.isEmpty, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([WorkspacePair].self, from: data)) ?? []
+    }
+
+    // MARK: - Per-identity secret (Keychain)
+    //
+    // Each Identity carries its credential in Keychain under
+    // "lemon-identity-{uuid}-secret". Linear's credential is the API key;
+    // GitHub's is the PAT. Memory-backed stores keep them in-process.
+
+    func identitySecret(for identityId: UUID) -> String {
+        let memoryKey = "id-\(identityId.uuidString)-secret"
+        let service  = "lemon-identity-\(identityId.uuidString)-secret"
+        if memory != nil { return memory?[memoryKey] ?? "" }
+        if Self.isTestRun || Self.isMockMode { return "" }
+        return readKeychain(service) ?? ""
+    }
+
+    func setIdentitySecret(_ value: String, for identityId: UUID) {
+        let memoryKey = "id-\(identityId.uuidString)-secret"
+        let service  = "lemon-identity-\(identityId.uuidString)-secret"
+        if memory != nil { memory?[memoryKey] = value; return }
+        if Self.isTestRun || Self.isMockMode { return }
+        writeKeychain(service, value: value)
+    }
+
+    func deleteIdentitySecret(for identityId: UUID) {
+        let memoryKey = "id-\(identityId.uuidString)-secret"
+        let service  = "lemon-identity-\(identityId.uuidString)-secret"
+        if memory != nil { memory?.removeValue(forKey: memoryKey); return }
+        SecItemDelete([kSecClass: kSecClassGenericPassword,
+                       kSecAttrService: service] as CFDictionary)
+    }
+
+    /// Build a `SourceAuth` from an identity. Returns nil if the credential
+    /// or principal is missing.
+    func authFor(identity: Identity) -> SourceAuth? {
+        let secret = identitySecret(for: identity.id)
+        guard !secret.isEmpty, !identity.principalId.isEmpty else { return nil }
+        switch identity.kind {
+        case .linear:
+            return .linear(apiKey: secret, userId: identity.principalId)
+        case .github:
+            return .github(pat: secret, login: identity.handle)
+        }
+    }
+
+    /// Lookup a Workspace's identity by id, returning nil if the routing
+    /// points at a deleted identity (graceful drift handling).
+    func identity(for workspace: Workspace) -> Identity? {
+        identities.first { $0.id == workspace.routing.identityId }
+    }
+
+    /// Lookup the routed Surface on the identity, or nil if it was removed
+    /// upstream (team deleted on Linear, repo deleted on GitHub, etc.).
+    func surface(for workspace: Workspace) -> Surface? {
+        identity(for: workspace).flatMap { ident in
+            ident.knownSurfaces.first { $0.id == workspace.routing.surfaceId }
+        }
+    }
+
     // MARK: - Legacy workspace repos helpers
     //
     // Kept one release for any external callers (older onboarding paths,
