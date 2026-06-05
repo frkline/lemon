@@ -43,21 +43,24 @@ struct IdentityEditorPane: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
-                eyebrowHeader
-                labelField
-                credentialCard
-                if isGitHub { hostField }
-                verifyRow
-                if verified { surfacesSummary }
-                if !isNew { routedBySummary }
-                Spacer(minLength: 4)
-                actionsRow
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+        // VStack (not ScrollView) so the pane sizes to its content. The
+        // popover frame's width is fixed in PopoverView; height is intrinsic.
+        // For very long surface lists (>8 entries), `surfacesSummary` already
+        // collapses to a "+ N more" tail.
+        VStack(alignment: .leading, spacing: 22) {
+            eyebrowHeader
+            labelField
+            credentialCard
+            if isGitHub { hostField }
+            verifyRow
+            if verified { surfacesSummary }
+            if !isNew { routedBySummary }
+            actionsRow
         }
+        .padding(.horizontal, 22)
+        .padding(.top, 18)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(LD.consoleBackground.opacity(0.02))
         .onAppear { hydrate() }
     }
@@ -148,7 +151,8 @@ struct IdentityEditorPane: View {
     }
 
     private var verifyRow: some View {
-        HStack(spacing: 10) {
+        let canVerify = !token.isEmpty && verifyState != .verifying
+        return HStack(spacing: 10) {
             Button {
                 Task { await runVerify() }
             } label: {
@@ -162,14 +166,27 @@ struct IdentityEditorPane: View {
                     Text(verifyButtonLabel)
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LD.citrus)
+                .foregroundStyle(canVerify ? AnyShapeStyle(LD.citrus) : AnyShapeStyle(.tertiary))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(LD.lemon, in: Capsule())
+                .background(
+                    canVerify
+                        ? AnyShapeStyle(LD.lemon)
+                        : AnyShapeStyle(Color.primary.opacity(0.06)),
+                    in: Capsule()
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        canVerify
+                            ? Color.clear
+                            : Color.primary.opacity(0.10),
+                        lineWidth: 0.5
+                    )
+                )
             }
             .buttonStyle(.plain)
-            .disabled(token.isEmpty || verifyState == .verifying)
-            .opacity(token.isEmpty ? 0.5 : 1)
+            .disabled(!canVerify)
+            .animation(LD.smooth, value: canVerify)
 
             verifyStateChip
             Spacer(minLength: 0)

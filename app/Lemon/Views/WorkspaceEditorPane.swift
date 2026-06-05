@@ -48,23 +48,23 @@ struct WorkspaceEditorPane: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
-                eyebrowHeader
-                if identities.isEmpty {
-                    noIdentitiesCard
-                } else {
-                    pathSection
-                    identitySection
-                    surfaceSection
-                    folderOptions
-                }
-                Spacer(minLength: 4)
-                actionsRow
+        // Intrinsic-height layout — pane grows to its content and stops.
+        VStack(alignment: .leading, spacing: 22) {
+            eyebrowHeader
+            if identities.isEmpty {
+                noIdentitiesCard
+            } else {
+                pathSection
+                identitySection
+                surfaceSection
+                folderOptions
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+            actionsRow
         }
+        .padding(.horizontal, 22)
+        .padding(.top, 18)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(LD.consoleBackground.opacity(0.02))
         .onAppear { hydrate() }
     }
