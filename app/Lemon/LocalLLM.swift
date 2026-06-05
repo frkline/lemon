@@ -334,7 +334,14 @@ final class LocalLLM: @unchecked Sendable {
     }
 }
 
-enum LocalLLMError: Error, Equatable {
+enum LocalLLMError: LocalizedError, Equatable {
     case invalidRequest
     case invalidResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRequest:  return "LocalLLM invalid request"
+        case .invalidResponse: return "LocalLLM returned empty/malformed content (prompt-cache full hit can return zero tokens — try mutating the input slightly)"
+        }
+    }
 }

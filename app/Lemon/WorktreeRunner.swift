@@ -435,11 +435,17 @@ final class WorktreeRunner: @unchecked Sendable {
         let launcherPath = "/tmp/lemon-launch-\(identifier.lowercased()).sh"
         let mcpFlag      = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
 
-        // Trailing positional kickoff prompt — `claude [options] [prompt]`.
+        // Trailing positional kickoff prompt — `claude [options] [--] [prompt]`.
         // Without this Claude opens an empty REPL and just sits there; the
         // user is supposed to be afk, so Gemma sees an idle pane forever and
         // (correctly) returns state=running/action=null on every classify.
         // Pointing Claude at LEMON_CONTEXT.md makes the session self-starting.
+        //
+        // The `--` matters: `--remote-control [name]` takes an *optional*
+        // positional argument. Without the separator, the kickoff prompt
+        // gets gobbled as the remote-control session name, leaving Claude
+        // at an empty REPL with the prompt mis-bound. Live-test caught this
+        // on HRP-37 — Gemma classified the resulting silence as state=stuck.
         // Single-quoted in bash, so no apostrophes in the prompt body.
         let kickoffPrompt = "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
@@ -454,7 +460,7 @@ final class WorktreeRunner: @unchecked Sendable {
         [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control '\(kickoffPrompt)'
+        cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
