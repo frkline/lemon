@@ -16,9 +16,10 @@ private extension Int {
 
 @main
 struct LemonApp: App {
-    #if DEBUG
+    // AppDelegate is always installed — in DEBUG it boots smoke-test mode;
+    // in Release it pops the menu-bar popover on first launch so the
+    // wizard is visible without the user having to hunt for the icon.
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    #endif
 
     @State private var orchestrator: Orchestrator = {
         #if DEBUG
@@ -86,13 +87,21 @@ struct LemonApp: App {
             }
             .onReceive(NotificationCenter.default.publisher(for: .lemonRerunSetup)) { _ in
                 onboardingComplete = false
-                // Re-running setup pops the wizard window back open so the
-                // user lands in the right surface immediately.
-                NSApp.activate(ignoringOtherApps: true)
-                LemonApp.presentOnboardingWindow()
+                // Re-running setup pops the menu-bar popover open so the
+                // user lands in the wizard immediately, in the same
+                // surface they'll use once configured.
+                LemonApp.openMenuBarPopover()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 LocalLLM.shared.stop()
+            }
+            .onChange(of: onboardingComplete) { _, complete in
+                // Wizard just transitioned to complete — orchestrator
+                // polling will get kicked by PopoverView's .task on the
+                // next render. MCP server isn't tied to that, so fire
+                // it here so it comes up alongside the polling loop.
+                guard complete else { return }
+                LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
             }
         } label: {
             Image(orchestrator.sessions.active.isEmpty ? "MenuBarIconIdle" : "MenuBarIcon")
@@ -100,63 +109,40 @@ struct LemonApp: App {
                 .accessibilityLabel("Lemon")
         }
         .menuBarExtraStyle(.window)
-
-        // Standalone onboarding window — opens automatically at launch when
-        // nothing's configured, so the user lands inside the wizard instead
-        // of having to discover the menu-bar icon and click into a popover.
-        // .defaultLaunchBehavior is evaluated once at process start; the
-        // window stays out of the way for already-configured users.
-        Window("Welcome to Lemon", id: "lemon-onboarding") {
-            OnboardingWindowContents(
-                onboardingComplete: $onboardingComplete,
-                orchestrator: orchestrator,
-                nav: nav
-            )
-        }
-        .defaultSize(width: 520, height: 720)
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(
-            KeychainStore.shared.isConfigured ? .suppressed : .presented
-        )
     }
 
-    /// Called from rerunSetup so the wizard window pops back into view even
-    /// if the user closed it during the session.
+    /// Simulate a click on Lemon's menu bar item so the popover (containing
+    /// either the wizard or the configured PopoverView) pops open. Used at
+    /// launch when the user isn't configured yet — keeps the wizard in the
+    /// same surface they'll meet day-to-day, no separate window. Also
+    /// re-used by `.lemonRerunSetup` from Settings.
     @MainActor
-    static func presentOnboardingWindow() {
-        // The Window-id contract is "lemon-onboarding"; SwiftUI surfaces it
-        // via OpenWindowAction inside views. From AppKit space we hit
-        // NSApp.windows directly and re-show whichever NSWindow is hosting
-        // the SwiftUI surface.
-        for window in NSApp.windows where window.identifier?.rawValue == "lemon-onboarding"
-            || window.title == "Welcome to Lemon" {
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-    }
-}
-
-/// Hosting content for the standalone onboarding window. Pulled into its own
-/// view so we can use @Environment(\.dismissWindow) to close the window
-/// once the wizard reports complete.
-private struct OnboardingWindowContents: View {
-    @Binding var onboardingComplete: Bool
-    let orchestrator: Orchestrator
-    let nav: AppNavigation
-    @Environment(\.dismissWindow) private var dismissWindow
-
-    var body: some View {
-        OnboardingView(isComplete: $onboardingComplete)
-            .environment(orchestrator)
-            .environment(nav)
-            .onChange(of: onboardingComplete) { _, complete in
-                if complete {
-                    // Configured — start the polling loop and dismiss the
-                    // wizard window. The popover takes over from here.
-                    orchestrator.start()
-                    LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
-                    dismissWindow(id: "lemon-onboarding")
+    static func openMenuBarPopover() {
+        // NSStatusBar doesn't expose its items publicly, so we walk
+        // NSApp.windows for the AppKit-side window backing the MenuBarExtra
+        // popover. The window has no title, no identifier, and is owned by
+        // the system status bar. Its rootView's host view is what gets
+        // toggled by clicking the menu bar icon.
+        //
+        // Strategy: find the NSStatusItem via NSApp.windows → first key
+        // window whose level matches statusBar, OR walk the menu-bar
+        // status item buttons by hit-testing the system status bar.
+        // SwiftUI's MenuBarExtra installs exactly one NSStatusItem in the
+        // shared NSStatusBar; we iterate the bar to find it.
+        let statusBar = NSStatusBar.system
+        // NSStatusBar.system has a private `_statusItems` collection;
+        // public API doesn't expose it. Fall back to walking NSApp.windows
+        // to find the popover's host window and toggling its visibility.
+        if let items = statusBar.value(forKey: "_statusItems") as? [NSStatusItem] {
+            for item in items {
+                if let button = item.button {
+                    button.performClick(nil)
+                    return
                 }
             }
+        }
+        // Fallback: activate the app so the menu bar icon is at least
+        // visually pulsed; the user can click it themselves.
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

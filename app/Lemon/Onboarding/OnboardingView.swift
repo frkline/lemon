@@ -312,18 +312,20 @@ private struct StepShell<Content: View>: View {
 
             Spacer().frame(height: 22)
 
-            // Intrinsic-height content — the wizard window grows to fit
-            // (OnboardingView uses minHeight, not fixed height). For steps
-            // that genuinely have unbounded content (LemonMd's editor),
-            // the step wraps its own scrolling internally.
-            content
-                .padding(.horizontal, 28)
-
-            // Flexible spacer: absorbs the excess when content is short
-            // (LemonMd step), collapses to ~16pt when content fills the
-            // minHeight window (Trackers step). Without this, short steps
-            // distributed empty space awkwardly through the layout.
-            Spacer(minLength: 16)
+            // Scrollable content region — the wizard lives inside the
+            // menu-bar popover whose total height is bounded by the
+            // screen. Without ScrollView, tall steps (Ready) push the
+            // footer past the popover's bottom edge and the primary
+            // action clips. ScrollView keeps the footer pinned and lets
+            // dense content (label rows, automation banners) scroll.
+            ScrollView(.vertical, showsIndicators: false) {
+                content
+                    .padding(.horizontal, 28)
+                    // 24pt editorial pause between the form body and the
+                    // action row when content is shorter than the
+                    // scroll viewport.
+                    .padding(.bottom, 24)
+            }
 
             HStack(spacing: 10) {
                 Button("Quit") { NSApp.terminate(nil) }
@@ -344,9 +346,11 @@ private struct StepShell<Content: View>: View {
                     .keyboardShortcut(.return, modifiers: .command)
             }
             .padding(.horizontal, 28)
-            // 34pt bottom inset so the buttons clear the window's rounded
-            // corner with editorial breathing room.
-            .padding(.bottom, 34)
+            // 48pt bottom inset so the buttons clear the window's rounded
+            // corner with real breathing room. 34 was getting visually
+            // clipped by the corner radius; 48 sits the actions in a
+            // proper gallery margin.
+            .padding(.bottom, 48)
         }
     }
 }
@@ -370,31 +374,118 @@ private struct TrackersStep: View {
     @State private var draft = DraftPair()
     @State private var verifyState: VerifyState = .idle
     @State private var typingCustomSurface = false
+    // Once a pair has been saved this session, the editor collapses into
+    // an "Add another pair" affordance so the page reads as a tidy list
+    // rather than a saved row with a half-filled form below it.
+    // `editorOpen` reflects whether the editor is currently expanded.
+    @State private var editorOpen: Bool = true
 
     enum VerifyState: Equatable {
         case idle, verifying, ok, failed(String)
     }
 
-    private var canContinue: Bool { !savedPairs.isEmpty }
+    // Continue advances if EITHER:
+    //   • there's at least one already-saved pair, OR
+    //   • the current draft is complete (Save-on-Continue: nobody should
+    //     have to click "Add another" before "Continue" for the single-pair
+    //     happy path).
+    private var canContinue: Bool { !savedPairs.isEmpty || draft.isSavable }
     private var canAddCurrent: Bool { draft.isSavable }
+
+    // Editor is implicitly open whenever there's nothing saved yet —
+    // there's no list to show, the form is the whole page. Once the
+    // first pair lands, the user can collapse it back.
+    private var isEditorVisible: Bool { savedPairs.isEmpty || editorOpen }
 
     var body: some View {
         StepShell(
             emoji: "🍋",
-            title: "Connect a tracker · pick a workspace",
-            subtitle: "Where issues live and where the work happens on disk. Add as many as you want.",
-            nextLabel: "Continue",
+            title: "Connect",
+            subtitle: "Link where your issues live to your local git repository.",
+            nextLabel: continueLabel,
             nextEnabled: canContinue,
-            nextAction: onNext,
-            addAnotherLabel: "Add another",
-            addAnotherEnabled: canAddCurrent,
-            addAnotherAction: { addCurrentToSavedAndReset() }
+            nextAction: { commitDraftIfReadyAndContinue() },
+            addAnotherLabel: addAnotherLabelText,
+            addAnotherEnabled: addAnotherEnabledFlag,
+            addAnotherAction: { handleAddAnother() }
         ) {
             VStack(alignment: .leading, spacing: 18) {
                 if !savedPairs.isEmpty { savedPairsList }
-                draftSection
+                if isEditorVisible {
+                    draftSection
+                } else {
+                    addAnotherPlaceholder
+                }
             }
         }
+    }
+
+    // Footer label adapts to context. While the editor is open with a
+    // valid draft and other pairs already exist, the primary action is
+    // explicitly "Save & Continue" so the click-saves-the-draft behavior
+    // doesn't read as a surprise.
+    private var continueLabel: String {
+        if isEditorVisible, canAddCurrent, !savedPairs.isEmpty { return "Save & Continue" }
+        return "Continue"
+    }
+
+    // Secondary button label: with the editor collapsed (>=1 saved
+    // pair, no draft in progress) it offers to open a fresh editor.
+    // With the editor open and a valid draft, it commits the draft and
+    // resets for the next pair.
+    private var addAnotherLabelText: String? {
+        if isEditorVisible { return "Add another" }
+        return "Add another"
+    }
+
+    private var addAnotherEnabledFlag: Bool {
+        if isEditorVisible { return canAddCurrent }
+        return true  // collapsed → button just reopens the editor
+    }
+
+    private func handleAddAnother() {
+        if isEditorVisible {
+            withAnimation(LD.snappy) {
+                addCurrentToSavedAndReset()
+                // Collapse to the placeholder once the pair lands so the
+                // page reads as a tidy list. One more click reopens.
+                editorOpen = false
+            }
+        } else {
+            withAnimation(LD.snappy) { editorOpen = true }
+        }
+    }
+
+    private func commitDraftIfReadyAndContinue() {
+        if isEditorVisible, canAddCurrent {
+            addCurrentToSavedAndReset()
+        }
+        onNext()
+    }
+
+    // Collapsed editor surface — a single ghost row that reads as a
+    // "create new" affordance. Tap expands the editor back open.
+    private var addAnotherPlaceholder: some View {
+        Button {
+            withAnimation(LD.snappy) { editorOpen = true }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(LD.lemon)
+                Text("Add another tracker + workspace")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .background(LD.lemon.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .overlay(
+                RoundedRectangle(cornerRadius: LD.r10)
+                    .strokeBorder(LD.lemon.opacity(0.22), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Saved pairs (already added this session)
@@ -462,127 +553,173 @@ private struct TrackersStep: View {
     // MARK: - Draft form
 
     private var draftSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Show the routing picker only when there are existing
-            // identities to choose between — otherwise the title + the
-            // credential block below already do the work, and the
-            // "+ Connect a tracker" row reads as a redundant button.
-            if !verifiedIdentities.isEmpty { routeThroughPicker }
-            if draft.identityRef == nil { credentialBlock }
-            if currentSurfaceList.isEmpty == false { surfacePicker }
-            pathField
-            folderToggle
+        // Flat editorial layout: each section is an EYEBROW + fields, no
+        // nested cards. The whole pane reads as ISSUE TRACKER → REPO/TEAM
+        // → WORKSPACE PATH from top to bottom — match the visual rhythm
+        // the user already meets at the bottom of the page.
+        VStack(alignment: .leading, spacing: 22) {
+            issueTrackerSection
+            // REPO/TEAM is shown from the start so the user sees the
+            // shape of the form up front. The picker is disabled
+            // until surfaces load (post-verify).
+            surfaceSection
+            workspaceSection
         }
     }
 
-    // Route-through picker: existing verified identities + "Connect new"
-    private var routeThroughPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ROUTE THROUGH")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(1.4)
-                .foregroundStyle(.tertiary)
-            VStack(spacing: 6) {
-                ForEach(verifiedIdentities, id: \.identityId) { snap in
-                    routeOption(snap)
-                }
-                connectNewOption
+    // MARK: ISSUE TRACKER
+
+    private var issueTrackerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            eyebrow("ISSUE TRACKER")
+            // If we already have verified identities, the user picks one
+            // OR explicitly chooses Connect new. Otherwise the segmented
+            // picker is just Linear/GitHub.
+            if !verifiedIdentities.isEmpty {
+                inlineIdentityPicker
+            }
+            if draft.identityRef == nil {
+                sourceSegmented
+                tokenField
+                if draft.sourceKind == .github { hostField }
+                verifyRow
             }
         }
     }
 
-    private func routeOption(_ snap: DraftPair.VerifiedSnapshot) -> some View {
+    // Compact horizontal identity picker — no boxes, no radio circles.
+    // Each existing identity is a pill; "Connect new" appears as the
+    // final pill.
+    private var inlineIdentityPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ForEach(verifiedIdentities, id: \.identityId) { snap in
+                    identityPill(snap)
+                }
+                connectNewPill
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func identityPill(_ snap: DraftPair.VerifiedSnapshot) -> some View {
         let selected = draft.identityRef == snap.identityId
+        let kind: IssueSource = snap.label.lowercased().contains("github") ? .github : .linear
         return Button {
             withAnimation(LD.snappy) {
                 draft.identityRef = snap.identityId
-                draft.sourceKind = snap.label.lowercased().contains("github") ? .github : .linear
+                draft.sourceKind = kind
                 draft.surfaceId = ""
                 draft.newIdentityToken = ""
                 draft.newIdentityVerified = nil
                 verifyState = .idle
             }
         } label: {
-            HStack(spacing: 10) {
-                SourceGlyph(source: snap.label.lowercased().contains("github") ? .github : .linear, size: 9)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(snap.label)
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("@\(snap.handle) · \(snap.surfaces.count) surface\(snap.surfaces.count == 1 ? "" : "s")")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+            HStack(spacing: 6) {
+                SourceMark(source: kind, size: 12)
+                Text("@\(snap.handle)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(selected ? .primary : .secondary)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(selected ? LD.lemon.opacity(0.06) : Color.primary.opacity(0.03),
-                        in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(
+                selected ? AnyShapeStyle(kind.accent.opacity(0.14)) : AnyShapeStyle(.primary.opacity(0.04)),
+                in: Capsule()
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(selected ? LD.lemon.opacity(0.30) : Color.primary.opacity(0.08),
-                                  lineWidth: 0.5)
+                Capsule().strokeBorder(
+                    selected ? kind.accent.opacity(0.40) : Color.primary.opacity(0.08),
+                    lineWidth: 0.5
+                )
             )
         }
         .buttonStyle(.plain)
     }
 
-    private var connectNewOption: some View {
+    private var connectNewPill: some View {
         let selected = draft.identityRef == nil
-        let isOnlyOption = verifiedIdentities.isEmpty
         return Button {
             withAnimation(LD.snappy) {
                 draft.identityRef = nil
                 if draft.newIdentityVerified == nil { verifyState = .idle }
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.tertiary))
-                Text(isOnlyOption ? "Connect a tracker" : "Connect another identity")
+            HStack(spacing: 5) {
+                Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("Connect new")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 0)
-                // Only show the radio-circle when there are other options to
-                // pick between. Solo "Connect a tracker" doesn't need the
-                // affordance — the credential block below already implies it.
-                if !isOnlyOption {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
-                }
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
-                selected ? AnyShapeStyle(LD.lemon.opacity(0.05)) : AnyShapeStyle(Color.clear),
-                in: RoundedRectangle(cornerRadius: 8)
+                selected ? AnyShapeStyle(LD.lemon.opacity(0.10)) : AnyShapeStyle(Color.clear),
+                in: Capsule()
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        selected ? LD.lemon.opacity(0.28) : LD.lemon.opacity(0.18),
-                        lineWidth: 0.5
-                    )
+                Capsule().strokeBorder(
+                    selected ? LD.lemon.opacity(0.32) : LD.lemon.opacity(0.20),
+                    style: StrokeStyle(lineWidth: 0.5, dash: selected ? [] : [3, 3])
+                )
             )
         }
         .buttonStyle(.plain)
     }
 
-    // Credential block — only when "Connect new" is the chosen route
-    private var credentialBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sourceSegmented
-            tokenField
-            if draft.sourceKind == .github { hostField }
-            verifyRow
+    // MARK: REPO / TEAM
+
+    private var surfaceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            eyebrow(draft.sourceKind == .linear ? "TEAM" : "REPO")
+            surfacePicker
+            // After a surface is chosen, surface the connection's
+            // assigned-issue count as concrete proof the right scope is
+            // wired up. Comes from the verify snapshot — no extra
+            // network call needed.
+            if !draft.surfaceId.isEmpty, let count = currentAssignedCount {
+                HStack(spacing: 6) {
+                    Image(systemName: "tray.full")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Text("\(count) issue\(count == 1 ? "" : "s") assigned to this credential")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
-        .padding(14)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-        .overlay(
-            RoundedRectangle(cornerRadius: LD.r10)
-                .strokeBorder(draft.sourceKind.accent.opacity(0.18), lineWidth: 0.5)
-        )
+    }
+
+    private var currentAssignedCount: Int? {
+        if let ref = draft.identityRef,
+           let snap = verifiedIdentities.first(where: { $0.identityId == ref }) {
+            return snap.assignedIssueCount
+        }
+        return draft.newIdentityVerified?.assignedIssueCount
+    }
+
+    // MARK: WORKSPACE PATH
+
+    private var workspaceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                eyebrow("WORKSPACE PATH")
+                Text("drop a folder or paste a path")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+                Spacer()
+            }
+            pathField
+            folderToggle
+        }
+    }
+
+    // MARK: helpers
+
+    private func eyebrow(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .kerning(1.4)
+            .foregroundStyle(.tertiary)
     }
 
     /// Custom segmented control — replaces SwiftUI's `.pickerStyle(.segmented)`
@@ -645,36 +782,36 @@ private struct TrackersStep: View {
     }
 
     private var tokenField: some View {
+        // No sub-eyebrow — ISSUE TRACKER already labels the section.
+        // The placeholder text inside the SecureField (`lin_api_…`,
+        // `ghp_…`) tells you which credential format belongs here, and
+        // the "create one ↗" link is right-aligned next to the field
+        // for low-friction handoff to the provider.
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(draft.sourceKind == .linear ? "LINEAR API KEY" : "GITHUB PAT")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+                SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
+                            text: $draft.newIdentityToken)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .padding(.vertical, 7).padding(.horizontal, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                    )
+                    .onChange(of: draft.newIdentityToken) { _, _ in
+                        draft.newIdentityVerified = nil
+                        verifyState = .idle
+                    }
                 Link(destination: tokenProviderURL) {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 3) {
                         Text("create one")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                         Image(systemName: "arrow.up.right")
-                            .font(.system(size: 7, weight: .bold))
+                            .font(.system(size: 8, weight: .bold))
                     }
                     .foregroundStyle(.tertiary)
                 }
-                Spacer()
             }
-            SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
-                        text: $draft.newIdentityToken)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .padding(.vertical, 7).padding(.horizontal, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
-                )
-                .onChange(of: draft.newIdentityToken) { _, _ in
-                    draft.newIdentityVerified = nil
-                    verifyState = .idle
-                }
             Text(tokenProviderHint)
                 .font(.system(size: 9))
                 .foregroundStyle(.quaternary)
@@ -707,26 +844,17 @@ private struct TrackersStep: View {
     }
 
     private var hostField: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text("HOST")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
-                Text("leave as-is unless you're on GitHub Enterprise")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
-                Spacer()
-            }
-            TextField("github.com", text: $draft.newIdentityHost)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .padding(.vertical, 7).padding(.horizontal, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
-                )
-        }
+        // Compact host field — placeholder = github.com, hint is the
+        // muted "GitHub Enterprise host" cue. No eyebrow; this sits
+        // just below the token field inside ISSUE TRACKER.
+        TextField("github.com", text: $draft.newIdentityHost)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12, design: .monospaced))
+            .padding(.vertical, 7).padding(.horizontal, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+            )
     }
 
     private var verifyRow: some View {
@@ -806,49 +934,54 @@ private struct TrackersStep: View {
 
     private var surfacePicker: some View {
         let count = currentSurfaceList.count
-        let unit = draft.sourceKind == .linear ? "team" : "repo"
-        let placeholder = "Pick from \(count) \(unit)\(count == 1 ? "" : "s")…"
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(draft.sourceKind == .linear ? "TEAM" : "REPO")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
-                if !draft.surfaceId.isEmpty {
-                    Text("· tap to change")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.quaternary)
+        let enabled = count > 0
+        // Placeholder is source-aware and changes shape based on whether
+        // the picker is live yet:
+        //   • not verified → "Verify your credentials first"
+        //   • verified, nothing picked → "Select GitHub issues repo" / "Select Linear team"
+        //   • verified, picked → the surfaceId itself
+        let placeholder: String = {
+            if !enabled {
+                return "Verify your credentials first"
+            }
+            return draft.sourceKind == .github
+                ? "Select GitHub issues repo"
+                : "Select Linear team"
+        }()
+        return Menu {
+            ForEach(currentSurfaceList) { s in
+                Button(action: { draft.surfaceId = s.id }) {
+                    Text(s.key.caseInsensitiveCompare(s.displayName) == .orderedSame
+                         ? s.displayName
+                         : "\(s.key) — \(s.displayName)")
                 }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                // Typographic glyph — SourceMark (SVG/PNG) bleeds out
+                // of its frame inside a Menu's borderless label, which
+                // blows up the layout. SourceGlyph is text-based and
+                // composes correctly inside the picker.
+                SourceGlyph(source: draft.sourceKind, size: 10)
+                Text(draft.surfaceId.isEmpty ? placeholder : draft.surfaceId)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(draft.surfaceId.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                 Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
             }
-            Menu {
-                ForEach(currentSurfaceList) { s in
-                    Button(action: { draft.surfaceId = s.id }) {
-                        Text(s.key.caseInsensitiveCompare(s.displayName) == .orderedSame
-                             ? s.displayName
-                             : "\(s.key) — \(s.displayName)")
-                    }
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Text(draft.surfaceId.isEmpty ? placeholder : draft.surfaceId)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(draft.surfaceId.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .contentShape(RoundedRectangle(cornerRadius: 8))
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
-                )
-            }
-            .menuStyle(.borderlessButton)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+            )
+            .opacity(enabled ? 1 : 0.55)
         }
+        .menuStyle(.borderlessButton)
+        .disabled(!enabled)
     }
 
     // Path field — type or drag a folder onto it. The NSOpenPanel Browse
@@ -856,17 +989,9 @@ private struct TrackersStep: View {
     // from inside the in-app editor; keeping behavior consistent across
     // onboarding + editor surfaces.
     private var pathField: some View {
+        // The eyebrow lives on workspaceSection; this view is just the
+        // input + drag-drop affordance.
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text("WORKSPACE PATH")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
-                Text("drop a folder or paste a path")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
-                Spacer()
-            }
             TextField("/path/to/repo", text: $draft.path)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
@@ -1992,12 +2117,16 @@ private struct ReadyStep: View {
     enum LabelState { case pending, creating, done(Int), failed(String) }
     @State private var labelState: LabelState = .pending
 
+    // The 🍋 labels (Tag it / In Progress / Waiting / Complete) are the
+    // protocol Lemon listens for. Without them, nothing the user does
+    // post-onboarding will register. So Continue is gated on
+    // `.done` — pending/creating block (work in flight) and `.failed`
+    // surfaces a Retry instead of letting the user advance into a
+    // broken state.
     private var canStart: Bool {
         guard claudeChecked else { return false }
-        switch labelState {
-        case .pending, .creating: return false
-        default: return true
-        }
+        if case .done = labelState { return true }
+        return false
     }
 
     private var labelsReady: Bool {
@@ -2030,10 +2159,12 @@ private struct ReadyStep: View {
                 // Linear labels + workflow education
                 linearLabelsRow
 
-                // GitHub Issues hint — Lemon supports GitHub as a parallel
-                // trigger source too, but the onboarding wizard only collects
-                // Linear v1. Point users at Settings if they want to add it.
-                githubHintRow
+                // GitHub Issues hint — only shown when the user hasn't
+                // already connected a GitHub identity. Once GitHub is in
+                // play the card is just noise.
+                if !KeychainStore.shared.identities.contains(where: { $0.kind == .github }) {
+                    githubHintRow
+                }
 
                 // Launch at login — quiet opt-in; Lemon is workflow tooling
                 // for a dedicated Mac, so this is the recommended default for
@@ -2047,7 +2178,7 @@ private struct ReadyStep: View {
         }
         .onAppear {
             detectClaudeAuth()
-            createLinearLabels()
+            createLabels()
             preauthorizeTerminalAutomation()
         }
     }
@@ -2158,24 +2289,34 @@ private struct ReadyStep: View {
                 switch labelState {
                 case .pending:
                     ProgressView().scaleEffect(0.6).frame(width: 14, height: 14)
-                    Text("Connecting to Linear…")
+                    Text("Preparing 🍋 labels…")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 case .creating:
                     ProgressView().scaleEffect(0.6).frame(width: 14, height: 14)
-                    Text("Creating Lemon labels…")
+                    Text("Creating 🍋 labels in your trackers…")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 case .done(let count):
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(LD.statusDone).font(.system(size: 13))
-                    Text("Labels ready in \(count) team\(count == 1 ? "" : "s")")
+                    Text("🍋 labels created in \(count) place\(count == 1 ? "" : "s")")
                         .font(.system(size: 11, weight: .semibold))
-                case .failed:
+                case .failed(let err):
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(LD.coral).font(.system(size: 13))
-                    Text("Labels will be created on first start")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Couldn't create 🍋 labels")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(err)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2).truncationMode(.tail)
+                    }
+                    Spacer(minLength: 8)
+                    Button("Retry") { createLabels() }
+                        .buttonStyle(GhostButtonStyle())
+                        .controlSize(.small)
                 }
-                Spacer()
+                if case .failed = labelState { } else { Spacer() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -2322,25 +2463,74 @@ private struct ReadyStep: View {
     }
 
     // MARK: - Label creation
+    //
+    // Walks the persisted (Identity, Workspace) pairs and bootstraps the
+    // four 🍋 labels in each routed surface. One Linear team and one
+    // GitHub repo each count as one "scope". Failures of individual
+    // scopes don't abort the others — the user sees an aggregated
+    // result and can hit Retry if anything failed.
 
-    private func createLinearLabels() {
+    private func createLabels() {
         labelState = .creating
-        let key = apiKey
         Task.detached {
-            let client = LinearClient()
-            do {
-                let teams = try await client.fetchTeams(apiKey: key)
-                Logger.onboarding.info("Creating Lemon labels for \(teams.count) team(s)")
-                for team in teams {
-                    for label in [LinearClient.labelTrigger, LinearClient.labelInProgress,
-                                  LinearClient.labelWaiting, LinearClient.labelComplete] {
-                        _ = try await client.ensureLabelId(name: label, teamId: team.id, apiKey: key)
-                    }
+            let keychain = KeychainStore.shared
+            let workspaces = keychain.workspaces
+            // Deduplicate by (identityId, surfaceId) so two workspaces
+            // routed to the same team/repo don't double-bootstrap.
+            var seenScopes = Set<String>()
+            var scopes: [(identity: Identity, surfaceId: String)] = []
+            for ws in workspaces {
+                let key = "\(ws.routing.identityId.uuidString)/\(ws.routing.surfaceId)"
+                guard !seenScopes.contains(key) else { continue }
+                seenScopes.insert(key)
+                guard let identity = keychain.identity(for: ws) else { continue }
+                scopes.append((identity, ws.routing.surfaceId))
+            }
+
+            let linear = LinearClient()
+            let github = GitHubClient()
+            var okCount = 0
+            var firstError: String?
+
+            for (identity, surfaceId) in scopes {
+                guard let auth = keychain.authFor(identity: identity) else {
+                    if firstError == nil { firstError = "Missing credential for \(identity.label)" }
+                    continue
                 }
-                await MainActor.run { labelState = .done(teams.count) }
-            } catch {
-                Logger.onboarding.error("Label creation failed: \(error)")
-                await MainActor.run { labelState = .failed(error.localizedDescription) }
+                let cli: any IssueSourceClient = (identity.kind == .linear) ? linear : github
+                let config: SourceConfig
+                switch identity.kind {
+                case .linear:
+                    config = SourceConfig(
+                        source: .linear, displayName: identity.label,
+                        linearTeamKeys: [surfaceId], githubRepos: nil
+                    )
+                case .github:
+                    config = SourceConfig(
+                        source: .github, displayName: identity.label,
+                        linearTeamKeys: nil, githubRepos: [surfaceId]
+                    )
+                }
+                do {
+                    try await cli.bootstrapLabels(config: config, auth: auth)
+                    okCount += 1
+                } catch {
+                    Logger.onboarding.error("Bootstrap \(identity.label)/\(surfaceId) failed: \(error.localizedDescription)")
+                    if firstError == nil { firstError = error.localizedDescription }
+                }
+            }
+
+            await MainActor.run {
+                if scopes.isEmpty {
+                    labelState = .failed("No workspaces are configured. Go back and add one.")
+                } else if let err = firstError, okCount == 0 {
+                    labelState = .failed(err)
+                } else {
+                    // Partial success (some scopes failed) still advances —
+                    // the user has at least one working surface and can
+                    // fix the rest in Settings.
+                    labelState = .done(okCount)
+                }
             }
         }
     }
@@ -2413,7 +2603,7 @@ private struct LemonMdStep: View {
     var body: some View {
         StepShell(
             emoji: "📋",
-            title: "Team Instructions",
+            title: "🍋 Instructions",
             subtitle: "LEMON.md tells Lemon how your codebase works.\nClaude will draft one — edit before saving.",
             backAction: onBack,
             // Footer reflects the actual state:

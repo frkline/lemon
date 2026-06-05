@@ -271,6 +271,10 @@ struct SourceMark: View {
             }
         }
         .frame(width: size, height: size)
+        // Lock the intrinsic size — without .fixedSize() a SourceMark
+        // used as a SwiftUI Menu label can be re-stretched by the
+        // borderless menu style and balloon to fill the popover.
+        .fixedSize()
         .accessibilityHidden(true)
     }
 }

@@ -170,7 +170,9 @@ struct IdentityEditorPane: View {
         case .linear:
             return "Personal API Key. Workspace-scoped; never leaves Keychain."
         case .github:
-            return "Fine-grained PAT. Grant Issues (read + write) on the repos Lemon should watch."
+            // Match GitHub's exact phrasing from the fine-grained PAT
+            // Permissions section so the user can scan for it visually.
+            return "Required: Issues · Read and write. Pick the repos Lemon should watch."
         }
     }
 
