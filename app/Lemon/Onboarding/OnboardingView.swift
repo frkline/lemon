@@ -438,7 +438,11 @@ private struct TrackersStep: View {
 
     private var draftSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            routeThroughPicker
+            // Show the routing picker only when there are existing
+            // identities to choose between — otherwise the title + the
+            // credential block below already do the work, and the
+            // "+ Connect a tracker" row reads as a redundant button.
+            if !verifiedIdentities.isEmpty { routeThroughPicker }
             if draft.identityRef == nil { credentialBlock }
             if currentSurfaceList.isEmpty == false { surfacePicker }
             pathField
@@ -580,14 +584,18 @@ private struct TrackersStep: View {
                 verifyState = .idle
             }
         } label: {
-            HStack(spacing: 5) {
-                SourceGlyph(source: kind, size: 8)
+            HStack(spacing: 8) {
+                // Real brand mark on the segmented picker — this is the
+                // decisive choice on the page, so it earns the full logo
+                // instead of the typographic SourceGlyph.
+                SourceMark(source: kind, size: 16)
+                    .opacity(selected ? 1 : 0.55)
                 Text(label)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(selected ? .primary : .secondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
+            .padding(.vertical, 9)
             .background(
                 selected
                     ? AnyShapeStyle(kind.accent.opacity(0.14))
@@ -669,12 +677,17 @@ private struct TrackersStep: View {
 
     private var hostField: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("ENTERPRISE HOST")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(1.4)
-                .foregroundStyle(.tertiary)
-            TextField("api.github.acmecorp.com (blank = github.com)",
-                      text: $draft.newIdentityHost)
+            HStack(spacing: 4) {
+                Text("HOST")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                Text("leave as-is unless you're on GitHub Enterprise")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+                Spacer()
+            }
+            TextField("github.com", text: $draft.newIdentityHost)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
                 .padding(.vertical, 7).padding(.horizontal, 9)
@@ -796,25 +809,21 @@ private struct TrackersStep: View {
         }
     }
 
-    // Path field with Browse
+    // Path field — type or drag a folder onto it. The NSOpenPanel Browse
+    // button was removed because it auto-dismisses the popover when used
+    // from inside the in-app editor; keeping behavior consistent across
+    // onboarding + editor surfaces.
     private var pathField: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 4) {
                 Text("WORKSPACE PATH")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.4)
                     .foregroundStyle(.tertiary)
+                Text("drop a folder or paste a path")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
                 Spacer()
-                Button { pickFolder() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10))
-                        Text("Browse…")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
             }
             TextField("/path/to/repo", text: $draft.path)
                 .textFieldStyle(.plain)
@@ -824,6 +833,16 @@ private struct TrackersStep: View {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
                 )
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    for p in providers {
+                        _ = p.loadObject(ofClass: URL.self) { url, _ in
+                            if let url, url.hasDirectoryPath {
+                                DispatchQueue.main.async { draft.path = url.path }
+                            }
+                        }
+                    }
+                    return true
+                }
         }
     }
 

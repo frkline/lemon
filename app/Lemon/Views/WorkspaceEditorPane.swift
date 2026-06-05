@@ -96,19 +96,10 @@ struct WorkspaceEditorPane: View {
                     .font(.system(size: 8, weight: .bold))
                     .kerning(1.4)
                     .foregroundStyle(.tertiary)
+                Text("drop a folder or paste a path")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
                 Spacer()
-                Button {
-                    pickFolder()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10))
-                        Text("Browse…")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
             }
             HStack(spacing: 0) {
                 TextField(allReposInFolder ? "/path/to/projects" : "/path/to/repo", text: $path)
@@ -123,6 +114,16 @@ struct WorkspaceEditorPane: View {
             )
             .onChange(of: path) { _, newValue in
                 analyzePath(newValue)
+            }
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                for p in providers {
+                    _ = p.loadObject(ofClass: URL.self) { url, _ in
+                        if let url, url.hasDirectoryPath {
+                            DispatchQueue.main.async { path = url.path }
+                        }
+                    }
+                }
+                return true
             }
             if let suggestion {
                 suggestionChip(suggestion)

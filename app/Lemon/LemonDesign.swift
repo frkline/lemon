@@ -245,3 +245,32 @@ extension IssueRef {
         }
     }
 }
+
+/// High-emphasis brand mark — uses the actual Linear / GitHub logos shipped
+/// in the asset catalog. Use in places where the source is the headline of
+/// the surface (segmented picker, identity card eyebrow). For inline labels
+/// + chips, keep `SourceGlyph` (typographic, more editorial restraint).
+struct SourceMark: View {
+    let source: IssueSource
+    var size: CGFloat = 16
+
+    var body: some View {
+        Group {
+            switch source {
+            case .linear:
+                Image("LinearMark")
+                    .resizable()
+                    .scaledToFit()
+            case .github:
+                // Octicon is a template-rendering SVG — takes the current
+                // foreground color so it composes against any background.
+                Image("GitHubMark")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(.primary)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
