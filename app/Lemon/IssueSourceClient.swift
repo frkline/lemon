@@ -39,6 +39,12 @@ protocol IssueSourceClient: Sendable {
     // verification time — verifyCredential populates it. Optional `host`
     // for GitHub Enterprise; Linear ignores it.
     func verifyCredential(token: String, host: String?) async throws -> CredentialIdentity
+
+    /// Discover the surfaces this credential can reach. Linear: every team
+    /// the API key has access to. GitHub: every repo (public + private) the
+    /// PAT can see. Results populate `Identity.knownSurfaces` so the editor's
+    /// routing dropdowns are pre-filled from real data rather than free text.
+    func listSurfaces(token: String, host: String?) async throws -> [Surface]
 }
 
 extension IssueSourceClient {

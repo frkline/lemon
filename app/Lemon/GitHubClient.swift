@@ -438,10 +438,9 @@ extension GitHubClient: IssueSourceClient {
     }
 
     /// Fetch the authenticated user's repositories (public + private the PAT
-    /// can see), used to populate `Identity.knownSurfaces` for the editor.
-    /// Returns up to 100 entries; pagination is deferred until anyone runs
-    /// out of space.
-    func listUserRepos(token: String, host: String?) async throws -> [Surface] {
+    /// can see). Returns up to 100 entries sorted by recent push activity;
+    /// pagination deferred until anyone runs out of space.
+    func listSurfaces(token: String, host: String?) async throws -> [Surface] {
         let req = authedRequest(
             "GET",
             path: "/user/repos",

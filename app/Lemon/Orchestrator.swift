@@ -54,9 +54,60 @@ final class Orchestrator {
     private var runners: [UUID: WorktreeRunner] = [:]
 
     private func client(for identity: Identity) -> any IssueSourceClient {
-        switch identity.kind {
+        client(for: identity.kind)
+    }
+
+    /// Public client resolver — used by the editor when adding a new identity
+    /// (verify + list surfaces) before the identity is persisted.
+    func client(for kind: IdentityKind) -> any IssueSourceClient {
+        switch kind {
         case .linear: return linearClient
         case .github: return githubClient
+        }
+    }
+
+    /// Result of a verify-credential pass on a new identity. The identity
+    /// surface includes the verified login + a fresh surface list so the
+    /// editor can pre-populate the routing dropdown without a second hop.
+    struct IdentityVerifyResult {
+        let credential: CredentialIdentity
+        let surfaces: [Surface]
+    }
+
+    /// Verify a credential + pull the user's known surfaces in one shot.
+    /// Used by the identity-add flow in Settings.
+    func verifyAndDiscover(kind: IdentityKind, token: String, host: String?) async throws -> IdentityVerifyResult {
+        let cli = client(for: kind)
+        let credential = try await cli.verifyCredential(token: token, host: host)
+        let surfaces = (try? await cli.listSurfaces(token: token, host: host)) ?? []
+        return IdentityVerifyResult(credential: credential, surfaces: surfaces)
+    }
+
+    /// Re-fetch surfaces for an existing identity and persist the updated
+    /// `knownSurfaces` + `surfacesFetchedAt`. Silently logs on failure so a
+    /// refresh-button tap never breaks the editor.
+    func refreshSurfaces(identityId: UUID) async {
+        let keychain = KeychainStore.shared
+        guard let identity = keychain.identities.first(where: { $0.id == identityId }) else { return }
+        let secret = keychain.identitySecret(for: identityId)
+        guard !secret.isEmpty else {
+            Logger.orchestrator.info("Refresh surfaces skipped \(identity.label): no secret")
+            return
+        }
+        let cli = client(for: identity.kind)
+        do {
+            let surfaces = try await cli.listSurfaces(token: secret, host: identity.host)
+            var updated = identity
+            updated.knownSurfaces = surfaces
+            updated.surfacesFetchedAt = Date()
+            var all = keychain.identities
+            if let idx = all.firstIndex(where: { $0.id == identityId }) {
+                all[idx] = updated
+                keychain.identities = all
+                Logger.orchestrator.info("Refreshed \(surfaces.count) surfaces for \(identity.label)")
+            }
+        } catch {
+            Logger.orchestrator.error("Refresh surfaces failed for \(identity.label): \(error.localizedDescription)")
         }
     }
 

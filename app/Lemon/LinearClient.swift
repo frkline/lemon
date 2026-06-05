@@ -503,4 +503,13 @@ extension LinearClient: IssueSourceClient {
         let viewer = try await fetchViewer(apiKey: token)
         return CredentialIdentity(id: viewer.id, displayName: viewer.name, avatarUrl: viewer.avatarUrl)
     }
+
+    /// Discover every team this API key can see. Maps to `Surface` so the
+    /// editor's routing dropdowns can render `[Harpy Rocks (HRP)]` instead
+    /// of asking the user to type the prefix.
+    func listSurfaces(token: String, host: String?) async throws -> [Surface] {
+        _ = host
+        let teams = try await fetchTeams(apiKey: token)
+        return teams.map { Surface(id: $0.key, key: $0.key, displayName: $0.name) }
+    }
 }
