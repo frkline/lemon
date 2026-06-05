@@ -172,7 +172,7 @@ final class LinearClient: Sendable {
         // Fractional seconds in Linear timestamps (e.g. "...537Z") — the default
         // ISO8601 formatter rejects them. Opt in so we don't silently drop comments.
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return nodes.compactMap { node -> Comment? in
+        let parsed = nodes.compactMap { node -> Comment? in
             guard
                 let id   = node["id"]   as? String,
                 let body = node["body"] as? String,
@@ -181,6 +181,12 @@ final class LinearClient: Sendable {
             else { return nil }
             return Comment(id: id, body: body, createdAt: date)
         }
+        // Normalize to chronological order (oldest first). Linear returns
+        // newest-first by default — every downstream consumer (findLemonMarker
+        // iterates reversed; hasNewComment / fetchCommentsAfter compare indices)
+        // breaks subtly if the input order shifts. Sorting here once means the
+        // re-trigger pipeline reasons about time, not API quirks.
+        return parsed.sorted { $0.createdAt < $1.createdAt }
     }
 
     // Returns true if there is any comment on the issue that was created
