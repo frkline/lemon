@@ -281,23 +281,28 @@ private struct StepShell<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: 44)
+            Spacer().frame(height: 36)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Text(emoji)
-                    .font(.system(size: 44))
-                    .shadow(color: LD.lemon.opacity(0.4), radius: 16, y: 4)
+                    .font(.system(size: 38))
+                    .shadow(color: LD.lemon.opacity(0.35), radius: 14, y: 4)
+                // Editorial serif headline — same family the in-app editor
+                // uses for "HarpyRocks" / "Linear · @user". Onboarding speaks
+                // the same dialect the user will meet later.
                 Text(title)
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .font(.system(size: 24, weight: .bold, design: .serif))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
+                    .frame(maxWidth: 380)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer().frame(height: 24)
+            Spacer().frame(height: 22)
 
             ScrollView(showsIndicators: false) {
                 content
@@ -354,7 +359,7 @@ private struct TrackersStep: View {
         StepShell(
             emoji: "🍋",
             title: "Connect a tracker · pick a workspace",
-            subtitle: "Tell Lemon where your issues live and where the work happens on disk.\nAdd as many as you want; identities you've already connected stay available.",
+            subtitle: "Where issues live and where the work happens on disk. Add as many as you want.",
             nextLabel: "Continue",
             nextEnabled: canContinue,
             nextAction: onNext
@@ -496,6 +501,7 @@ private struct TrackersStep: View {
 
     private var connectNewOption: some View {
         let selected = draft.identityRef == nil
+        let isOnlyOption = verifiedIdentities.isEmpty
         return Button {
             withAnimation(LD.snappy) {
                 draft.identityRef = nil
@@ -505,21 +511,30 @@ private struct TrackersStep: View {
             HStack(spacing: 8) {
                 Image(systemName: "plus.circle")
                     .font(.system(size: 11))
-                Text(verifiedIdentities.isEmpty ? "Connect a tracker" : "Connect another identity")
+                    .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.tertiary))
+                Text(isOnlyOption ? "Connect a tracker" : "Connect another identity")
                     .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 0)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+                // Only show the radio-circle when there are other options to
+                // pick between. Solo "Connect a tracker" doesn't need the
+                // affordance — the credential block below already implies it.
+                if !isOnlyOption {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+                }
             }
-            .foregroundStyle(.primary)
             .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(selected ? LD.lemon.opacity(0.06) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 8))
+            .background(
+                selected ? AnyShapeStyle(LD.lemon.opacity(0.05)) : AnyShapeStyle(Color.clear),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(selected ? LD.lemon.opacity(0.30) : LD.lemon.opacity(0.18),
-                                  style: StrokeStyle(lineWidth: selected ? 0.5 : 1,
-                                                     dash: selected ? [] : [4, 3]))
+                    .strokeBorder(
+                        selected ? LD.lemon.opacity(0.28) : LD.lemon.opacity(0.18),
+                        lineWidth: 0.5
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -527,80 +542,172 @@ private struct TrackersStep: View {
 
     // Credential block — only when "Connect new" is the chosen route
     private var credentialBlock: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("", selection: $draft.sourceKind) {
-                Label("Linear", systemImage: "circle.hexagongrid.fill").tag(IssueSource.linear)
-                Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right").tag(IssueSource.github)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 220)
+        VStack(alignment: .leading, spacing: 12) {
+            sourceSegmented
+            tokenField
+            if draft.sourceKind == .github { hostField }
+            verifyRow
+        }
+        .padding(14)
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .overlay(
+            RoundedRectangle(cornerRadius: LD.r10)
+                .strokeBorder(draft.sourceKind.accent.opacity(0.18), lineWidth: 0.5)
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(draft.sourceKind == .linear ? "LINEAR API KEY" : "GITHUB PAT")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
-                SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
-                            text: $draft.newIdentityToken)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
-                    .onChange(of: draft.newIdentityToken) { _, _ in
-                        draft.newIdentityVerified = nil
-                        verifyState = .idle
+    /// Custom segmented control — replaces SwiftUI's `.pickerStyle(.segmented)`
+    /// which uses the system accent (default blue) and clashes with the lemon
+    /// brand. Each pill is hairline-bordered; the active one fills with the
+    /// source's editorial accent.
+    private var sourceSegmented: some View {
+        HStack(spacing: 0) {
+            sourcePill(.linear, label: "Linear")
+            sourcePill(.github, label: "GitHub")
+        }
+        .background(.primary.opacity(0.04), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5))
+    }
+
+    private func sourcePill(_ kind: IssueSource, label: String) -> some View {
+        let selected = draft.sourceKind == kind
+        return Button {
+            withAnimation(LD.snappy) {
+                draft.sourceKind = kind
+                draft.newIdentityToken = ""
+                draft.newIdentityHost = ""
+                draft.newIdentityVerified = nil
+                verifyState = .idle
+            }
+        } label: {
+            HStack(spacing: 5) {
+                SourceGlyph(source: kind, size: 8)
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(selected ? .primary : .secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(
+                selected
+                    ? AnyShapeStyle(kind.accent.opacity(0.14))
+                    : AnyShapeStyle(Color.clear),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    selected ? kind.accent.opacity(0.40) : Color.clear,
+                    lineWidth: 0.5
+                )
+            )
+            .padding(2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var tokenField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(draft.sourceKind == .linear ? "LINEAR API KEY" : "GITHUB PAT")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(.tertiary)
+            SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
+                        text: $draft.newIdentityToken)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(.vertical, 7).padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                )
+                .onChange(of: draft.newIdentityToken) { _, _ in
+                    draft.newIdentityVerified = nil
+                    verifyState = .idle
+                }
+        }
+    }
+
+    private var hostField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("ENTERPRISE HOST")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(.tertiary)
+            TextField("api.github.acmecorp.com (blank = github.com)",
+                      text: $draft.newIdentityHost)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(.vertical, 7).padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                )
+        }
+    }
+
+    private var verifyRow: some View {
+        let canVerify = !draft.newIdentityToken.isEmpty && verifyState != .verifying
+        return HStack(spacing: 10) {
+            Button {
+                Task { await verify() }
+            } label: {
+                HStack(spacing: 6) {
+                    if verifyState == .verifying {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 10))
                     }
+                    Text(verifyState == .verifying ? "Verifying…" : "Verify & sync")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(canVerify ? AnyShapeStyle(LD.citrus) : AnyShapeStyle(.tertiary))
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(
+                    canVerify
+                        ? AnyShapeStyle(LD.lemon)
+                        : AnyShapeStyle(Color.primary.opacity(0.06)),
+                    in: Capsule()
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        canVerify ? Color.clear : Color.primary.opacity(0.10),
+                        lineWidth: 0.5
+                    )
+                )
             }
+            .buttonStyle(.plain)
+            .disabled(!canVerify)
+            .animation(LD.smooth, value: canVerify)
 
-            if draft.sourceKind == .github {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("ENTERPRISE HOST")
-                        .font(.system(size: 9, weight: .bold))
-                        .kerning(1.4)
-                        .foregroundStyle(.tertiary)
-                    TextField("api.github.acmecorp.com (blank = github.com)",
-                              text: $draft.newIdentityHost)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12, design: .monospaced))
+            verifyStateChip
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var verifyStateChip: some View {
+        switch verifyState {
+        case .ok:
+            if let v = draft.newIdentityVerified {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(LD.statusDone)
+                    Text("@\(v.handle) · \(v.surfaces.count) surface\(v.surfaces.count == 1 ? "" : "s")")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(LD.statusDone)
                 }
             }
-
-            HStack(spacing: 8) {
-                Button {
-                    Task { await verify() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if verifyState == .verifying {
-                            ProgressView().scaleEffect(0.65)
-                        } else {
-                            Image(systemName: "bolt.fill")
-                        }
-                        Text(verifyState == .verifying ? "Verifying…" : "Verify & sync")
-                    }
-                }
-                .buttonStyle(LemonButtonStyle())
-                .disabled(draft.newIdentityToken.isEmpty || verifyState == .verifying)
-
-                switch verifyState {
-                case .ok:
-                    if let v = draft.newIdentityVerified {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.seal.fill")
-                                .foregroundStyle(LD.statusDone)
-                            Text("@\(v.handle) · \(v.surfaces.count) surface\(v.surfaces.count == 1 ? "" : "s")")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(LD.statusDone)
-                        }
-                    }
-                case .failed(let msg):
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.octagon.fill")
-                            .foregroundStyle(LD.coral)
-                        Text(msg).font(.system(size: 10)).foregroundStyle(LD.coral).lineLimit(2)
-                    }
-                default: EmptyView()
-                }
-                Spacer()
+        case .failed(let msg):
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.coral)
+                Text(msg).font(.system(size: 10)).foregroundStyle(LD.coral).lineLimit(2)
             }
+        default:
+            EmptyView()
         }
     }
 
@@ -659,15 +766,24 @@ private struct TrackersStep: View {
                     .foregroundStyle(.tertiary)
                 Spacer()
                 Button { pickFolder() } label: {
-                    Label("Browse…", systemImage: "folder")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 10))
+                        Text("Browse…")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
             TextField("/path/to/repo", text: $draft.path)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
+                .padding(.vertical, 7).padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                )
         }
     }
 
@@ -687,8 +803,13 @@ private struct TrackersStep: View {
                         .kerning(1.4)
                         .foregroundStyle(.tertiary)
                     TextField("e.g. memory", text: $draft.homeRepo)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
+                        .padding(.vertical, 7).padding(.horizontal, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                        )
                 }
                 .padding(.leading, 20)
             }
