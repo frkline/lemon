@@ -179,6 +179,19 @@ final class LinearClient: Sendable {
         return idx < comments.count - 1
     }
 
+    // Returns the bodies of all comments posted after the given comment ID
+    // (exclusive). Used on re-trigger to surface human revision requests into
+    // LEMON_CONTEXT.md — without this, Claude reads only the original issue
+    // body on a re-run and concludes the task is already done.
+    func fetchCommentsAfter(issueId: String, afterCommentId: String, apiKey: String) async throws -> [String] {
+        let comments = try await fetchComments(issueId: issueId, apiKey: apiKey)
+        guard let idx = comments.firstIndex(where: { $0.id == afterCommentId }) else {
+            return []
+        }
+        let after = comments.suffix(from: comments.index(after: idx))
+        return after.map { $0.body }
+    }
+
     // Finds the Lemon HTML marker in the issue's comments and parses it.
     func findLemonMarker(issueId: String, apiKey: String) async throws -> LemonMarker? {
         let comments = try await fetchComments(issueId: issueId, apiKey: apiKey)

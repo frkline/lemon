@@ -89,12 +89,34 @@ final class WorktreeRunner: @unchecked Sendable {
         // Write issue context for Claude. Team instructions from {homeRepo}/LEMON.md come first.
         let lemonMdPath = homeRepo.isEmpty ? nil : "\(workspace.path)/\(homeRepo)/LEMON.md"
         let devPort = Self.devPort(for: identifier)
+
+        // On re-trigger, pull every comment posted after the Lemon Report
+        // marker — those are the human's revision requests. Without this
+        // context, Claude reads only the original issue body and concludes
+        // the task is already done.
+        var revisionComments: [String] = []
+        if let marker = retrigger {
+            do {
+                revisionComments = try await linear.fetchCommentsAfter(
+                    issueId: issue.id,
+                    afterCommentId: marker.commentId,
+                    apiKey: apiKey
+                )
+                if !revisionComments.isEmpty {
+                    log("[lemon] re-trigger with \(revisionComments.count) revision comment(s)")
+                }
+            } catch {
+                log("[lemon] failed to fetch revision comments: \(error)", level: .error)
+            }
+        }
+
         writeContext(
             to: sessionPath,
             issue: issue,
             repos: workspace.allReposInFolder ? repos : [],
             lemonMdPath: lemonMdPath,
-            devPort: devPort
+            devPort: devPort,
+            revisionComments: revisionComments
         )
 
         // Update Linear labels.
@@ -296,7 +318,8 @@ final class WorktreeRunner: @unchecked Sendable {
         issue: LinearIssue,
         repos: [(name: String, repoPath: String)],
         lemonMdPath: String?,
-        devPort: Int
+        devPort: Int,
+        revisionComments: [String] = []
     ) {
         var content = ""
 
@@ -314,6 +337,27 @@ final class WorktreeRunner: @unchecked Sendable {
         if let desc = issue.description, !desc.isEmpty {
             content += desc.trimmingCharacters(in: .whitespacesAndNewlines)
             content += "\n\n"
+        }
+
+        // Re-trigger context — comments posted after the last Lemon Report.
+        // Without this section, Claude reads only the original issue body
+        // on a re-run and concludes the task is already done. Each entry is
+        // the revision the human is asking for; treat them as the authoritative
+        // *current* request, layered on top of the original issue description.
+        if !revisionComments.isEmpty {
+            content += "## 🔄 Revision Request (this is a re-run — read carefully)\n\n"
+            content += "Your previous PR for this issue has already been opened. "
+            content += "A human has replied to the Lemon Report comment asking for changes. "
+            content += "Treat the items below as the authoritative current request — "
+            content += "they layer on top of (and supersede where applicable) the original "
+            content += "issue description above.\n\n"
+            for (i, comment) in revisionComments.enumerated() {
+                let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                content += "### Revision \(i + 1)\n\n"
+                content += trimmed
+                content += "\n\n"
+            }
         }
 
         // Available repos (multi-repo mode).
