@@ -30,38 +30,31 @@ final class KeychainStore: @unchecked Sendable {
     // userId and workspaceConfig are non-sensitive and stored in UserDefaults.
 
     var linearApiKey: String {
-        get {
-            if memory != nil { return memory?["linearApiKey"] ?? "" }
-            // Env var bypass — for unattended iteration loops and recursive
-            // Claude-Code-driving-Lemon sessions. Both forms skip Keychain
-            // entirely, which avoids the OS prompt on first launch and keeps
-            // tests/scripts headless. Direct value wins over file path.
-            //   LEMON_LINEAR_KEY=lin_...       — value inline (less safe)
-            //   LEMON_LINEAR_KEY_FILE=~/path   — read from disk (file perms = auth)
-            if let bypass = Self.envKeyBypass() { return bypass }
-            if Self.isTestRun || Self.isMockMode { return "" }
-            return readKeychain("lemon-linear-key") ?? ""
-        }
-        set {
-            if memory != nil { memory?["linearApiKey"] = newValue; return }
-            if Self.isTestRun || Self.isMockMode { return }
-            // Don't mutate the real Keychain entry when env-var bypass is in
-            // play — the user is explicitly running with an external key, so
-            // writes should be no-ops to avoid polluting their stored secret.
-            if Self.envKeyBypass() != nil { return }
-            writeKeychain("lemon-linear-key", value: newValue)
-        }
+        get { credential(memoryKey: "linearApiKey", keychainService: "lemon-linear-key", envPrefix: "LEMON_LINEAR_KEY") }
+        set { writeCredential(memoryKey: "linearApiKey", keychainService: "lemon-linear-key", envPrefix: "LEMON_LINEAR_KEY", value: newValue) }
     }
 
-    // Returns the bypass value (from LEMON_LINEAR_KEY or LEMON_LINEAR_KEY_FILE)
-    // or nil if neither env var is set. Trims whitespace and expands ~ in paths.
-    static func envKeyBypass() -> String? {
+    var githubToken: String {
+        get { credential(memoryKey: "githubToken", keychainService: "lemon-github-token", envPrefix: "LEMON_GITHUB_TOKEN") }
+        set { writeCredential(memoryKey: "githubToken", keychainService: "lemon-github-token", envPrefix: "LEMON_GITHUB_TOKEN", value: newValue) }
+    }
+
+    // Returns the bypass value (from {prefix} or {prefix}_FILE) or nil if
+    // neither env var is set. Trims whitespace and expands ~ in paths.
+    //
+    // Used for unattended iteration loops and recursive Claude-Code-driving-Lemon
+    // sessions. Both forms skip Keychain entirely, which avoids the OS prompt
+    // on first launch and keeps tests/scripts headless. Direct value wins
+    // over file path.
+    //   {prefix}=lin_...       — value inline (less safe)
+    //   {prefix}_FILE=~/path   — read from disk (file perms = auth)
+    static func envBypass(prefix: String) -> String? {
         let env = ProcessInfo.processInfo.environment
-        if let direct = env["LEMON_LINEAR_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let direct = env[prefix]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !direct.isEmpty {
             return direct
         }
-        if let raw = env["LEMON_LINEAR_KEY_FILE"], !raw.isEmpty {
+        if let raw = env["\(prefix)_FILE"], !raw.isEmpty {
             let path = (raw as NSString).expandingTildeInPath
             if let contents = try? String(contentsOfFile: path, encoding: .utf8) {
                 let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,6 +62,28 @@ final class KeychainStore: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    // Back-compat shim for callers that haven't migrated to envBypass(prefix:).
+    static func envKeyBypass() -> String? { envBypass(prefix: "LEMON_LINEAR_KEY") }
+
+    // Shared credential read/write so Linear + GitHub follow identical
+    // env-bypass + in-memory + Keychain semantics.
+    private func credential(memoryKey: String, keychainService: String, envPrefix: String) -> String {
+        if memory != nil { return memory?[memoryKey] ?? "" }
+        if let bypass = Self.envBypass(prefix: envPrefix) { return bypass }
+        if Self.isTestRun || Self.isMockMode { return "" }
+        return readKeychain(keychainService) ?? ""
+    }
+
+    private func writeCredential(memoryKey: String, keychainService: String, envPrefix: String, value: String) {
+        if memory != nil { memory?[memoryKey] = value; return }
+        if Self.isTestRun || Self.isMockMode { return }
+        // Don't mutate the real Keychain entry when env-var bypass is in
+        // play — the user is explicitly running with an external key, so
+        // writes should be no-ops to avoid polluting their stored secret.
+        if Self.envBypass(prefix: envPrefix) != nil { return }
+        writeKeychain(keychainService, value: value)
     }
 
     var linearUserId: String {
@@ -79,6 +94,17 @@ final class KeychainStore: @unchecked Sendable {
         set {
             if memory != nil { memory?["linearUserId"] = newValue; return }
             UserDefaults.standard.set(newValue, forKey: "lemon-linear-user-id")
+        }
+    }
+
+    var githubUser: String {
+        get {
+            if memory != nil { return memory?["githubUser"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-github-user") ?? ""
+        }
+        set {
+            if memory != nil { memory?["githubUser"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-github-user")
         }
     }
 
@@ -93,12 +119,142 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - Workspace pairs (replacement for workspaceRepos)
+    //
+    // The pair list lives under "lemon-workspace-pairs". On first read after
+    // the multi-source upgrade we migrate any legacy "lemon-workspace-config"
+    // into a single Linear-source pair list and stamp the migration sentinel.
+    //
+    // Cap: 10 pairs. Enforced on the setter; the UI also disables "Add"
+    // buttons at the cap. The number is soft — raise it if real users hit it,
+    // but it bounds per-poll fan-out and keeps the Settings list legible.
+
+    static let maxPairs = 10
+
+    var pairs: [WorkspacePair] {
+        get {
+            migrateLegacyWorkspaceIfNeeded()
+            let json = pairsJSON
+            guard !json.isEmpty, let data = json.data(using: .utf8) else { return [] }
+            return (try? JSONDecoder().decode([WorkspacePair].self, from: data)) ?? []
+        }
+        set {
+            let clipped = Array(newValue.prefix(Self.maxPairs))
+            guard let data = try? JSONEncoder().encode(clipped),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            pairsJSON = json
+        }
+    }
+
+    private var pairsJSON: String {
+        get {
+            if memory != nil { return memory?["workspacePairs"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-workspace-pairs") ?? ""
+        }
+        set {
+            if memory != nil { memory?["workspacePairs"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-workspace-pairs")
+        }
+    }
+
+    private var migrationSentinel: String {
+        get {
+            if memory != nil { return memory?["pairsMigratedAt"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-workspace-config-migrated-at") ?? ""
+        }
+        set {
+            if memory != nil { memory?["pairsMigratedAt"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-workspace-config-migrated-at")
+        }
+    }
+
+    // Idempotent. After the first successful migration the sentinel keeps it
+    // off; deleting "lemon-workspace-pairs" without clearing the sentinel
+    // does NOT cause a re-migration (the user has explicitly emptied their
+    // pair list).
+    func migrateLegacyWorkspaceIfNeeded() {
+        guard migrationSentinel.isEmpty else { return }
+        let legacy = workspaceRepos
+        guard !legacy.isEmpty else {
+            // No legacy data → mark migrated so we don't keep checking.
+            migrationSentinel = ISO8601DateFormatter().string(from: Date())
+            return
+        }
+        let linearSource = SourceConfig(
+            source: .linear,
+            displayName: "Linear",
+            linearTeamKeys: legacy.map { $0.issuePrefix },
+            githubRepos: nil
+        )
+        let migrated = legacy.map { repo in
+            WorkspacePair(
+                source: linearSource,
+                workspace: WorkspaceMapping(
+                    matchKey: repo.issuePrefix,
+                    path: repo.path,
+                    allReposInFolder: repo.allReposInFolder,
+                    homeRepo: repo.homeRepo
+                )
+            )
+        }
+        if let data = try? JSONEncoder().encode(migrated),
+           let json = String(data: data, encoding: .utf8) {
+            pairsJSON = json
+            migrationSentinel = ISO8601DateFormatter().string(from: Date())
+        }
+    }
+
+    // Pair lookup keyed by IssueRef. Linear refs match by team key prefix
+    // (the matchKey); GitHub refs match by "owner/repo".
+    func pair(for ref: IssueRef) -> WorkspacePair? {
+        switch ref.scope {
+        case .linearTeam:
+            let needle = ref.identifierPrefix.lowercased()
+            return pairs.first { pair in
+                pair.source.source == .linear &&
+                pair.workspace.matchKey.lowercased() == needle
+            }
+        case .githubRepo(let owner, let repo, _):
+            let needle = "\(owner)/\(repo)".lowercased()
+            return pairs.first { pair in
+                pair.source.source == .github &&
+                pair.workspace.matchKey.lowercased() == needle
+            }
+        }
+    }
+
+    // SourceAuth assembled per pair from the credentials in this store.
+    // Nil if the credential for the pair's source is missing.
+    func authFor(pair: WorkspacePair) -> SourceAuth? {
+        switch pair.source.source {
+        case .linear:
+            guard !linearApiKey.isEmpty, !linearUserId.isEmpty else { return nil }
+            return .linear(apiKey: linearApiKey, userId: linearUserId)
+        case .github:
+            guard !githubToken.isEmpty, !githubUser.isEmpty else { return nil }
+            return .github(pat: githubToken, login: githubUser)
+        }
+    }
+
+    // Looser than `authFor` — used by `isConfigured` to gate UI without
+    // demanding a fully-resolved principal id. linearUserId / githubUser are
+    // hydrated at first verifyCredential and during onboarding.
+    private func credentialPresent(for pair: WorkspacePair) -> Bool {
+        switch pair.source.source {
+        case .linear: return !linearApiKey.isEmpty
+        case .github: return !githubToken.isEmpty
+        }
+    }
+
     var isConfigured: Bool {
         if Self.isMockMode { return true }
         // Real Keychain store in test mode: always false to prevent the Keychain dialog
         // when there's no user to click it. In-memory stores (makeForTesting) are unaffected.
         if memory == nil && Self.isTestRun { return false }
-        guard !linearApiKey.isEmpty, !workspaceRepos.isEmpty else { return false }
+        let configuredPairs = pairs
+        guard !configuredPairs.isEmpty else { return false }
+        // Every configured pair must have its source credential present.
+        for pair in configuredPairs where !credentialPresent(for: pair) { return false }
         // Local AI is required AND its files must still exist on disk. Without
         // the disk-existence check, a user who upgraded across a dirName
         // change (or deleted ~/Library/Application Support/Lemon/Models) would
@@ -111,7 +267,11 @@ final class KeychainStore: @unchecked Sendable {
             && fm.isExecutableFile(atPath: swiftLMPath)
     }
 
-    // MARK: - Workspace repos helpers
+    // MARK: - Legacy workspace repos helpers
+    //
+    // Kept one release for any external callers (older onboarding paths,
+    // tests that pre-date the pair model). Reads decode the legacy JSON
+    // directly; writes still target the legacy key. `pairs` is authoritative.
 
     var workspaceRepos: [WorkspaceRepo] {
         guard let data = workspaceConfig.data(using: .utf8) else { return [] }
@@ -185,8 +345,13 @@ final class KeychainStore: @unchecked Sendable {
         if memory != nil { memory = [:]; return }
         SecItemDelete([kSecClass: kSecClassGenericPassword,
                        kSecAttrService: "lemon-linear-key"] as CFDictionary)
+        SecItemDelete([kSecClass: kSecClassGenericPassword,
+                       kSecAttrService: "lemon-github-token"] as CFDictionary)
         UserDefaults.standard.removeObject(forKey: "lemon-linear-user-id")
+        UserDefaults.standard.removeObject(forKey: "lemon-github-user")
         UserDefaults.standard.removeObject(forKey: "lemon-workspace-config")
+        UserDefaults.standard.removeObject(forKey: "lemon-workspace-pairs")
+        UserDefaults.standard.removeObject(forKey: "lemon-workspace-config-migrated-at")
         UserDefaults.standard.removeObject(forKey: "lemon-swiftlm-path")
         UserDefaults.standard.removeObject(forKey: "lemon-gemma-model-path")
         UserDefaults.standard.removeObject(forKey: "lemon-ai-enabled")

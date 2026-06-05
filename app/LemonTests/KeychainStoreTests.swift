@@ -197,4 +197,148 @@ final class KeychainStoreTests: XCTestCase {
             XCTAssertNil(KeychainStore.envKeyBypass())
         }
     }
+
+    // MARK: - GitHub credential
+
+    func testGithubTokenRoundTrip() {
+        let s = store()
+        s.githubToken = "ghp_test_value"
+        XCTAssertEqual(s.githubToken, "ghp_test_value")
+    }
+
+    func testGithubUserRoundTrip() {
+        let s = store()
+        s.githubUser = "frkline"
+        XCTAssertEqual(s.githubUser, "frkline")
+    }
+
+    func testEnvBypassGithubTokenDirect() {
+        withEnv(["LEMON_GITHUB_TOKEN": "ghp_env_direct"]) {
+            XCTAssertEqual(KeychainStore.envBypass(prefix: "LEMON_GITHUB_TOKEN"), "ghp_env_direct")
+        }
+    }
+
+    func testEnvBypassGithubTokenFile() throws {
+        let path = NSTemporaryDirectory() + "kc-gh-\(UUID().uuidString)"
+        try "ghp_from_file\n".write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        withEnv(["LEMON_GITHUB_TOKEN": nil, "LEMON_GITHUB_TOKEN_FILE": path]) {
+            XCTAssertEqual(KeychainStore.envBypass(prefix: "LEMON_GITHUB_TOKEN"), "ghp_from_file")
+        }
+    }
+
+    // MARK: - Workspace pairs
+
+    private func mapping(matchKey: String, path: String = "/tmp/repo") -> WorkspaceMapping {
+        WorkspaceMapping(matchKey: matchKey, path: path)
+    }
+
+    private func linearPair(matchKey: String, teamKeys: [String]? = nil) -> WorkspacePair {
+        WorkspacePair(
+            source: SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: teamKeys ?? [matchKey]),
+            workspace: mapping(matchKey: matchKey)
+        )
+    }
+
+    private func githubPair(repo: String, path: String = "/tmp/repo") -> WorkspacePair {
+        WorkspacePair(
+            source: SourceConfig(source: .github, displayName: "GitHub", githubRepos: [repo]),
+            workspace: mapping(matchKey: repo, path: path)
+        )
+    }
+
+    func testPairsRoundTrip() {
+        let s = store()
+        s.pairs = [linearPair(matchKey: "HRP"), githubPair(repo: "acme/widgets")]
+        XCTAssertEqual(s.pairs.count, 2)
+        XCTAssertEqual(s.pairs[0].workspace.matchKey, "HRP")
+        XCTAssertEqual(s.pairs[1].source.source, .github)
+    }
+
+    func testPairCapEnforcedAtTen() {
+        let s = store()
+        let many = (0..<15).map { linearPair(matchKey: "PFX\($0)") }
+        s.pairs = many
+        XCTAssertEqual(s.pairs.count, KeychainStore.maxPairs,
+                       "Setter must clip to maxPairs.")
+    }
+
+    func testPairLookupForLinearRef() {
+        let s = store()
+        s.pairs = [linearPair(matchKey: "HRP"), linearPair(matchKey: "LEM")]
+        let ref = IssueRef(
+            id: "n1", identifier: "LEM-42", title: "x", description: nil,
+            labelNames: [], scope: .linearTeam(id: "team1")
+        )
+        XCTAssertEqual(s.pair(for: ref)?.workspace.matchKey, "LEM")
+    }
+
+    func testPairLookupForGitHubRef() {
+        let s = store()
+        s.pairs = [linearPair(matchKey: "HRP"), githubPair(repo: "acme/widgets")]
+        let ref = IssueRef(
+            id: "acme/widgets#7", identifier: "acme/widgets#7", title: "x", description: nil,
+            labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 7)
+        )
+        XCTAssertEqual(s.pair(for: ref)?.workspace.matchKey, "acme/widgets")
+    }
+
+    func testPairLookupIsCaseInsensitive() {
+        let s = store()
+        s.pairs = [githubPair(repo: "Acme/Widgets")]
+        let ref = IssueRef(
+            id: "acme/widgets#1", identifier: "acme/widgets#1", title: "x", description: nil,
+            labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 1)
+        )
+        XCTAssertNotNil(s.pair(for: ref), "owner/repo match should be case-insensitive.")
+    }
+
+    // MARK: - Migration
+
+    func testMigrationFromLegacyWorkspaceConfig() {
+        let s = store()
+        s.saveWorkspaceRepos([
+            WorkspaceRepo(issuePrefix: "HRP", path: "/tmp/a"),
+            WorkspaceRepo(issuePrefix: "LEM", path: "/tmp/b"),
+        ])
+        XCTAssertTrue(s.pairs.count == 2, "Legacy config should migrate to two Linear-source pairs on first read.")
+        XCTAssertTrue(s.pairs.allSatisfy { $0.source.source == .linear })
+        XCTAssertEqual(s.pairs.map(\.workspace.matchKey).sorted(), ["HRP", "LEM"])
+    }
+
+    func testMigrationIsIdempotent() {
+        let s = store()
+        s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "HRP", path: "/tmp/a")])
+        _ = s.pairs   // triggers migration
+        // Mutate pairs to simulate user editing
+        s.pairs = [githubPair(repo: "acme/widgets")]
+        // A second read must NOT re-overlay the legacy Linear pair on top.
+        XCTAssertEqual(s.pairs.count, 1)
+        XCTAssertEqual(s.pairs.first?.source.source, .github)
+    }
+
+    func testMigrationWithNoLegacyMarksSentinel() {
+        let s = store()
+        // No saveWorkspaceRepos call → legacy is empty
+        _ = s.pairs
+        // Subsequent writes shouldn't be disturbed
+        s.pairs = [linearPair(matchKey: "HRP")]
+        XCTAssertEqual(s.pairs.count, 1)
+    }
+
+    func testAuthForLinearPairRequiresKeyAndUserId() {
+        let s = store()
+        let pair = linearPair(matchKey: "HRP")
+        XCTAssertNil(s.authFor(pair: pair))
+        s.linearApiKey = "lin_t"; s.linearUserId = "u1"
+        XCTAssertNotNil(s.authFor(pair: pair))
+    }
+
+    func testAuthForGitHubPairRequiresTokenAndLogin() {
+        let s = store()
+        let pair = githubPair(repo: "acme/widgets")
+        XCTAssertNil(s.authFor(pair: pair))
+        s.githubToken = "ghp_t"; s.githubUser = "frkline"
+        XCTAssertNotNil(s.authFor(pair: pair))
+    }
 }
