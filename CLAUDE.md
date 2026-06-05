@@ -70,12 +70,13 @@ Re-trigger: human replies to the Lemon Report comment on a `🍋 Complete` issue
 WorktreeRunner launches Claude via a shell script opened in Terminal.app:
 
 ```bash
-claude --enable-auto-mode --remote-control
+claude --permission-mode auto --remote-control -- '<kickoff prompt>'
 ```
 
-**Both flags are required — do not drop either one:**
-- `--enable-auto-mode` — runs non-interactively without confirmation prompts
-- `--remote-control` — sends push notifications to the user's phone when Claude is waiting for input
+**All three pieces matter — do not drop any:**
+- `--permission-mode auto` — Claude's classifier decides per-prompt: routine tool use (Bash inside the worktree, file edits, gh/git commands) is auto-accepted; destructive or ambiguous calls still prompt. This is the right balance for Lemon's `/tmp/lemon-{id}` worktree, which has internet access. Use `bypassPermissions` only if you specifically want zero prompts ever (riskier). (Earlier docs called this `--enable-auto-mode`; that flag does not exist — the real surface is `--permission-mode <auto|bypassPermissions|acceptEdits|...>` per `claude --help`.)
+- `--remote-control` — sends push notifications to the user's phone when Claude is waiting for input.
+- `--` separator before the trailing kickoff prompt. Without it, `--remote-control` (whose `[name]` argument is optional) eats the prompt as its session name and Claude opens an empty REPL.
 
 ## Build
 

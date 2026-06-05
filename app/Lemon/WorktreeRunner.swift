@@ -504,7 +504,7 @@ final class WorktreeRunner: @unchecked Sendable {
         [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && claude \(mcpFlag) --enable-auto-mode --remote-control -- '\(kickoffPrompt)'
+        cd '\(sessionPath)' && claude \(mcpFlag) --permission-mode auto --remote-control -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
