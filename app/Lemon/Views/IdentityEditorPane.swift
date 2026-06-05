@@ -120,10 +120,22 @@ struct IdentityEditorPane: View {
 
     private var credentialCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(isGitHub ? "PERSONAL ACCESS TOKEN" : "API KEY")
-                .font(.system(size: 8, weight: .bold))
-                .kerning(1.4)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                Text(isGitHub ? "PERSONAL ACCESS TOKEN" : "API KEY")
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                Link(destination: providerURL) {
+                    HStack(spacing: 2) {
+                        Text("create one")
+                            .font(.system(size: 8, weight: .medium))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 6, weight: .bold))
+                    }
+                    .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
             SecureField(
                 isGitHub ? "ghp_…" : "lin_api_…",
                 text: $token
@@ -137,6 +149,28 @@ struct IdentityEditorPane: View {
                     .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
             )
             .onChange(of: token) { _, _ in verifyState = .idle }
+            Text(providerHint)
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var providerURL: URL {
+        switch kind {
+        case .linear:
+            return URL(string: "https://linear.app/settings/api")!
+        case .github:
+            return URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=Lemon")!
+        }
+    }
+
+    private var providerHint: String {
+        switch kind {
+        case .linear:
+            return "Personal API Key. Workspace-scoped; never leaves Keychain."
+        case .github:
+            return "Classic PAT, `repo` scope. The link pre-fills it. Fine-grained tokens also work if you'd rather lock to specific repos."
         }
     }
 

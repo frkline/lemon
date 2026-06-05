@@ -607,10 +607,22 @@ private struct TrackersStep: View {
 
     private var tokenField: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(draft.sourceKind == .linear ? "LINEAR API KEY" : "GITHUB PAT")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(1.4)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                Text(draft.sourceKind == .linear ? "LINEAR API KEY" : "GITHUB PAT")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                Link(destination: tokenProviderURL) {
+                    HStack(spacing: 2) {
+                        Text("create one")
+                            .font(.system(size: 9, weight: .medium))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 7, weight: .bold))
+                    }
+                    .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
             SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
                         text: $draft.newIdentityToken)
                 .textFieldStyle(.plain)
@@ -624,6 +636,34 @@ private struct TrackersStep: View {
                     draft.newIdentityVerified = nil
                     verifyState = .idle
                 }
+            Text(tokenProviderHint)
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Direct link to the right token creation page per source. For GitHub we
+    /// pre-fill the classic `repo` scope + a "Lemon" description so the user
+    /// just clicks Generate. Classic > fine-grained for Lemon's use case
+    /// (broad access via one scope checkbox instead of selecting individual
+    /// repos at creation time, which is friction for a tool that polls
+    /// multiple identities' repos).
+    private var tokenProviderURL: URL {
+        switch draft.sourceKind {
+        case .linear:
+            return URL(string: "https://linear.app/settings/api")!
+        case .github:
+            return URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=Lemon")!
+        }
+    }
+
+    private var tokenProviderHint: String {
+        switch draft.sourceKind {
+        case .linear:
+            return "Personal API Key. Workspace-scoped; never leaves Keychain."
+        case .github:
+            return "Classic PAT, `repo` scope. The link pre-fills it. Fine-grained tokens work too if you'd rather lock to specific repos."
         }
     }
 
