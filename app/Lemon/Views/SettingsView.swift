@@ -720,64 +720,74 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 // Toggle row
                 HStack(spacing: 12) {
-                    iconBox("network", tint: running ? LD.lemon : .secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Expose to Claude Code")
-                            .font(.system(size: 13))
+                    configGlyph("network", tint: running ? LD.statusDone : .secondary.opacity(0.6))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("Expose to Claude Code")
+                                .font(.system(size: 12, weight: .semibold))
+                            Spacer()
+                            mcpRunningChip(running: running)
+                        }
                         Text(running
-                             ? "Running on \(endpoint) — localhost only"
-                             : "Off — flip on to let another Claude observe and steer Lemon sessions")
-                            .font(.system(size: 11))
+                             ? endpoint
+                             : "Flip on to let another Claude observe and steer Lemon sessions.")
+                            .font(.system(size: 10, design: running ? .monospaced : .default))
                             .foregroundStyle(.tertiary)
                             .lineLimit(2)
                             .truncationMode(.tail)
                     }
-                    Spacer(minLength: 8)
                     Toggle("", isOn: $mcpEnabled)
                         .labelsHidden()
                         .onChange(of: mcpEnabled) { _, enabled in
                             applyMcpToggle(enabled: enabled)
                         }
                 }
-                .padding(.horizontal, 14).padding(.vertical, 10)
+                .padding(.horizontal, 14).padding(.vertical, 11)
 
                 if mcpEnabled {
-                    Divider().padding(.leading, 54)
+                    Divider().padding(.leading, 56).opacity(0.6)
 
                     // Port row
                     HStack(spacing: 12) {
-                        iconBox("number", tint: .secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Port").font(.system(size: 13))
-                            Text("Default 8765 — change requires a quick toggle off/on")
-                                .font(.system(size: 11))
+                        configGlyph("number", tint: .secondary.opacity(0.7))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Port")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Default 8765 — toggle off/on to apply changes.")
+                                .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer(minLength: 8)
                         TextField("8765", value: $mcpPort, format: .number.grouping(.never))
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .frame(width: 80)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 11, design: .monospaced))
+                            .multilineTextAlignment(.center)
+                            .frame(width: 60)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                            )
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .padding(.horizontal, 14).padding(.vertical, 11)
 
-                    Divider().padding(.leading, 54)
+                    Divider().padding(.leading, 56).opacity(0.6)
 
                     // Copy config row
                     HStack(spacing: 12) {
-                        iconBox("doc.on.clipboard", tint: .secondary)
-                        VStack(alignment: .leading, spacing: 1) {
+                        configGlyph("doc.on.clipboard", tint: .secondary.opacity(0.7))
+                        VStack(alignment: .leading, spacing: 3) {
                             Text("Add to Claude Code")
-                                .font(.system(size: 13))
+                                .font(.system(size: 12, weight: .semibold))
                             if let hint = mcpCopyHint {
                                 Text(hint)
-                                    .font(.system(size: 11))
+                                    .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(LD.statusDone)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                             } else {
                                 Text("Copies a JSON snippet for ~/.claude.json")
-                                    .font(.system(size: 11))
+                                    .font(.system(size: 10))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
@@ -832,10 +842,11 @@ struct SettingsView: View {
 
     private var aiTestRow: some View {
         HStack(spacing: 12) {
-            iconBox("wand.and.stars", tint: aiTestTint)
-            VStack(alignment: .leading, spacing: 4) {
+            configGlyph("wand.and.stars", tint: aiTestTint)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("Self-test").font(.system(size: 13))
+                    Text("Self-test")
+                        .font(.system(size: 12, weight: .semibold))
                     aiTestBadge
                 }
                 // Failed states often carry a multi-line SwiftLM log tail —
@@ -967,25 +978,75 @@ struct SettingsView: View {
 
     private func aiRow(icon: String, label: String, path: String, ready: Bool) -> some View {
         HStack(spacing: 12) {
-            iconBox(icon, tint: ready ? LD.lemon : .secondary)
-            VStack(alignment: .leading, spacing: 4) {
+            // Editorial: a small mono SF Symbol in a hairline-bordered chip,
+            // matching the SourceGlyph weight rather than the old colored
+            // iconBox tile.
+            configGlyph(icon, tint: ready ? LD.statusDone : LD.coral.opacity(0.55))
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(label).font(.system(size: 13))
-                    if ready {
-                        readyBadge
-                    } else {
-                        missingBadge
-                    }
+                    Text(label)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    configStatusChip(ready: ready)
                 }
                 Text(path)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
-            Spacer()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
+    }
+
+    /// Editorial config glyph — same hairline-border treatment as `SourceGlyph`,
+    /// just using an SF Symbol instead of a typographic mark. Used by the
+    /// Local AI + MCP rows so they read in the same language as the rest
+    /// of the Settings pane.
+    private func configGlyph(_ symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: 22, height: 18)
+            .background(Capsule().fill(tint.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(tint.opacity(0.22), lineWidth: 0.5))
+    }
+
+    /// Live / off / missing chip matching `workspaceLiveChip` in shape.
+    @ViewBuilder
+    private func configStatusChip(ready: Bool) -> some View {
+        if ready {
+            HStack(spacing: 3) {
+                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
+                Text("ready")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.statusDone)
+            }
+        } else {
+            HStack(spacing: 3) {
+                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Text("missing")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.coral)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mcpRunningChip(running: Bool) -> some View {
+        if running {
+            HStack(spacing: 3) {
+                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
+                Text("running")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.statusDone)
+            }
+        } else {
+            Text("off")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.quaternary)
+        }
     }
 
     private var readyBadge: some View {
