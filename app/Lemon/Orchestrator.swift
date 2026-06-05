@@ -2,10 +2,10 @@ import Foundation
 import SwiftUI
 import os
 
-// Per-pair diagnostic snapshot — surfaced in Settings so the user can see
-// at a glance whether each configured source is healthy. Updated after every
-// pollPair call (success or failure).
-struct PairStatus: Equatable {
+// Per-workspace diagnostic snapshot — surfaced in Settings so the user can
+// see at a glance whether each configured workspace is healthy. Updated
+// after every pollWorkspace call (success or failure).
+struct WorkspaceStatus: Equatable {
     var lastPolledAt: Date?
     var triggerCount: Int = 0
     var completeCount: Int = 0
@@ -25,6 +25,9 @@ struct PairStatus: Equatable {
     }
 }
 
+/// Back-compat alias for any view code still naming PairStatus.
+typealias PairStatus = WorkspaceStatus
+
 @Observable
 @MainActor
 final class Orchestrator {
@@ -34,11 +37,15 @@ final class Orchestrator {
     var isPolling = false
     var aiState: LocalLLM.AIState = .notConfigured
 
-    // Per-pair diagnostics keyed on WorkspacePair.id. Settings reads this to
-    // render each pair row's connection chip + subtitle line.
-    var pairStatuses: [UUID: PairStatus] = [:]
+    // Per-workspace diagnostics keyed on Workspace.id. Settings reads this
+    // to render each workspace row's connection chip + subtitle line.
+    var workspaceStatuses: [UUID: WorkspaceStatus] = [:]
 
-    func pairStatus(for pairId: UUID) -> PairStatus? { pairStatuses[pairId] }
+    func workspaceStatus(for workspaceId: UUID) -> WorkspaceStatus? { workspaceStatuses[workspaceId] }
+
+    // Back-compat readers for any view still keyed on the old pair shape.
+    var pairStatuses: [UUID: WorkspaceStatus] { workspaceStatuses }
+    func pairStatus(for pairId: UUID) -> WorkspaceStatus? { workspaceStatuses[pairId] }
 
     // Per-source clients, lazily created on first use per process.
     private let linearClient = LinearClient()
@@ -46,8 +53,8 @@ final class Orchestrator {
     private var pollTask: Task<Void, Never>?
     private var runners: [UUID: WorktreeRunner] = [:]
 
-    private func client(for pair: WorkspacePair) -> any IssueSourceClient {
-        switch pair.source.source {
+    private func client(for identity: Identity) -> any IssueSourceClient {
+        switch identity.kind {
         case .linear: return linearClient
         case .github: return githubClient
         }
@@ -90,38 +97,52 @@ final class Orchestrator {
             aiState = LocalLLM.shared.state()
         }
 
-        let pairs = keychain.pairs
-        guard !pairs.isEmpty else {
-            lastPollError = "No workspace pairs configured."
+        let workspaces = keychain.workspaces
+        guard !workspaces.isEmpty else {
+            lastPollError = "No workspaces configured."
             return
         }
 
         lastPollError = nil
 
-        // Bootstrap labels once per process, per pair. Failures don't abort
-        // polling — bootstrapLabels logs and retries on the next poll.
-        await bootstrapLabels(pairs: pairs, keychain: keychain)
+        // Bootstrap labels once per process per (identity, surface) combo.
+        // Failures don't abort polling — bootstrapLabels logs and retries.
+        await bootstrapLabels(workspaces: workspaces, keychain: keychain)
 
-        // Iterate pairs sequentially: avoids GitHub rate-limit bursts on
-        // first poll and keeps log lines easy to follow per source.
-        for pair in pairs {
-            guard let auth = keychain.authFor(pair: pair) else {
-                Logger.orchestrator.info("Skip pair \(pair.workspace.matchKey): missing credentials")
+        // Iterate workspaces sequentially: avoids GitHub rate-limit bursts
+        // on first poll and keeps log lines easy to follow per source.
+        for workspace in workspaces {
+            guard let identity = keychain.identity(for: workspace) else {
+                workspaceStatuses[workspace.id] = WorkspaceStatus(
+                    lastPolledAt: Date(),
+                    error: "Routing points at a deleted identity. Edit the workspace."
+                )
                 continue
             }
-            let cli = client(for: pair)
-            await pollPair(pair: pair, client: cli, auth: auth)
+            guard let auth = keychain.authFor(identity: identity) else {
+                Logger.orchestrator.info("Skip workspace \(workspace.path): \(identity.label) credentials missing")
+                workspaceStatuses[workspace.id] = WorkspaceStatus(
+                    lastPolledAt: Date(),
+                    error: "\(identity.label): credentials missing"
+                )
+                continue
+            }
+            let cli = client(for: identity)
+            await pollWorkspace(workspace: workspace, identity: identity, client: cli, auth: auth)
         }
     }
 
     @MainActor
-    private func pollPair(pair: WorkspacePair, client: any IssueSourceClient, auth: SourceAuth) async {
-        var status = pairStatuses[pair.id] ?? PairStatus()
+    private func pollWorkspace(workspace: Workspace, identity: Identity,
+                               client: any IssueSourceClient, auth: SourceAuth) async {
+        var status = workspaceStatuses[workspace.id] ?? WorkspaceStatus()
+        let config = sourceConfig(identity: identity, surfaceId: workspace.routing.surfaceId)
+        let scopeTag = "\(identity.kind.rawValue)/\(workspace.routing.surfaceId)"
         do {
             // 1. New 🍋-labeled issues → start a session.
-            let newIssues = try await client.fetchTriggerQueue(config: pair.source, auth: auth)
+            let newIssues = try await client.fetchTriggerQueue(config: config, auth: auth)
             status.triggerCount = newIssues.count
-            Logger.orchestrator.info("Poll[\(pair.source.source.rawValue)/\(pair.workspace.matchKey)]: \(newIssues.count) queued, \(self.sessions.active.count) active")
+            Logger.orchestrator.info("Poll[\(scopeTag)]: \(newIssues.count) queued, \(self.sessions.active.count) active")
 
             for ref in newIssues {
                 guard !sessions.isTracking(ref: ref) else { continue }
@@ -130,13 +151,14 @@ final class Orchestrator {
                     break
                 }
                 Logger.orchestrator.info("Starting session for \(ref.identifier): \(ref.title)")
-                await startSession(ref: ref, pair: pair, client: client, auth: auth, retrigger: nil)
+                await startSession(ref: ref, workspace: workspace, identity: identity,
+                                   client: client, auth: auth, retrigger: nil)
             }
 
             // 2. 🍋 Complete issues → check for human replies to re-trigger.
-            let completeIssues = try await client.fetchCompleteQueue(config: pair.source, auth: auth)
+            let completeIssues = try await client.fetchCompleteQueue(config: config, auth: auth)
             status.completeCount = completeIssues.count
-            Logger.orchestrator.info("Poll[\(pair.source.source.rawValue)]: \(completeIssues.count) complete issues to check for replies")
+            Logger.orchestrator.info("Poll[\(scopeTag)]: \(completeIssues.count) complete issues to check for replies")
             for ref in completeIssues {
                 if sessions.isTracking(ref: ref) {
                     Logger.orchestrator.info("Retrigger skip \(ref.identifier): already tracking")
@@ -165,35 +187,60 @@ final class Orchestrator {
                     continue
                 }
                 Logger.orchestrator.info("Re-triggering \(ref.identifier) from reply")
-                await startSession(ref: ref, pair: pair, client: client, auth: auth, retrigger: marker)
+                await startSession(ref: ref, workspace: workspace, identity: identity,
+                                   client: client, auth: auth, retrigger: marker)
             }
             status.error = nil
         } catch {
-            Logger.orchestrator.error("Poll error for pair \(pair.workspace.matchKey): \(error)")
+            Logger.orchestrator.error("Poll error for workspace \(workspace.path) [\(scopeTag)]: \(error)")
             status.error = error.localizedDescription
             lastPollError = error.localizedDescription
         }
         status.lastPolledAt = Date()
-        pairStatuses[pair.id] = status
+        workspaceStatuses[workspace.id] = status
+    }
+
+    /// Build the per-call SourceConfig from an identity + the surface the
+    /// workspace is routed to. Linear: filter by team key (surfaceId);
+    /// GitHub: filter by owner/repo (surfaceId).
+    private func sourceConfig(identity: Identity, surfaceId: String) -> SourceConfig {
+        switch identity.kind {
+        case .linear:
+            return SourceConfig(
+                source: .linear, displayName: identity.label,
+                linearTeamKeys: [surfaceId], githubRepos: nil
+            )
+        case .github:
+            return SourceConfig(
+                source: .github, displayName: identity.label,
+                linearTeamKeys: nil, githubRepos: [surfaceId]
+            )
+        }
     }
 
     private var maxConcurrent: Int { 2 }
 
     // MARK: - Label bootstrapping
 
-    private var bootstrappedPairs: Set<UUID> = []
+    /// Memo keyed on (identity.id, surfaceId) so bootstrapping a Linear team
+    /// or GitHub repo happens at most once per process, even if multiple
+    /// workspaces route to the same surface.
+    private var bootstrappedScopes: Set<String> = []
 
-    private func bootstrapLabels(pairs: [WorkspacePair], keychain: KeychainStore) async {
-        for pair in pairs {
-            if bootstrappedPairs.contains(pair.id) { continue }
-            guard let auth = keychain.authFor(pair: pair) else { continue }
-            let cli = client(for: pair)
+    private func bootstrapLabels(workspaces: [Workspace], keychain: KeychainStore) async {
+        for workspace in workspaces {
+            let scopeKey = "\(workspace.routing.identityId.uuidString)/\(workspace.routing.surfaceId)"
+            if bootstrappedScopes.contains(scopeKey) { continue }
+            guard let identity = keychain.identity(for: workspace),
+                  let auth = keychain.authFor(identity: identity) else { continue }
+            let cli = client(for: identity)
+            let config = sourceConfig(identity: identity, surfaceId: workspace.routing.surfaceId)
             do {
-                try await cli.bootstrapLabels(config: pair.source, auth: auth)
-                bootstrappedPairs.insert(pair.id)
-                Logger.orchestrator.info("Bootstrapped labels for pair \(pair.workspace.matchKey)")
+                try await cli.bootstrapLabels(config: config, auth: auth)
+                bootstrappedScopes.insert(scopeKey)
+                Logger.orchestrator.info("Bootstrapped labels for \(scopeKey)")
             } catch {
-                Logger.orchestrator.error("Label bootstrap failed for \(pair.workspace.matchKey): \(error) — will retry on next poll")
+                Logger.orchestrator.error("Label bootstrap failed for \(scopeKey): \(error) — will retry on next poll")
             }
         }
     }
@@ -201,8 +248,9 @@ final class Orchestrator {
     // MARK: - Session management
 
     @MainActor
-    private func startSession(ref: IssueRef, pair: WorkspacePair, client: any IssueSourceClient,
-                              auth: SourceAuth, retrigger: LemonMarker?) async {
+    private func startSession(ref: IssueRef, workspace: Workspace, identity: Identity,
+                              client: any IssueSourceClient, auth: SourceAuth,
+                              retrigger: LemonMarker?) async {
         let session = Session(issue: ref)
         session.worktreePath = "/tmp/lemon-\(ref.pathSlug)"
         session.terminalWindowName = "Lemon · \(ref.identifier)"
@@ -232,6 +280,20 @@ final class Orchestrator {
         runner.onPendingAction = { [weak session] msg in
             DispatchQueue.main.async { session?.pendingAction = msg }
         }
+
+        // WorktreeRunner still consumes the pair shape internally; build the
+        // matching pair from the workspace + identity. (R-next will switch
+        // the runner signature too, but this keeps the cut minimal.)
+        let pair = WorkspacePair(
+            id: workspace.id,
+            source: sourceConfig(identity: identity, surfaceId: workspace.routing.surfaceId),
+            workspace: WorkspaceMapping(
+                matchKey: workspace.routing.surfaceId,
+                path: workspace.path,
+                allReposInFolder: workspace.allReposInFolder,
+                homeRepo: workspace.homeRepo
+            )
+        )
 
         Task.detached(priority: .background) {
             await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger)
@@ -344,18 +406,29 @@ final class Orchestrator {
         KeychainStore.shared.githubUser = "frkline"
 
         let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
-        pairStatuses[linearPair.id] = PairStatus(
+        workspaceStatuses[linearPair.id] = WorkspaceStatus(
             lastPolledAt: now.addingTimeInterval(-12),
             triggerCount: 0,
             completeCount: 1,
             error: nil
         )
-        pairStatuses[githubPair.id] = PairStatus(
+        workspaceStatuses[githubPair.id] = WorkspaceStatus(
             lastPolledAt: now.addingTimeInterval(-8),
             triggerCount: 1,
             completeCount: 0,
             error: nil
         )
+
+        // Also stamp workspace-keyed statuses so the new (identity-aware)
+        // settings view renders the same mock live state.
+        for ws in KeychainStore.shared.workspaces {
+            workspaceStatuses[ws.id] = WorkspaceStatus(
+                lastPolledAt: now.addingTimeInterval(-10),
+                triggerCount: 0,
+                completeCount: 0,
+                error: nil
+            )
+        }
     }
     #endif
 }
