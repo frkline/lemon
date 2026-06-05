@@ -256,10 +256,18 @@ final class KeychainStore: @unchecked Sendable {
         // Real Keychain store in test mode: always false to prevent the Keychain dialog
         // when there's no user to click it. In-memory stores (makeForTesting) are unaffected.
         if memory == nil && Self.isTestRun { return false }
-        let configuredPairs = pairs
-        guard !configuredPairs.isEmpty else { return false }
-        // Every configured pair must have its source credential present.
-        for pair in configuredPairs where !credentialPresent(for: pair) { return false }
+        // Source of truth is the new (Identity, Workspace) model — the old
+        // synthesized `pairs` view is no longer written by onboarding so
+        // gating on it would force the wizard to re-launch on every
+        // restart even after a successful save.
+        let configuredWorkspaces = workspaces
+        guard !configuredWorkspaces.isEmpty else { return false }
+        for ws in configuredWorkspaces {
+            guard let identity = identity(for: ws) else { return false }
+            // Per-identity Keychain entry — the actual GitHub PAT /
+            // Linear API key live here, keyed by Identity.id.
+            if identitySecret(for: identity.id).isEmpty { return false }
+        }
         // Local AI is required AND its files must still exist on disk. Without
         // the disk-existence check, a user who upgraded across a dirName
         // change (or deleted ~/Library/Application Support/Lemon/Models) would

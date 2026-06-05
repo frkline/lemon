@@ -441,6 +441,91 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertEqual(s.surface(for: workspace)?.displayName, "Widgets")
     }
 
+    // MARK: - isConfigured via the modern (Identity, Workspace, secret) model
+    //
+    // Regression: persistTrackers() writes identities + workspaces + per-identity
+    // secrets but does NOT write to the legacy `pairs` storage. isConfigured
+    // used to gate on `pairs`, so on restart it returned false and the wizard
+    // re-launched — even though the credential was sitting in Keychain. These
+    // tests lock the modern code path against re-introducing that bug.
+
+    private func aiFixtures() throws -> (modelDir: String, swiftLM: String, cleanup: () -> Void) {
+        let fm = FileManager.default
+        let modelDir = NSTemporaryDirectory() + "kc-test-model-\(UUID().uuidString)"
+        let swiftLM  = NSTemporaryDirectory() + "kc-test-swiftlm-\(UUID().uuidString)"
+        try fm.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
+        try "{}".write(toFile: modelDir + "/config.json", atomically: true, encoding: .utf8)
+        try Data().write(to: URL(fileURLWithPath: swiftLM))
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swiftLM)
+        return (modelDir, swiftLM, {
+            try? fm.removeItem(atPath: modelDir)
+            try? fm.removeItem(atPath: swiftLM)
+        })
+    }
+
+    func testIsConfiguredTrueWithIdentityAndWorkspaceAndAI() throws {
+        let fix = try aiFixtures(); defer { fix.cleanup() }
+        let s = store()
+
+        let identity = Identity(
+            kind: .github, label: "GitHub · frkline", handle: "frkline",
+            principalId: "frkline", host: nil
+        )
+        s.identities = [identity]
+        s.setIdentitySecret("ghp_modern_path", for: identity.id)
+        s.workspaces = [Workspace(
+            path: "/tmp/repo",
+            routing: Routing(identityId: identity.id, surfaceId: "frkline/lemon")
+        )]
+        s.modelPath = fix.modelDir
+        s.swiftLMPath = fix.swiftLM
+        s.aiEnabled = true
+
+        XCTAssertTrue(s.isConfigured, "Identity + workspace + secret + AI should configure cleanly.")
+    }
+
+    func testIsConfiguredFalseWhenIdentitySecretMissing() throws {
+        let fix = try aiFixtures(); defer { fix.cleanup() }
+        let s = store()
+
+        let identity = Identity(
+            kind: .github, label: "GitHub · frkline", handle: "frkline",
+            principalId: "frkline", host: nil
+        )
+        s.identities = [identity]
+        // Deliberately do NOT call setIdentitySecret — the workspace routes
+        // through an identity whose Keychain entry is missing.
+        s.workspaces = [Workspace(
+            path: "/tmp/repo",
+            routing: Routing(identityId: identity.id, surfaceId: "frkline/lemon")
+        )]
+        s.modelPath = fix.modelDir
+        s.swiftLMPath = fix.swiftLM
+        s.aiEnabled = true
+
+        XCTAssertFalse(s.isConfigured, "Missing per-identity Keychain secret must NOT count as configured.")
+    }
+
+    func testIsConfiguredFalseWhenWorkspaceRoutesToMissingIdentity() throws {
+        let fix = try aiFixtures(); defer { fix.cleanup() }
+        let s = store()
+
+        // Workspace exists but the identity it routes to was deleted /
+        // never persisted. Drift scenario from manual UserDefaults edits
+        // or interrupted persists.
+        let orphanId = UUID()
+        s.identities = []
+        s.workspaces = [Workspace(
+            path: "/tmp/repo",
+            routing: Routing(identityId: orphanId, surfaceId: "any")
+        )]
+        s.modelPath = fix.modelDir
+        s.swiftLMPath = fix.swiftLM
+        s.aiEnabled = true
+
+        XCTAssertFalse(s.isConfigured, "Workspace pointing at a missing identity must NOT count as configured.")
+    }
+
     func testStaleRoutingReturnsNilSurface() {
         let s = store()
         let identity = Identity(
