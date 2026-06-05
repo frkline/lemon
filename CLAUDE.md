@@ -1,6 +1,6 @@
 # Lemon
 
-A personal workflow orchestration menu-bar app for Claude Code + Linear, leveraging Gemma 4 on device. Made for the Mac mini sitting on your desk. Tag a Linear issue with 🍋 and Lemon spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via Linear labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a small local Gemma 4 classifier — Lemon itself is glue.
+A personal workflow orchestration menu-bar app for Claude Code + your issue tracker (Linear or GitHub), leveraging Gemma 4 on device. Made for the Mac mini sitting on your desk. Tag an issue with 🍋 and Lemon spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a small local Gemma 4 classifier — Lemon itself is glue.
 
 ## Repo layout
 
@@ -9,16 +9,37 @@ app/                 SwiftUI macOS 26 app (orchestrator + UI)
   Lemon/             Source files
     LemonApp.swift        @main — MenuBarExtra, onboarding gate, dual idle/active icons
     LemonDesign.swift     Design tokens (LD.*), button styles, StatusPill
-    Models.swift          LinearIssue, Session, SessionStatus, WorkspaceRepo
-    KeychainStore.swift   Secret read/write (Keychain) + non-secret config (UserDefaults)
-    LinearClient.swift    GraphQL: label-based polling, label mutations, comment posting
-    Orchestrator.swift    Poll loop, spawns WorktreeRunner per issue, re-trigger detection
-    SessionStore.swift    Active + recent session state
-    WorktreeRunner.swift  Per-session: worktree setup, Terminal launch, label polling, cleanup
+    Models.swift          IssueRef, Session, SessionStatus, IssueSource/Scope,
+                          SourceConfig, WorkspaceMapping, WorkspacePair, LemonState,
+                          IssueComment + legacy LinearIssue/WorkspaceRepo
+    KeychainStore.swift   Keychain secrets + UserDefaults config + pair-based workspace +
+                          legacy lemon-workspace-config → pairs migration
+    IssueSourceClient.swift  Protocol both LinearClient + GitHubClient conform to;
+                             SourceAuth, CredentialIdentity, IssueSourceError
+    LemonMarkerExtractor.swift  Shared parse/find/hasNew/bodiesAfter against [IssueComment]
+    LinearClient.swift    Linear GraphQL surface + IssueSourceClient conformance
+    GitHubClient.swift    GitHub REST v3 + PAT auth + IssueSourceClient conformance
+    Orchestrator.swift    Poll loop: iterates keychain.pairs sequentially per-source,
+                          memoizes bootstrap per pair, spawns WorktreeRunner per issue
+    SessionStore.swift    Active + recent session state; isTracking by IssueRef.trackingKey
+    WorktreeRunner.swift  Per-session: worktree setup, Terminal launch, label polling
+                          via IssueSourceClient, cleanup. Paths/tmux keyed on pathSlug
     LemonLogger.swift     os.Logger subsystem constants
-    Onboarding/           First-run wizard (3 steps: Linear key → Workspace → Done)
+    LemonMCPServer.swift  / LemonMCPTools.swift  MCP tool surface (source-agnostic)
+    Onboarding/           First-run wizard — currently Linear-first; GitHub added in
+                          Settings post-onboarding (migration handles single-pair case)
     Views/                PopoverView, SessionRowView, SessionDetailView, SettingsView
+                          (Settings has Linear key + GitHub PAT + pair editor)
 ```
+
+### Multi-source architecture (issues #2 + #10)
+
+- **`IssueSourceClient` protocol** — `fetchTriggerQueue`, `fetchCompleteQueue`, `fetchIssueLabels`, `applyState/clearState(LemonState)`, `postComment`, `fetchComments`, `hasNewComment`, `fetchCommentsAfter`, `findLemonMarker`, `bootstrapLabels`, `verifyCredential`. Each client maps `LemonState` to its source-specific representation internally (Linear label ID vs GitHub label name).
+- **`SourceAuth`** enum — `.linear(apiKey, userId)` or `.github(pat, login)`. Built per-pair by `KeychainStore.authFor(pair:)`.
+- **`WorkspacePair { source: SourceConfig, workspace: WorkspaceMapping }`** is the unit of config. Capped at 10 (`KeychainStore.maxPairs`). Stored under `lemon-workspace-pairs` JSON; legacy `lemon-workspace-config` migrates to one Linear pair per legacy `WorkspaceRepo` on first read of `keychain.pairs`, gated by the `lemon-workspace-config-migrated-at` sentinel.
+- **`IssueRef.pathSlug`** drives `/tmp/lemon-{slug}` worktree paths, tmux session names, log paths, sentinels, MCP config paths. Linear: `lem-42`. GitHub: `owner-repo-7` (slashes flatten). Do NOT use `identifier.lowercased()` for paths — GitHub identifiers contain `/` and `#`.
+- **`IssueRef.trackingKey`** is `"linear:<id>"` or `"github:<id>"` — used in `SessionStore.isTracking(ref:)` to keep node IDs and `owner/repo#n` disjoint.
+- **Lemon Report marker** stays the same shape across sources; gains an optional `source: github` line on GitHub-origin reports. `LemonMarkerExtractor.parse` reads it back as `IssueSource?`; nil parses as legacy / Linear.
 
 ## Design system
 
@@ -39,19 +60,21 @@ LemonApp (@main)
   → dual menu bar icons: MenuBarIconIdle / MenuBarIcon (active)
 
 Orchestrator (poll loop: 15s when active, 45s when idle)
-  → LinearClient.fetchLemonQueue()   → issues with 🍋 label → start session
-  → LinearClient.fetchCompleteIssues() → issues with 🍋 Complete → check for human reply → re-trigger
-  → WorktreeRunner.run(issue:workspace:retrigger:) per new issue (max 2 concurrent)
-  → SessionStore tracks active + recent sessions
+  → iterates keychain.pairs sequentially (per-source clients, memoized)
+  → per pair: client.fetchTriggerQueue() → start session
+              client.fetchCompleteQueue() → check for human reply → re-trigger
+  → bootstrapLabels per-pair, memoized by pair.id (retried next poll on failure)
+  → WorktreeRunner.run(ref:, pair:, client:, auth:, retrigger:) per issue (max 2 concurrent)
+  → SessionStore tracks active + recent; isTracking by IssueRef.trackingKey
 
-WorktreeRunner (one per Linear issue)
-  → git worktree add /tmp/lemon-{identifier} -b lemon/{identifier} origin/main
+WorktreeRunner (one per issue)
+  → git worktree add /tmp/lemon-{ref.pathSlug} -b lemon/{slug} origin/main
   → writes LEMON_CONTEXT.md with issue details + completion checklist
-  → updates Linear labels: removes 🍋, adds 🍋 In Progress
+  → state transitions via client.applyState/clearState(LemonState)
   → launches Terminal via `open -a Terminal launcher.sh`
-  → polls Linear every 10s for label changes (🍋 Waiting / 🍋 Complete)
+  → polls every 10s via client.fetchIssueLabels for state changes
   → on 🍋 Complete: posts Lemon Report comment, cleans up worktree
-  → sentinel file (/tmp/lemon-exit-{identifier}) detects early claude exit
+  → sentinel file (/tmp/lemon-exit-{slug}) detects early claude exit
 ```
 
 ## Linear label workflow
