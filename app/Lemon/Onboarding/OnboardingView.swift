@@ -279,6 +279,12 @@ private struct StepShell<Content: View>: View {
     var nextLabel: String = "Continue"
     var nextEnabled: Bool = true
     var nextAction: () -> Void
+    // Optional secondary "Add another" action — renders adjacent to the
+    // primary CTA in the footer in ghost style. Used by TrackersStep so
+    // the action lives in the same row as Continue.
+    var addAnotherLabel: String? = nil
+    var addAnotherEnabled: Bool = false
+    var addAnotherAction: (() -> Void)? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -312,7 +318,12 @@ private struct StepShell<Content: View>: View {
             // the step wraps its own scrolling internally.
             content
                 .padding(.horizontal, 28)
-                .padding(.bottom, 16)
+
+            // Flexible spacer: absorbs the excess when content is short
+            // (LemonMd step), collapses to ~16pt when content fills the
+            // minHeight window (Trackers step). Without this, short steps
+            // distributed empty space awkwardly through the layout.
+            Spacer(minLength: 16)
 
             HStack(spacing: 10) {
                 Button("Quit") { NSApp.terminate(nil) }
@@ -322,13 +333,20 @@ private struct StepShell<Content: View>: View {
                         .buttonStyle(GhostButtonStyle())
                 }
                 Spacer()
+                if let addLabel = addAnotherLabel, let addAction = addAnotherAction {
+                    Button(addLabel, action: addAction)
+                        .buttonStyle(GhostButtonStyle())
+                        .disabled(!addAnotherEnabled)
+                }
                 Button(nextLabel, action: nextAction)
                     .buttonStyle(LemonButtonStyle())
                     .disabled(!nextEnabled)
                     .keyboardShortcut(.return, modifiers: .command)
             }
             .padding(.horizontal, 28)
-            .padding(.bottom, 24)
+            // 34pt bottom inset so the buttons clear the window's rounded
+            // corner with editorial breathing room.
+            .padding(.bottom, 34)
         }
     }
 }
@@ -351,6 +369,7 @@ private struct TrackersStep: View {
 
     @State private var draft = DraftPair()
     @State private var verifyState: VerifyState = .idle
+    @State private var typingCustomSurface = false
 
     enum VerifyState: Equatable {
         case idle, verifying, ok, failed(String)
@@ -366,12 +385,14 @@ private struct TrackersStep: View {
             subtitle: "Where issues live and where the work happens on disk. Add as many as you want.",
             nextLabel: "Continue",
             nextEnabled: canContinue,
-            nextAction: onNext
+            nextAction: onNext,
+            addAnotherLabel: "Add another",
+            addAnotherEnabled: canAddCurrent,
+            addAnotherAction: { addCurrentToSavedAndReset() }
         ) {
             VStack(alignment: .leading, spacing: 18) {
                 if !savedPairs.isEmpty { savedPairsList }
                 draftSection
-                if canAddCurrent { addAnotherButton }
             }
         }
     }
@@ -679,7 +700,9 @@ private struct TrackersStep: View {
         case .linear:
             return "Personal API Key. Workspace-scoped; never leaves Keychain."
         case .github:
-            return "Fine-grained PAT. Grant Issues (read + write) on the repos Lemon should watch."
+            // Match GitHub's exact wording from the fine-grained PAT
+            // Permissions section so the user can scan for it visually.
+            return "Required: Issues · Read and write. Pick the repos Lemon should watch."
         }
     }
 
@@ -782,11 +805,22 @@ private struct TrackersStep: View {
     }
 
     private var surfacePicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(draft.sourceKind == .linear ? "TEAM" : "REPO")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(1.4)
-                .foregroundStyle(.tertiary)
+        let count = currentSurfaceList.count
+        let unit = draft.sourceKind == .linear ? "team" : "repo"
+        let placeholder = "Pick from \(count) \(unit)\(count == 1 ? "" : "s")…"
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(draft.sourceKind == .linear ? "TEAM" : "REPO")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(.tertiary)
+                if !draft.surfaceId.isEmpty {
+                    Text("· tap to change")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.quaternary)
+                }
+                Spacer()
+            }
             Menu {
                 ForEach(currentSurfaceList) { s in
                     Button(action: { draft.surfaceId = s.id }) {
@@ -797,16 +831,16 @@ private struct TrackersStep: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Text(draft.surfaceId.isEmpty
-                         ? (draft.sourceKind == .linear ? "Pick a team…" : "Pick a repo…")
-                         : draft.surfaceId)
+                    Text(draft.surfaceId.isEmpty ? placeholder : draft.surfaceId)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(draft.surfaceId.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
+                .contentShape(RoundedRectangle(cornerRadius: 8))
                 .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -885,28 +919,6 @@ private struct TrackersStep: View {
     }
 
     // MARK: - Add another
-
-    private var addAnotherButton: some View {
-        HStack {
-            Button {
-                addCurrentToSavedAndReset()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Add another")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundStyle(LD.citrus)
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(LD.lemon.opacity(0.85), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            Spacer()
-            Text("or Continue when you've added everything.")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-        }
-    }
 
     private func addCurrentToSavedAndReset() {
         // Promote a verified-but-not-yet-saved identity into the global list so
