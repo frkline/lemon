@@ -124,7 +124,7 @@ flowchart LR
 
 1. **You label** a Linear issue with 🍋.
 2. **Orchestrator** picks it up next poll (15 s active, 45 s idle), spins up a git worktree at `/tmp/lemon-{id}`, writes `LEMON_CONTEXT.md` with the issue body + your team's `LEMON.md` + completion checklist.
-3. A **terminal window** opens running `claude --enable-auto-mode --remote-control` (iTerm2 preferred, Terminal.app fallback).
+3. A **terminal window** opens running `claude --permission-mode auto --remote-control` (iTerm2 preferred, Terminal.app fallback).
 4. **Gemma 4** runs locally via SwiftLM + MLX. After 2 minutes of pane silence, it sees the log tail and decides: auto-accept a confirmation (`y / n / Enter / Escape / 1-9`, through a hard allowlist), or raise 🍋 Waiting if it's ambiguous.
 5. When Claude sets **🍋 Complete**, Lemon posts the PR link + summary to Linear, then cleans up.
 

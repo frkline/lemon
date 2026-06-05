@@ -34,7 +34,7 @@
     <!-- Stacked log lines representation -->
     <rect x="0" y="48" width="200" height="170" class="stroke paper-fill"/>
     <g class="muted" transform="translate(12, 70)">
-      <text>$ claude --enable-auto</text>
+      <text>$ claude --permission-mode auto</text>
       <text y="18">Reading View.swift…</text>
       <text y="36">✓ updated tokens</text>
       <text y="54">$ git diff</text>

@@ -471,7 +471,7 @@ struct SettingsView: View {
                 teamId: "test"
             )
             let logs = [
-                "$ claude --enable-auto-mode --remote-control",
+                "$ claude --permission-mode auto --remote-control",
                 "Trust this MCP server (linear)? [y/N]"
             ]
             do {
