@@ -292,7 +292,7 @@ struct WorkspaceEditorPane: View {
                     Menu {
                         ForEach(ident.knownSurfaces) { s in
                             Button(action: { surfaceId = s.id }) {
-                                Text("\(s.key) — \(s.displayName)")
+                                Text(surfaceMenuLabel(for: s))
                             }
                         }
                     } label: {
@@ -345,12 +345,20 @@ struct WorkspaceEditorPane: View {
 
     private func surfaceLabelText(for ident: Identity) -> String {
         if let s = ident.knownSurfaces.first(where: { $0.id == surfaceId }) {
-            return "\(s.key) — \(s.displayName)"
+            return surfaceMenuLabel(for: s)
         }
         if !surfaceId.isEmpty {
             return surfaceId
         }
         return ident.kind == .github ? "Pick a repo…" : "Pick a team…"
+    }
+
+    /// When a surface's key and displayName are the same string (Linear teams
+    /// whose key matches the team name; GitHub repos where id == owner/repo),
+    /// render once. Otherwise "KEY — Name".
+    private func surfaceMenuLabel(for s: Surface) -> String {
+        let same = s.key.caseInsensitiveCompare(s.displayName) == .orderedSame
+        return same ? s.displayName : "\(s.key) — \(s.displayName)"
     }
 
     // MARK: - Folder options

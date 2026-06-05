@@ -235,18 +235,7 @@ struct IdentityEditorPane: View {
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(surfaces.prefix(8), id: \.id) { surface in
-                        HStack(spacing: 8) {
-                            Text(surface.key)
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 50, alignment: .leading)
-                            Text(surface.displayName)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: 0)
-                        }
+                        surfaceLine(surface)
                     }
                     if surfaces.count > 8 {
                         Text("+ \(surfaces.count - 8) more")
@@ -257,6 +246,35 @@ struct IdentityEditorPane: View {
                 .padding(12)
                 .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func surfaceLine(_ surface: Surface) -> some View {
+        // When key == displayName (common for GitHub repos where
+        // owner/repo is both the id and the label, or for Linear teams
+        // whose key matches the team name), collapse the two columns
+        // into a single editorial mark.
+        let dupe = surface.key.caseInsensitiveCompare(surface.displayName) == .orderedSame
+        HStack(spacing: 8) {
+            if dupe {
+                Text(surface.displayName)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else {
+                Text(surface.key)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 50, alignment: .leading)
+                Text(surface.displayName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
         }
     }
 
