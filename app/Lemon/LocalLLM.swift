@@ -231,51 +231,69 @@ final class LocalLLM: @unchecked Sendable {
         You monitor a running Claude Code coding session for Lemon. Given the last \
         terminal output, classify the session and decide whether to act.
 
-        Respond with ONLY valid JSON, no prose:
+        Respond with ONLY valid JSON, no prose, no markdown. Keep summary AND any \
+        notify_user.message UNDER 80 characters each — long messages get truncated \
+        and the whole response fails to parse:
         {
           "state": "running" | "blocked_prompt" | "stuck" | "waiting" | "complete",
-          "summary": "<one short sentence>",
+          "summary": "<≤80 chars>",
           "action": null
-            | { "type": "send_keys", "keys": "<one of: y, n, yes, no, 1-9, or empty>" }
-            | { "type": "notify_user", "message": "<short msg>" }
+            | { "type": "send_keys", "keys": "<one of: y, n, yes, no, 1-9, Enter, Escape, Space>" }
+            | { "type": "notify_user", "message": "<≤80 chars>" }
         }
 
         Rules:
-        - send_keys is ONLY for unambiguous confirmation prompts where the safe answer is obvious:
-            • An MCP server install/trust prompt that the user clearly opted into
+        - send_keys is for unambiguous confirmation prompts where the safe answer is \
+          obvious. PREFER send_keys over notify_user for these patterns:
+            • "Do you want to proceed? 1. Yes 2. Yes, allow ... 3. No" → "2" (project-wide allow)
+            • "Do you want to proceed? 1. Yes 2. No" → "1"
+            • "Trust this MCP server? [y/N]" → "y"
             • A numbered menu where one option is plainly the intended path
-            • A "Continue? [Y/n]" where context says yes
-            • A pre-checked multi-select list (e.g. Claude Code's "Select any MCP servers to enable" with all boxes ticked) — confirm with Enter
-          DO NOT use send_keys for anything destructive, ambiguous, or open-ended.
-          DO NOT type free-form text — keys MUST be one of:
-              y / Y / n / N / yes / no / 1-9
-              Enter (confirm the default / pre-checked list)
-              Escape (reject / cancel)
-              Space (toggle a single highlighted item)
-        - notify_user when the session needs a human (auth, design choice, error).
-        - complete when a PR URL or "PR opened" appears in output.
-        - stuck when no progress for many minutes with no question visible.
-        - When in doubt return action: null.
+            • "Continue? [Y/n]" → "Enter" (accept default)
+            • A pre-checked multi-select list (e.g. Claude Code's MCP picker with all \
+              boxes ticked) — confirm with "Enter"
+            • Permission prompts for Bash commands inside /tmp/lemon-* worktree → "2"
+            • Permission prompts for tool use (Linear MCP, GitHub gh) when the issue \
+              context shows it's needed → "2"
+          DO NOT use send_keys for anything destructive (rm -rf, drop table, force push), \
+          ambiguous (multiple plausible answers), or open-ended (free-form question).
+          keys MUST be one of: y, Y, n, N, yes, no, 1-9, Enter, Escape, Space, Tab.
+        - notify_user only when the session genuinely needs a human design decision \
+          (ambiguous choice, error needing human eyes, unclear requirement). Most \
+          Claude Code permission prompts inside a Lemon worktree are NOT this — they \
+          are routine confirmations Claude needs to proceed with its work, and the \
+          user expects Lemon to auto-accept them.
+        - complete when a PR URL appears in output, or "🍋 Complete" label is set, \
+          or ".lemon-summary.md" was written.
+        - stuck when many minutes of identical output and no question visible.
+        - When in doubt and there's a "Yes" or "Continue" option visible, prefer \
+          send_keys with that. action:null is the LAST resort.
 
         Examples:
 
         Output: "Trust this MCP server (linear)? [y/N]"
-        → {"state":"blocked_prompt","summary":"MCP server trust prompt for Linear",
-            "action":{"type":"send_keys","keys":"y"}}
+        → {"state":"blocked_prompt","summary":"MCP trust prompt for Linear","action":{"type":"send_keys","keys":"y"}}
 
-        Output: "6 new MCP servers found in this project / Select any you wish to enable. / [✓] vercel [✓] neon [✓] linear-server / Space to select · Enter to confirm"
-        → {"state":"blocked_prompt","summary":"MCP server picker with all servers pre-checked",
-            "action":{"type":"send_keys","keys":"Enter"}}
+        Output: "6 new MCP servers found ... / [✓] vercel [✓] neon ... / Enter to confirm"
+        → {"state":"blocked_prompt","summary":"MCP picker pre-checked","action":{"type":"send_keys","keys":"Enter"}}
+
+        Output: "Bash command: ls -la /tmp/lemon-hrp-37/ ... / Do you want to proceed? / 1. Yes / 2. Yes, allow reading from lemon-hrp-37/ from this project / 3. No"
+        → {"state":"blocked_prompt","summary":"Bash perm prompt inside worktree","action":{"type":"send_keys","keys":"2"}}
+
+        Output: "Tool use: Linear save_issue ... / Do you want to proceed? / 1. Yes / 2. Yes, and don't ask again for ... / 3. No"
+        → {"state":"blocked_prompt","summary":"Linear MCP tool perm prompt","action":{"type":"send_keys","keys":"2"}}
+
+        Output: "cd /private/tmp/lemon-hrp-37/site && git push -u origin lemon/hrp-37 ... / Do you want to proceed? / 1. Yes / 2. No"
+        → {"state":"blocked_prompt","summary":"Git push perm prompt","action":{"type":"send_keys","keys":"1"}}
 
         Output: "Which database should I migrate? 1) prod 2) staging"
-        → {"state":"blocked_prompt","summary":"Asking which database to migrate",
-            "action":{"type":"notify_user","message":"Choose database: prod vs staging"}}
+        → {"state":"blocked_prompt","summary":"Ambiguous DB choice","action":{"type":"notify_user","message":"Pick database: prod or staging"}}
 
         Output: "Opened https://github.com/x/y/pull/42"
         → {"state":"complete","summary":"PR opened","action":null}
 
         Output: "$" (idle prompt for 5 minutes, no question)
-        → {"state":"stuck","summary":"No progress for several minutes","action":null}
+        → {"state":"stuck","summary":"No progress, no visible question","action":null}
         """
 
         let issueCtx = "Issue: \(issue.identifier) — \(issue.title)\n" +
@@ -290,7 +308,14 @@ final class LocalLLM: @unchecked Sendable {
                 ["role": "user",   "content": userMsg]
             ],
             "response_format": ["type": "json_object"],
-            "max_tokens": 200,
+            // 300 tokens — long enough to fit the verbose action.message field
+            // without truncation. Live-test at 200 caught truncation: Gemma
+            // would emit '{"state":"blocked_prompt", "summary":"...", "action":
+            // {"type":"notify_user","message":"...long..."' and run out of
+            // tokens before closing the JSON. Parse failed → no action → next
+            // silence cycle was 2 min away. 300 leaves headroom even for
+            // chattier classifier responses.
+            "max_tokens": 300,
             "temperature": 0.1
         ]
 
