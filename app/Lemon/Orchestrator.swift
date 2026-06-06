@@ -135,6 +135,9 @@ final class Orchestrator {
     func start() {
         guard pollTask == nil else { return }
         Task { await LocalLLM.shared.start() }
+        Task { @MainActor [weak self] in
+            self?.reconstructDanglingSessions()
+        }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.poll()
@@ -143,6 +146,118 @@ final class Orchestrator {
                 try? await Task.sleep(for: .seconds(hasActive ? 15 : 45))
             }
         }
+    }
+
+    /// On launch, scan `/tmp/lemon-*` for worktrees Lemon left behind in
+    /// a previous process. Match each by slug-shape against the
+    /// configured workspaces, then synthesize a Session in `.reviewing`
+    /// with `cleanupInfo` populated. The user sees the stuck session in
+    /// the active list with a "Cleanup worktree" affordance ready to
+    /// fire — no manual `git worktree remove` required.
+    @MainActor
+    private func reconstructDanglingSessions() {
+        let fm = FileManager.default
+        guard let tmpEntries = try? fm.contentsOfDirectory(atPath: "/tmp") else { return }
+        let lemonDirs = tmpEntries.filter { $0.hasPrefix("lemon-") }
+        guard !lemonDirs.isEmpty else { return }
+
+        let keychain = KeychainStore.shared
+        let workspaces = keychain.workspaces
+        guard !workspaces.isEmpty else { return }
+
+        for dirName in lemonDirs {
+            let slug = String(dirName.dropFirst("lemon-".count))
+            let sessionPath = "/tmp/\(dirName)"
+
+            // Skip Lemon's own tmp scratch dirs (build output, smoke
+            // results, etc.) — only directories whose name matches the
+            // `lemon-<slug>` worktree convention count.
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: sessionPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+            // Already tracked this process — skip.
+            if sessions.active.contains(where: { $0.cleanupInfo?.slug == slug }) { continue }
+            if sessions.recent.contains(where: { $0.cleanupInfo?.slug == slug }) { continue }
+
+            guard let (ref, info) = matchSlugToWorkspace(slug: slug, sessionPath: sessionPath,
+                                                        workspaces: workspaces) else { continue }
+            let session = Session(issue: ref)
+            session.status = .reviewing
+            session.worktreePath = sessionPath
+            session.cleanupInfo = info
+            session.appendLog("[lemon] reconstructed on launch — worktree at \(sessionPath)")
+            sessions.add(session)
+            Logger.orchestrator.info("Reconstructed dangling session for \(ref.identifier) at \(sessionPath)")
+        }
+    }
+
+    /// Match a slug ("lem-42" / "frkline-lemon-14") against a configured
+    /// workspace's expected slug shape. Returns the synthesized IssueRef
+    /// and cleanupInfo on a hit, nil otherwise.
+    private func matchSlugToWorkspace(slug: String, sessionPath: String,
+                                      workspaces: [Workspace]) -> (IssueRef, WorktreeCleanupInfo)? {
+        for ws in workspaces {
+            let surfaceId = ws.routing.surfaceId
+            guard !surfaceId.isEmpty else { continue }
+            // Linear: surfaceId is the team key (e.g. "LEM"); slug is
+            // "lem-<number>".
+            if let identity = KeychainStore.shared.identity(for: ws),
+               identity.kind == .linear {
+                let prefix = surfaceId.lowercased() + "-"
+                if slug.hasPrefix(prefix),
+                   let _ = Int(slug.dropFirst(prefix.count)) {
+                    let identifier = slug.uppercased().replacingOccurrences(of: "-", with: "-")
+                    let ref = IssueRef(
+                        id: "reconstructed-\(slug)",
+                        identifier: identifier,
+                        title: identifier,
+                        description: nil,
+                        labelNames: [],
+                        scope: .linearTeam(id: surfaceId)
+                    )
+                    return (ref, makeCleanupInfo(slug: slug, sessionPath: sessionPath, workspace: ws))
+                }
+            }
+            // GitHub: surfaceId is "owner/repo"; slug is
+            // "owner-repo-<number>" lowercased.
+            if let identity = KeychainStore.shared.identity(for: ws),
+               identity.kind == .github {
+                let flat = surfaceId.lowercased().replacingOccurrences(of: "/", with: "-") + "-"
+                if slug.hasPrefix(flat),
+                   let number = Int(slug.dropFirst(flat.count)) {
+                    let parts = surfaceId.split(separator: "/", maxSplits: 1)
+                    guard parts.count == 2 else { continue }
+                    let owner = String(parts[0]); let repo = String(parts[1])
+                    let identifier = "\(owner)/\(repo)#\(number)"
+                    let ref = IssueRef(
+                        id: identifier,
+                        identifier: identifier,
+                        title: identifier,
+                        description: nil,
+                        labelNames: [],
+                        scope: .githubRepo(owner: owner, repo: repo, number: number)
+                    )
+                    return (ref, makeCleanupInfo(slug: slug, sessionPath: sessionPath, workspace: ws))
+                }
+            }
+        }
+        return nil
+    }
+
+    private func makeCleanupInfo(slug: String, sessionPath: String,
+                                 workspace: Workspace) -> WorktreeCleanupInfo {
+        // For allReposInFolder workspaces, we can't reliably know which
+        // repos were checked out without rescanning — fall back to the
+        // single-repo shape pointing at the workspace path. The cleanup
+        // helper's FileManager fallback handles any stragglers under
+        // sessionPath anyway.
+        let workspaceName = URL(fileURLWithPath: workspace.path).lastPathComponent
+        return WorktreeCleanupInfo(
+            sessionPath: sessionPath,
+            isMultiRepo: workspace.allReposInFolder,
+            repos: [WorktreeCleanupInfo.RepoRef(name: workspaceName, repoPath: workspace.path)],
+            slug: slug
+        )
     }
 
     func stop() {
@@ -377,6 +492,9 @@ final class Orchestrator {
         runner.onPendingAction = { [weak session] msg in
             DispatchQueue.main.async { session?.pendingAction = msg }
         }
+        runner.onCleanupReady = { [weak session] info in
+            DispatchQueue.main.async { session?.cleanupInfo = info }
+        }
 
         // WorktreeRunner still consumes the pair shape internally; build the
         // matching pair from the workspace + identity. (R-next will switch
@@ -408,6 +526,52 @@ final class Orchestrator {
         runners[session.id]?.cancelPendingAction()
         // Clear directly — covers mock sessions that have no backing runner.
         session.pendingAction = nil
+    }
+
+    /// User clicked "Cleanup worktree" in the Ready-for-review card.
+    /// Reads the session's stashed `cleanupInfo`, fires the worktree +
+    /// tmux + /tmp teardown, transitions the session to `.done`, and
+    /// drops it from the active list. Idempotent — no-ops if there's
+    /// no cleanup info (already cleaned up, or never reached
+    /// reviewing).
+    func cleanupSession(_ session: Session) {
+        guard let info = session.cleanupInfo else {
+            Logger.orchestrator.warning("cleanupSession called on \(session.issue.identifier) with no cleanupInfo")
+            return
+        }
+        // Capture only Sendable values; the @Observable Session can't
+        // cross actor boundaries directly. Look up by sessionId on the
+        // way back.
+        let sessionId = session.id
+        Task.detached(priority: .background) { [weak self] in
+            // Look up the existing runner (if the session completed
+            // this process lifetime). Otherwise spin up a throwaway
+            // WorktreeRunner — cleanup's instance helpers don't depend
+            // on the runner having ever called `run()`.
+            let runner: WorktreeRunner = await self?.runnerOrThrowaway(sessionId: sessionId) ?? WorktreeRunner()
+            await runner.cleanup(info: info)
+            await MainActor.run { [weak self] in
+                self?.finishCleanedUpSession(sessionId: sessionId)
+            }
+        }
+    }
+
+    @MainActor
+    private func runnerOrThrowaway(sessionId: UUID) -> WorktreeRunner {
+        runners[sessionId] ?? WorktreeRunner()
+    }
+
+    @MainActor
+    private func finishCleanedUpSession(sessionId: UUID) {
+        guard let session = sessions.active.first(where: { $0.id == sessionId })
+                ?? sessions.recent.first(where: { $0.id == sessionId }) else {
+            runners.removeValue(forKey: sessionId)
+            return
+        }
+        session.cleanupInfo = nil
+        session.status = .done
+        sessions.finish(session)
+        runners.removeValue(forKey: sessionId)
     }
 
     // MARK: - Mock data (--mock launch argument)

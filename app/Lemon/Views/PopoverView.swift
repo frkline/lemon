@@ -451,6 +451,14 @@ struct PopoverView: View {
             .padding(.vertical, 10)
             .background(.primary.opacity(0.025))
 
+            // Ready-for-review card — shown when handleComplete has
+            // landed a Lemon Report and stashed cleanupInfo but the
+            // user hasn't fired the cleanup yet. Sits above the console
+            // so it's the first thing you see when you click in.
+            if session.status == .reviewing, let info = session.cleanupInfo {
+                readyForReviewCard(session: session, info: info)
+            }
+
             // Gemma summary — shown when the local model has classified the session.
             if let summary = session.aiSummary {
                 HStack(spacing: 5) {
@@ -491,6 +499,63 @@ struct PopoverView: View {
             inlineConsole(session)
             detailFooter(session)
         }
+    }
+
+    @ViewBuilder
+    private func readyForReviewCard(session: Session, info: WorktreeCleanupInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(LD.statusDone)
+                    .frame(width: 6, height: 6)
+                Text("READY FOR REVIEW")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(LD.statusDone)
+                Spacer()
+            }
+            // Worktree path — monospace, selectable so the user can
+            // copy it into a terminal and `cd` over.
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text(info.sessionPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            HStack(spacing: 8) {
+                if let pr = session.prUrl, let url = URL(string: pr) {
+                    Link(destination: url) {
+                        Label("Open PR", systemImage: "arrow.up.right.square")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(LD.lemon)
+                }
+                Spacer()
+                Button {
+                    orchestrator.cleanupSession(session)
+                    withAnimation(LD.slide) { nav.showList() }
+                } label: {
+                    Label("Cleanup worktree", systemImage: "trash")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(GhostButtonStyle())
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(LD.statusDone.opacity(0.06))
+        .overlay(
+            Rectangle()
+                .fill(LD.statusDone.opacity(0.4))
+                .frame(width: 2),
+            alignment: .leading
+        )
     }
 
     private func inlineConsole(_ session: Session) -> some View {

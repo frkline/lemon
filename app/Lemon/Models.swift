@@ -291,6 +291,24 @@ struct LemonMarker: Equatable {
     let source: IssueSource?
 }
 
+/// Everything Orchestrator needs to clean up a finished session's
+/// worktree(s) + tmux + /tmp leftovers, stashed on the Session so the
+/// user can fire the cleanup later from the "Ready for review" card
+/// without WorktreeRunner staying alive in memory.
+struct WorktreeCleanupInfo: Equatable {
+    let sessionPath: String
+    let isMultiRepo: Bool
+    /// Per-repo (name, source-repo-path) tuples — both single-repo and
+    /// multi-repo cleanup walk this list. For single-repo, count == 1.
+    let repos: [RepoRef]
+    let slug: String
+
+    struct RepoRef: Equatable {
+        let name: String
+        let repoPath: String
+    }
+}
+
 @Observable
 final class Session: Identifiable {
     let id: UUID = UUID()
@@ -304,6 +322,11 @@ final class Session: Identifiable {
     var endedAt: Date?
     var aiSummary: String?
     var pendingAction: String?
+    /// Populated when handleComplete fires. The session moves to
+    /// `.reviewing` and stays in the active list until the user clicks
+    /// "Cleanup worktree" in the detail view, which fires
+    /// `Orchestrator.cleanupSession`.
+    var cleanupInfo: WorktreeCleanupInfo?
 
     init(issue: IssueRef) {
         self.issue = issue

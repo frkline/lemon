@@ -14,6 +14,11 @@ final class WorktreeRunner: @unchecked Sendable {
     var onPRUrl: ((String) -> Void)?
     var onAiSummary: ((String) -> Void)?
     var onPendingAction: ((String?) -> Void)?
+    /// Fired from handleComplete once the Lemon Report is posted and
+    /// intermediate labels are cleared. The session is now in
+    /// `.reviewing` and waiting for the user to hit "Cleanup worktree".
+    /// Orchestrator stashes this info on the Session.
+    var onCleanupReady: ((WorktreeCleanupInfo) -> Void)?
 
     func cancelPendingAction() {
         pendingActionTask?.cancel()
@@ -264,7 +269,20 @@ final class WorktreeRunner: @unchecked Sendable {
         _ = try? await shell("git -C \(q(repoPath)) worktree prune")
     }
 
-    private func cleanupWorktrees(
+    /// User-triggered (or reconstructed-session-triggered) cleanup
+    /// entry point. Orchestrator calls this on the per-session runner;
+    /// for reconstructed sessions whose runner was destroyed at a
+    /// previous process exit, Orchestrator spins up a fresh throwaway
+    /// WorktreeRunner just for this call.
+    func cleanup(info: WorktreeCleanupInfo) async {
+        let repos = info.repos.map { (name: $0.name, repoPath: $0.repoPath) }
+        await cleanupWorktrees(repos: repos,
+                               sessionPath: info.sessionPath,
+                               isMultiRepo: info.isMultiRepo,
+                               slug: info.slug)
+    }
+
+    func cleanupWorktrees(
         repos: [(name: String, repoPath: String)],
         sessionPath: String,
         isMultiRepo: Bool,
@@ -878,9 +896,21 @@ final class WorktreeRunner: @unchecked Sendable {
         try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
         try? await client.clearState(ref: ref, state: .waiting,    auth: auth)
 
-        await cleanupWorktrees(repos: repos, sessionPath: sessionPath, isMultiRepo: isMultiRepo,
-                               slug: ref.pathSlug)
-        onStatusChange?(.done)
+        // Stash cleanup info on the Session via the orchestrator's
+        // callback. The runner stops here — the user fires the actual
+        // worktree/tmux/tmp teardown by clicking "Cleanup worktree" in
+        // the detail view, which routes through
+        // Orchestrator.cleanupSession. Letting the user inspect or
+        // check out the worktree before it's blown away is the whole
+        // point of the .reviewing state.
+        let cleanup = WorktreeCleanupInfo(
+            sessionPath: sessionPath,
+            isMultiRepo: isMultiRepo,
+            repos: repos.map { WorktreeCleanupInfo.RepoRef(name: $0.name, repoPath: $0.repoPath) },
+            slug: ref.pathSlug
+        )
+        onCleanupReady?(cleanup)
+        log("[lemon] ready for review — worktree at \(sessionPath). Click Cleanup to tear down.")
     }
 
     // MARK: - Comment builders
