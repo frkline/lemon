@@ -620,6 +620,14 @@
     line-height: 24px;
   }
   .panel li .mark.no { color: var(--coral); }
+  /* Plain term/description lists (no .mark column) flow inline instead of
+     using the 24px grid, which would squeeze the term and overlap the text. */
+  .panel ul.tool-list li {
+    display: block;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .panel ul.tool-list li strong { font-family: var(--mono); }
 
   /* ---------- Interlude (chapter-break) ---------- */
 
@@ -1156,7 +1164,7 @@
       <div class="panel">
         <div class="panel-label">Tool surface</div>
         <h3 style="margin-bottom: 12px;">What Claude can do</h3>
-        <ul style="font-size: 13px; line-height: 1.7;">
+        <ul class="tool-list" style="font-size: 13px; line-height: 1.7;">
           <li><strong>list_sessions</strong> &mdash; what&rsquo;s running</li>
           <li><strong>get_session</strong> &mdash; full state of one session</li>
           <li><strong>get_pane_log</strong> &mdash; raw tmux output</li>
