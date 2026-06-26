@@ -26,17 +26,20 @@ struct IdentityEditorPane: View {
 
     private var kind: IdentityKind {
         switch target {
-        case .new(let k): return k
-        case .existing(let id):
-            return KeychainStore.shared.identities.first { $0.id == id }?.kind ?? .linear
+        case let .new(k): k
+        case let .existing(id):
+            KeychainStore.shared.identities.first { $0.id == id }?.kind ?? .linear
         }
     }
 
     private var isNew: Bool {
-        if case .new = target { return true } else { return false }
+        if case .new = target { true } else { false }
     }
 
-    private var isGitHub: Bool { kind == .github }
+    private var isGitHub: Bool {
+        kind == .github
+    }
+
     private var verified: Bool {
         if case .ok = verifyState { return true }
         return existingIdentity != nil
@@ -88,17 +91,17 @@ struct IdentityEditorPane: View {
 
     private var headerTitle: String {
         switch kind {
-        case .linear: return isNew ? "Connect Linear" : (existingIdentity?.label ?? "Linear")
-        case .github: return isNew ? "Connect GitHub" : (existingIdentity?.label ?? "GitHub")
+        case .linear: isNew ? "Connect Linear" : (existingIdentity?.label ?? "Linear")
+        case .github: isNew ? "Connect GitHub" : (existingIdentity?.label ?? "GitHub")
         }
     }
 
     private var headerSubtitle: String {
         switch kind {
         case .linear:
-            return "Personal API key from linear.app/settings → API. Lemon polls your teams; the key is stored in Keychain."
+            "Personal API key from linear.app/settings → API. Lemon polls your teams; the key is stored in Keychain."
         case .github:
-            return "Classic or fine-grained PAT with the `repo` scope. Add an Enterprise host below if you're on a self-hosted instance."
+            "Classic or fine-grained PAT with the `repo` scope. Add an Enterprise host below if you're on a self-hosted instance."
         }
     }
 
@@ -107,14 +110,14 @@ struct IdentityEditorPane: View {
             eyebrow: "LABEL",
             placeholder: defaultLabel,
             text: $label,
-            helper: "How this identity reads in the workspace editor."
+            helper: "How this identity reads in the workspace editor.",
         )
     }
 
     private var defaultLabel: String {
         switch kind {
-        case .linear: return "Linear · work"
-        case .github: return "GitHub · @you"
+        case .linear: "Linear · work"
+        case .github: "GitHub · @you"
         }
     }
 
@@ -138,7 +141,7 @@ struct IdentityEditorPane: View {
             }
             SecureField(
                 isGitHub ? "ghp_…" : "lin_api_…",
-                text: $token
+                text: $token,
             )
             .textFieldStyle(.plain)
             .font(.system(size: 12, design: .monospaced))
@@ -146,7 +149,7 @@ struct IdentityEditorPane: View {
             .padding(.horizontal, 9)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
             )
             .onChange(of: token) { _, _ in verifyState = .idle }
             Text(providerHint)
@@ -159,20 +162,20 @@ struct IdentityEditorPane: View {
     private var providerURL: URL {
         switch kind {
         case .linear:
-            return URL(string: "https://linear.app/settings/api")!
+            URL(string: "https://linear.app/settings/api")!
         case .github:
-            return URL(string: "https://github.com/settings/personal-access-tokens/new")!
+            URL(string: "https://github.com/settings/personal-access-tokens/new")!
         }
     }
 
     private var providerHint: String {
         switch kind {
         case .linear:
-            return "Personal API Key. Workspace-scoped; never leaves Keychain."
+            "Personal API Key. Workspace-scoped; never leaves Keychain."
         case .github:
             // Match GitHub's exact phrasing from the fine-grained PAT
             // Permissions section so the user can scan for it visually.
-            return "Required: Issues · Read and write. Pick the repos Lemon should watch."
+            "Required: Issues · Read and write. Pick the repos Lemon should watch."
         }
     }
 
@@ -182,7 +185,7 @@ struct IdentityEditorPane: View {
             placeholder: "api.github.acmecorp.com (leave blank for github.com)",
             text: $host,
             helper: "Optional. Set only for GitHub Enterprise Server installations.",
-            monospaced: true
+            monospaced: true,
         )
     }
 
@@ -209,15 +212,15 @@ struct IdentityEditorPane: View {
                     canVerify
                         ? AnyShapeStyle(LD.lemon)
                         : AnyShapeStyle(Color.primary.opacity(0.06)),
-                    in: Capsule()
+                    in: Capsule(),
                 )
                 .overlay(
                     Capsule().strokeBorder(
                         canVerify
                             ? Color.clear
                             : Color.primary.opacity(0.10),
-                        lineWidth: 0.5
-                    )
+                        lineWidth: 0.5,
+                    ),
                 )
             }
             .buttonStyle(.plain)
@@ -231,17 +234,17 @@ struct IdentityEditorPane: View {
 
     private var verifyButtonLabel: String {
         switch verifyState {
-        case .idle:      return verified ? "Re-verify & sync" : "Verify & sync"
-        case .verifying: return "Talking to API…"
-        case .ok:        return "Re-verify & sync"
-        case .failed:    return "Retry verify"
+        case .idle: verified ? "Re-verify & sync" : "Verify & sync"
+        case .verifying: "Talking to API…"
+        case .ok: "Re-verify & sync"
+        case .failed: "Retry verify"
         }
     }
 
     @ViewBuilder
     private var verifyStateChip: some View {
         switch verifyState {
-        case .ok(let handle, let count):
+        case let .ok(handle, count):
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 10))
@@ -250,7 +253,7 @@ struct IdentityEditorPane: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(LD.statusDone)
             }
-        case .failed(let msg):
+        case let .failed(msg):
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.octagon.fill")
                     .font(.system(size: 10))
@@ -269,7 +272,7 @@ struct IdentityEditorPane: View {
     private var surfacesSummary: some View {
         let surfaces = currentSurfaces
         let label = (kind == .linear) ? "TEAMS" : "REPOS"
-        let unit  = (kind == .linear) ? "team" : "repo"
+        let unit = (kind == .linear) ? "team" : "repo"
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text(label)
@@ -367,8 +370,8 @@ struct IdentityEditorPane: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Text(URL(fileURLWithPath: ws.path).lastPathComponent.isEmpty
-                                     ? "Unnamed"
-                                     : URL(fileURLWithPath: ws.path).lastPathComponent)
+                                    ? "Unnamed"
+                                    : URL(fileURLWithPath: ws.path).lastPathComponent)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.primary)
                                 Text("·")
@@ -412,16 +415,16 @@ struct IdentityEditorPane: View {
     private var currentSurfaces: [Surface] {
         switch verifyState {
         case .ok:
-            return existingIdentity?.knownSurfaces ?? []
+            existingIdentity?.knownSurfaces ?? []
         default:
-            return existingIdentity?.knownSurfaces ?? []
+            existingIdentity?.knownSurfaces ?? []
         }
     }
 
     private var emptySurfacesText: String {
         switch kind {
-        case .linear: return "No teams visible. Make sure the API key has team access."
-        case .github: return "No repos visible. Check the PAT's `repo` scope."
+        case .linear: "No teams visible. Make sure the API key has team access."
+        case .github: "No repos visible. Check the PAT's `repo` scope."
         }
     }
 
@@ -465,8 +468,9 @@ struct IdentityEditorPane: View {
     // MARK: - Behaviors
 
     private func hydrate() {
-        if case .existing(let id) = target,
-           let ident = KeychainStore.shared.identities.first(where: { $0.id == id }) {
+        if case let .existing(id) = target,
+           let ident = KeychainStore.shared.identities.first(where: { $0.id == id })
+        {
             existingIdentity = ident
             label = ident.label
             host = ident.host ?? ""
@@ -487,7 +491,7 @@ struct IdentityEditorPane: View {
             let result = try await orchestrator.verifyAndDiscover(
                 kind: kind,
                 token: trimmedToken,
-                host: trimmedHost.isEmpty ? nil : trimmedHost
+                host: trimmedHost.isEmpty ? nil : trimmedHost,
             )
             verifyState = .ok(handle: result.credential.handle, assignedCount: result.assignedIssueCount)
             // Mutate the in-memory identity record so the surfaces panel can
@@ -498,7 +502,7 @@ struct IdentityEditorPane: View {
                 label: label.isEmpty ? defaultLabel : label,
                 handle: result.credential.displayName,
                 principalId: result.credential.id,
-                host: trimmedHost.isEmpty ? nil : trimmedHost
+                host: trimmedHost.isEmpty ? nil : trimmedHost,
             )
             ident.label = label.isEmpty ? defaultLabel : label
             ident.handle = result.credential.displayName
@@ -519,7 +523,7 @@ struct IdentityEditorPane: View {
             label: label.isEmpty ? defaultLabel : label,
             handle: "",
             principalId: "",
-            host: nil
+            host: nil,
         )
         working.label = label.isEmpty ? defaultLabel : label
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -574,7 +578,7 @@ struct IdentityEditorPane: View {
         placeholder: String,
         text: Binding<String>,
         helper: String? = nil,
-        monospaced: Bool = false
+        monospaced: Bool = false,
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(eyebrow)
@@ -588,7 +592,7 @@ struct IdentityEditorPane: View {
                 .padding(.horizontal, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
                 )
             if let helper {
                 Text(helper)

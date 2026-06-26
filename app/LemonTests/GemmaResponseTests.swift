@@ -1,8 +1,7 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class GemmaResponseTests: XCTestCase {
-
     // MARK: - GemmaResponse decoding
 
     func testDecodesResponseWithNoAction() throws {
@@ -10,7 +9,7 @@ final class GemmaResponseTests: XCTestCase {
         {"state":"running","summary":"Making progress on CardView tokens","action":null}
         """
         let r = try decode(json)
-        XCTAssertEqual(r.state,   "running")
+        XCTAssertEqual(r.state, "running")
         XCTAssertEqual(r.summary, "Making progress on CardView tokens")
         XCTAssertNil(r.action)
     }
@@ -21,9 +20,9 @@ final class GemmaResponseTests: XCTestCase {
          "action":{"type":"send_keys","keys":"\\r"}}
         """
         let r = try decode(json)
-        XCTAssertEqual(r.state,          "blocked_prompt")
-        XCTAssertEqual(r.action?.type,   "send_keys")
-        XCTAssertEqual(r.action?.keys,   "\r")
+        XCTAssertEqual(r.state, "blocked_prompt")
+        XCTAssertEqual(r.action?.type, "send_keys")
+        XCTAssertEqual(r.action?.keys, "\r")
         XCTAssertNil(r.action?.message)
     }
 
@@ -33,7 +32,7 @@ final class GemmaResponseTests: XCTestCase {
          "action":{"type":"notify_user","message":"Which auth strategy should I use?"}}
         """
         let r = try decode(json)
-        XCTAssertEqual(r.action?.type,    "notify_user")
+        XCTAssertEqual(r.action?.type, "notify_user")
         XCTAssertEqual(r.action?.message, "Which auth strategy should I use?")
         XCTAssertNil(r.action?.keys)
     }
@@ -68,6 +67,7 @@ final class GemmaResponseTests: XCTestCase {
     }
 
     // MARK: - Two-layer decoding (OpenAI wrapper → inner JSON string)
+
     // LocalLLM.classify() decodes an outer ChatResponse, then decodes the
     // inner content string as GemmaResponse. Test that inner decoding round-trip works.
 

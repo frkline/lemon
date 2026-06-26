@@ -15,15 +15,14 @@ import Foundation
 //   comment: <optional explicit id, falls back to host comment>
 //   -->
 enum LemonMarkerExtractor {
-
-    // Parse a single comment body. Public so tests can target it directly.
+    /// Parse a single comment body. Public so tests can target it directly.
     static func parse(body: String, commentId: String) -> LemonMarker? {
         guard
             let start = body.range(of: "<!-- lemon\n"),
-            let end   = body.range(of: "\n-->", range: start.upperBound..<body.endIndex)
+            let end = body.range(of: "\n-->", range: start.upperBound ..< body.endIndex)
         else { return nil }
 
-        let block = String(body[start.upperBound..<end.lowerBound])
+        let block = String(body[start.upperBound ..< end.lowerBound])
         var fields: [String: String] = [:]
         for line in block.components(separatedBy: "\n") {
             let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -32,8 +31,8 @@ enum LemonMarkerExtractor {
 
         guard
             let branch = fields["branch"],
-            let pr     = fields["pr"],
-            let repo   = fields["repo"]
+            let pr = fields["pr"],
+            let repo = fields["repo"]
         else { return nil }
 
         let storedCommentId = fields["comment"] ?? commentId
@@ -43,12 +42,12 @@ enum LemonMarkerExtractor {
             prNumber: pr,
             commentId: storedCommentId,
             repoPath: repo,
-            source: source
+            source: source,
         )
     }
 
-    // Latest marker in a comment list. Walks newest → oldest because a fresh
-    // Lemon Report supersedes earlier ones.
+    /// Latest marker in a comment list. Walks newest → oldest because a fresh
+    /// Lemon Report supersedes earlier ones.
     static func findLatest(in comments: [IssueComment]) -> LemonMarker? {
         for comment in comments.reversed() {
             if let marker = parse(body: comment.body, commentId: comment.id) {
@@ -58,9 +57,9 @@ enum LemonMarkerExtractor {
         return nil
     }
 
-    // True if any comment was created after the given comment ID. Comments
-    // are expected chronological (oldest → newest); see LinearClient.fetchComments
-    // and the equivalent GitHubClient invariant.
+    /// True if any comment was created after the given comment ID. Comments
+    /// are expected chronological (oldest → newest); see LinearClient.fetchComments
+    /// and the equivalent GitHubClient invariant.
     static func hasNewComment(in comments: [IssueComment], afterCommentId: String) -> Bool {
         guard let idx = comments.firstIndex(where: { $0.id == afterCommentId }) else {
             return false
@@ -68,11 +67,11 @@ enum LemonMarkerExtractor {
         return idx < comments.count - 1
     }
 
-    // Bodies of all comments strictly after the given comment ID.
+    /// Bodies of all comments strictly after the given comment ID.
     static func bodiesAfter(in comments: [IssueComment], afterCommentId: String) -> [String] {
         guard let idx = comments.firstIndex(where: { $0.id == afterCommentId }) else {
             return []
         }
-        return comments.suffix(from: comments.index(after: idx)).map { $0.body }
+        return comments.suffix(from: comments.index(after: idx)).map(\.body)
     }
 }

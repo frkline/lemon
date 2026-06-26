@@ -1,8 +1,10 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class KeychainStoreTests: XCTestCase {
-    private func store() -> KeychainStore { KeychainStore.makeForTesting() }
+    private func store() -> KeychainStore {
+        KeychainStore.makeForTesting()
+    }
 
     func testLinearApiKeyRoundTrip() {
         let s = store()
@@ -43,7 +45,7 @@ final class KeychainStoreTests: XCTestCase {
         // so the test fixtures need to live somewhere real.
         let fm = FileManager.default
         let modelDir = NSTemporaryDirectory() + "kc-test-model-\(UUID().uuidString)"
-        let swiftLM  = NSTemporaryDirectory() + "kc-test-swiftlm-\(UUID().uuidString)"
+        let swiftLM = NSTemporaryDirectory() + "kc-test-swiftlm-\(UUID().uuidString)"
         try fm.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
         try "{}".write(toFile: modelDir + "/config.json", atomically: true, encoding: .utf8)
         try Data().write(to: URL(fileURLWithPath: swiftLM))
@@ -92,7 +94,7 @@ final class KeychainStoreTests: XCTestCase {
         let s = store()
         s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "ABC", path: "/tmp/repo-a")])
         XCTAssertNotNil(s.repoFor(issuePrefix: "ABC"))
-        XCTAssertNotNil(s.repoFor(issuePrefix: "abc"))  // case-insensitive match
+        XCTAssertNotNil(s.repoFor(issuePrefix: "abc")) // case-insensitive match
         XCTAssertNil(s.repoFor(issuePrefix: "LEM"))
     }
 
@@ -193,7 +195,8 @@ final class KeychainStoreTests: XCTestCase {
 
     func testEnvBypassFileMissingReturnsNil() {
         withEnv(["LEMON_LINEAR_KEY": nil,
-                 "LEMON_LINEAR_KEY_FILE": "/tmp/does-not-exist-\(UUID().uuidString)"]) {
+                 "LEMON_LINEAR_KEY_FILE": "/tmp/does-not-exist-\(UUID().uuidString)"])
+        {
             XCTAssertNil(KeychainStore.envKeyBypass())
         }
     }
@@ -236,14 +239,14 @@ final class KeychainStoreTests: XCTestCase {
     private func linearPair(matchKey: String, teamKeys: [String]? = nil) -> WorkspacePair {
         WorkspacePair(
             source: SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: teamKeys ?? [matchKey]),
-            workspace: mapping(matchKey: matchKey)
+            workspace: mapping(matchKey: matchKey),
         )
     }
 
     private func githubPair(repo: String, path: String = "/tmp/repo") -> WorkspacePair {
         WorkspacePair(
             source: SourceConfig(source: .github, displayName: "GitHub", githubRepos: [repo]),
-            workspace: mapping(matchKey: repo, path: path)
+            workspace: mapping(matchKey: repo, path: path),
         )
     }
 
@@ -257,7 +260,7 @@ final class KeychainStoreTests: XCTestCase {
 
     func testPairCapEnforcedAtTen() {
         let s = store()
-        let many = (0..<15).map { linearPair(matchKey: "PFX\($0)") }
+        let many = (0 ..< 15).map { linearPair(matchKey: "PFX\($0)") }
         s.pairs = many
         XCTAssertEqual(s.pairs.count, KeychainStore.maxPairs,
                        "Setter must clip to maxPairs.")
@@ -268,7 +271,7 @@ final class KeychainStoreTests: XCTestCase {
         s.pairs = [linearPair(matchKey: "HRP"), linearPair(matchKey: "LEM")]
         let ref = IssueRef(
             id: "n1", identifier: "LEM-42", title: "x", description: nil,
-            labelNames: [], scope: .linearTeam(id: "team1")
+            labelNames: [], scope: .linearTeam(id: "team1"),
         )
         XCTAssertEqual(s.pair(for: ref)?.workspace.matchKey, "LEM")
     }
@@ -278,7 +281,7 @@ final class KeychainStoreTests: XCTestCase {
         s.pairs = [linearPair(matchKey: "HRP"), githubPair(repo: "acme/widgets")]
         let ref = IssueRef(
             id: "acme/widgets#7", identifier: "acme/widgets#7", title: "x", description: nil,
-            labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 7)
+            labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 7),
         )
         XCTAssertEqual(s.pair(for: ref)?.workspace.matchKey, "acme/widgets")
     }
@@ -288,7 +291,7 @@ final class KeychainStoreTests: XCTestCase {
         s.pairs = [githubPair(repo: "Acme/Widgets")]
         let ref = IssueRef(
             id: "acme/widgets#1", identifier: "acme/widgets#1", title: "x", description: nil,
-            labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 1)
+            labelNames: [], scope: .githubRepo(owner: "acme", repo: "widgets", number: 1),
         )
         XCTAssertNotNil(s.pair(for: ref), "owner/repo match should be case-insensitive.")
     }
@@ -309,7 +312,7 @@ final class KeychainStoreTests: XCTestCase {
     func testMigrationIsIdempotent() {
         let s = store()
         s.saveWorkspaceRepos([WorkspaceRepo(issuePrefix: "HRP", path: "/tmp/a")])
-        _ = s.pairs   // triggers migration
+        _ = s.pairs // triggers migration
         // Mutate pairs to simulate user editing
         s.pairs = [githubPair(repo: "acme/widgets")]
         // A second read must NOT re-overlay the legacy Linear pair on top.
@@ -344,7 +347,7 @@ final class KeychainStoreTests: XCTestCase {
 
     // MARK: - Identity refactor migration
 
-    func testMigratePairsToIdentitiesAndWorkspaces() {
+    func testMigratePairsToIdentitiesAndWorkspaces() throws {
         let s = store()
         s.linearApiKey = "lin_t"
         s.linearUserId = "user-linear"
@@ -359,11 +362,11 @@ final class KeychainStoreTests: XCTestCase {
         // Touch identities → migration runs
         let ids = s.identities
         XCTAssertEqual(ids.count, 2, "One identity per source kind, regardless of pair count.")
-        XCTAssertEqual(ids.filter { $0.kind == .linear }.count, 1)
-        XCTAssertEqual(ids.filter { $0.kind == .github }.count, 1)
+        XCTAssertEqual(ids.count(where: { $0.kind == .linear }), 1)
+        XCTAssertEqual(ids.count(where: { $0.kind == .github }), 1)
 
-        let linear = ids.first { $0.kind == .linear }!
-        let github = ids.first { $0.kind == .github }!
+        let linear = try XCTUnwrap(ids.first { $0.kind == .linear })
+        let github = try XCTUnwrap(ids.first { $0.kind == .github })
         XCTAssertEqual(linear.handle, "user-linear")
         XCTAssertEqual(github.handle, "frkline")
 
@@ -373,7 +376,7 @@ final class KeychainStoreTests: XCTestCase {
 
         let workspaces = s.workspaces
         XCTAssertEqual(workspaces.count, 3)
-        XCTAssertEqual(Set(workspaces.map { $0.routing.surfaceId }), ["HRP", "LEM", "acme/widgets"])
+        XCTAssertEqual(Set(workspaces.map(\.routing.surfaceId)), ["HRP", "LEM", "acme/widgets"])
         XCTAssertTrue(workspaces.allSatisfy { ws in
             ws.routing.identityId == linear.id || ws.routing.identityId == github.id
         })
@@ -387,7 +390,7 @@ final class KeychainStoreTests: XCTestCase {
         let s = store()
         s.linearApiKey = "lin_t"; s.linearUserId = "user-linear"
         s.pairs = [linearPair(matchKey: "HRP")]
-        _ = s.identities    // triggers migration
+        _ = s.identities // triggers migration
         // User then mutates the identity list
         s.identities = []
         // Another read must NOT re-overlay the legacy migration
@@ -409,12 +412,12 @@ final class KeychainStoreTests: XCTestCase {
         let s = store()
         let linear = Identity(
             kind: .linear, label: "Linear · work", handle: "user",
-            principalId: "user-id", host: nil
+            principalId: "user-id", host: nil,
         )
         s.identities = [linear]
         XCTAssertNil(s.authFor(identity: linear), "Missing secret → nil.")
         s.setIdentitySecret("lin_secret", for: linear.id)
-        guard case .linear(let key, let userId) = s.authFor(identity: linear) else {
+        guard case let .linear(key, userId) = s.authFor(identity: linear) else {
             return XCTFail("Expected linear auth")
         }
         XCTAssertEqual(key, "lin_secret")
@@ -428,20 +431,21 @@ final class KeychainStoreTests: XCTestCase {
             principalId: "frkline", host: nil,
             knownSurfaces: [
                 Surface(id: "acme/widgets", key: "acme/widgets", displayName: "Widgets"),
-            ]
+            ],
         )
         s.identities = [identity]
         let workspace = Workspace(
             path: "/tmp/repo",
             allReposInFolder: false,
             homeRepo: "",
-            routing: Routing(identityId: identity.id, surfaceId: "acme/widgets")
+            routing: Routing(identityId: identity.id, surfaceId: "acme/widgets"),
         )
         XCTAssertEqual(s.identity(for: workspace)?.id, identity.id)
         XCTAssertEqual(s.surface(for: workspace)?.displayName, "Widgets")
     }
 
     // MARK: - isConfigured via the modern (Identity, Workspace, secret) model
+
     //
     // Regression: persistTrackers() writes identities + workspaces + per-identity
     // secrets but does NOT write to the legacy `pairs` storage. isConfigured
@@ -452,7 +456,7 @@ final class KeychainStoreTests: XCTestCase {
     private func aiFixtures() throws -> (modelDir: String, swiftLM: String, cleanup: () -> Void) {
         let fm = FileManager.default
         let modelDir = NSTemporaryDirectory() + "kc-test-model-\(UUID().uuidString)"
-        let swiftLM  = NSTemporaryDirectory() + "kc-test-swiftlm-\(UUID().uuidString)"
+        let swiftLM = NSTemporaryDirectory() + "kc-test-swiftlm-\(UUID().uuidString)"
         try fm.createDirectory(atPath: modelDir, withIntermediateDirectories: true)
         try "{}".write(toFile: modelDir + "/config.json", atomically: true, encoding: .utf8)
         try Data().write(to: URL(fileURLWithPath: swiftLM))
@@ -469,13 +473,13 @@ final class KeychainStoreTests: XCTestCase {
 
         let identity = Identity(
             kind: .github, label: "GitHub · frkline", handle: "frkline",
-            principalId: "frkline", host: nil
+            principalId: "frkline", host: nil,
         )
         s.identities = [identity]
         s.setIdentitySecret("ghp_modern_path", for: identity.id)
         s.workspaces = [Workspace(
             path: "/tmp/repo",
-            routing: Routing(identityId: identity.id, surfaceId: "frkline/lemon")
+            routing: Routing(identityId: identity.id, surfaceId: "frkline/lemon"),
         )]
         s.modelPath = fix.modelDir
         s.swiftLMPath = fix.swiftLM
@@ -490,14 +494,14 @@ final class KeychainStoreTests: XCTestCase {
 
         let identity = Identity(
             kind: .github, label: "GitHub · frkline", handle: "frkline",
-            principalId: "frkline", host: nil
+            principalId: "frkline", host: nil,
         )
         s.identities = [identity]
         // Deliberately do NOT call setIdentitySecret — the workspace routes
         // through an identity whose Keychain entry is missing.
         s.workspaces = [Workspace(
             path: "/tmp/repo",
-            routing: Routing(identityId: identity.id, surfaceId: "frkline/lemon")
+            routing: Routing(identityId: identity.id, surfaceId: "frkline/lemon"),
         )]
         s.modelPath = fix.modelDir
         s.swiftLMPath = fix.swiftLM
@@ -517,7 +521,7 @@ final class KeychainStoreTests: XCTestCase {
         s.identities = []
         s.workspaces = [Workspace(
             path: "/tmp/repo",
-            routing: Routing(identityId: orphanId, surfaceId: "any")
+            routing: Routing(identityId: orphanId, surfaceId: "any"),
         )]
         s.modelPath = fix.modelDir
         s.swiftLMPath = fix.swiftLM
@@ -531,12 +535,12 @@ final class KeychainStoreTests: XCTestCase {
         let identity = Identity(
             kind: .linear, label: "Linear", handle: "u",
             principalId: "u-id", host: nil,
-            knownSurfaces: []
+            knownSurfaces: [],
         )
         s.identities = [identity]
         let workspace = Workspace(
             path: "/tmp/r",
-            routing: Routing(identityId: identity.id, surfaceId: "GONE")
+            routing: Routing(identityId: identity.id, surfaceId: "GONE"),
         )
         XCTAssertNotNil(s.identity(for: workspace), "identity lookup still works")
         XCTAssertNil(s.surface(for: workspace), "surface deleted upstream → nil")

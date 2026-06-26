@@ -1,8 +1,7 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class WorktreeRunnerTests: XCTestCase {
-
     // MARK: - devPort
 
     func testDevPortBasicIssue() {
@@ -40,8 +39,8 @@ final class WorktreeRunnerTests: XCTestCase {
 
     func testTmuxSessionNameFromSlug() {
         let runner = WorktreeRunner()
-        XCTAssertEqual(runner.tmuxSessionName(slug: "demo-42"),  "lemon-demo-42")
-        XCTAssertEqual(runner.tmuxSessionName(slug: "lem-100"),  "lemon-lem-100")
+        XCTAssertEqual(runner.tmuxSessionName(slug: "demo-42"), "lemon-demo-42")
+        XCTAssertEqual(runner.tmuxSessionName(slug: "lem-100"), "lemon-lem-100")
         XCTAssertEqual(runner.tmuxSessionName(slug: "acme-widgets-7"), "lemon-acme-widgets-7",
                        "GitHub slugs flatten slashes; tmux name must not contain '/'.")
     }
@@ -72,9 +71,9 @@ final class WorktreeRunnerTests: XCTestCase {
     func testNoGemmaWhenSessionFresh() {
         let now = Date()
         let result = WorktreeRunner.shouldInvokeGemma(
-            lastActivityAt: now.addingTimeInterval(-30),  // 30s ago — not silent
+            lastActivityAt: now.addingTimeInterval(-30), // 30s ago — not silent
             lastGemmaAt: nil,
-            now: now
+            now: now,
         )
         XCTAssertFalse(result)
     }
@@ -82,9 +81,9 @@ final class WorktreeRunnerTests: XCTestCase {
     func testGemmaFiresAfter2MinSilence() {
         let now = Date()
         let result = WorktreeRunner.shouldInvokeGemma(
-            lastActivityAt: now.addingTimeInterval(-121),  // 121s ago
+            lastActivityAt: now.addingTimeInterval(-121), // 121s ago
             lastGemmaAt: nil,
-            now: now
+            now: now,
         )
         XCTAssertTrue(result)
     }
@@ -93,8 +92,8 @@ final class WorktreeRunnerTests: XCTestCase {
         let now = Date()
         let result = WorktreeRunner.shouldInvokeGemma(
             lastActivityAt: now.addingTimeInterval(-180),
-            lastGemmaAt: now.addingTimeInterval(-60),  // last Gemma only 60s ago — still in cooldown
-            now: now
+            lastGemmaAt: now.addingTimeInterval(-60), // last Gemma only 60s ago — still in cooldown
+            now: now,
         )
         XCTAssertFalse(result)
     }
@@ -103,8 +102,8 @@ final class WorktreeRunnerTests: XCTestCase {
         let now = Date()
         let result = WorktreeRunner.shouldInvokeGemma(
             lastActivityAt: now.addingTimeInterval(-300),
-            lastGemmaAt: now.addingTimeInterval(-181),  // 181s ago — cooldown expired
-            now: now
+            lastGemmaAt: now.addingTimeInterval(-181), // 181s ago — cooldown expired
+            now: now,
         )
         XCTAssertTrue(result)
     }
@@ -115,7 +114,7 @@ final class WorktreeRunnerTests: XCTestCase {
         let result = WorktreeRunner.shouldInvokeGemma(
             lastActivityAt: now.addingTimeInterval(-120),
             lastGemmaAt: nil,
-            now: now
+            now: now,
         )
         XCTAssertFalse(result)
     }
@@ -128,7 +127,7 @@ final class WorktreeRunnerTests: XCTestCase {
             lastGemmaAt: nil,
             now: now,
             silenceThreshold: 30,
-            cooldown: 60
+            cooldown: 60,
         )
         XCTAssertTrue(result)
     }
@@ -142,7 +141,7 @@ final class WorktreeRunnerTests: XCTestCase {
     }
 
     func testIsSafeSendKeysAcceptsNumericMenu() {
-        for digit in 1...9 {
+        for digit in 1 ... 9 {
             XCTAssertTrue(WorktreeRunner.isSafeSendKeys("\(digit)"))
         }
     }

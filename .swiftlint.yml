@@ -1,0 +1,33 @@
+# Pragmatic SwiftLint config.
+#
+# The rules disabled below are exactly the ones the existing codebase currently
+# trips: noisy style rules (several of which SwiftFormat already owns) plus the
+# structural size limits that the large SwiftUI types exceed. Disabling them
+# keeps CI green today while leaving the rest of SwiftLint's default rule set
+# active to catch *new* problems. Re-enable/tighten these incrementally.
+
+included:
+  - app/Lemon
+  - app/LemonTests
+
+disabled_rules:
+  # Noisy style / owned by SwiftFormat / high false-positive rate here
+  - identifier_name
+  - line_length
+  - trailing_comma          # SwiftFormat manages trailing commas
+  - opening_brace           # SwiftFormat manages brace placement
+  - statement_position
+  - implicit_optional_initialization
+  - multiple_closures_with_trailing_closure
+  - static_over_final_class
+  - force_cast
+  - unused_optional_binding
+  - type_name
+  # Structural size limits — relaxed for existing large views/types
+  - function_body_length
+  - type_body_length
+  - file_length
+  - function_parameter_count
+  - cyclomatic_complexity
+  - nesting
+  - large_tuple

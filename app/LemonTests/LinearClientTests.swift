@@ -1,5 +1,5 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class LinearClientTests: XCTestCase {
     private var session: URLSession!
@@ -11,16 +11,18 @@ final class LinearClientTests: XCTestCase {
         session = URLSession(configuration: config)
     }
 
-    private func client() -> LinearClient { LinearClient(session: session) }
+    private func client() -> LinearClient {
+        LinearClient(session: session)
+    }
 
-    // Minimal valid node JSON shared across tests
+    /// Minimal valid node JSON shared across tests
     private func node(
         id: String = "abc",
         identifier: String = "DEMO-42",
         title: String = "Fix it",
         description: String? = "Details",
         labels: [String] = [],
-        teamId: String = "team1"
+        teamId: String = "team1",
     ) -> String {
         let labelNodes = labels.map { "{\"name\":\"\($0)\"}" }.joined(separator: ",")
         let desc = description.map { "\"\($0)\"" } ?? "null"
@@ -47,10 +49,10 @@ final class LinearClientTests: XCTestCase {
 
     func testFiltersIssuesWithActiveLemonLabels() async throws {
         // Issues already carrying an active Lemon label should be excluded
-        let inProgress = node(id: "ip",  labels: [LinearClient.labelInProgress])
-        let waiting    = node(id: "wt",  labels: [LinearClient.labelWaiting])
-        let complete   = node(id: "cp",  labels: [LinearClient.labelComplete])
-        let fresh      = node(id: "fr",  labels: [LinearClient.labelTrigger])
+        let inProgress = node(id: "ip", labels: [LinearClient.labelInProgress])
+        let waiting = node(id: "wt", labels: [LinearClient.labelWaiting])
+        let complete = node(id: "cp", labels: [LinearClient.labelComplete])
+        let fresh = node(id: "fr", labels: [LinearClient.labelTrigger])
         StubURLProtocol.respond(json: wrapped("\(inProgress),\(waiting),\(complete),\(fresh)"))
         let issues = try await client().fetchLemonQueue(apiKey: "k", userId: "u")
         XCTAssertEqual(issues.map(\.id), ["fr"])
@@ -75,7 +77,7 @@ final class LinearClientTests: XCTestCase {
 
     func testMixedValidAndInvalidNodes() async throws {
         let good = node(id: "good")
-        let bad  = "{\"id\":\"bad\"}"   // missing identifier, title, team
+        let bad = "{\"id\":\"bad\"}" // missing identifier, title, team
         StubURLProtocol.respond(json: wrapped("\(good),\(bad)"))
         let issues = try await client().fetchLemonQueue(apiKey: "k", userId: "u")
         XCTAssertEqual(issues.map(\.id), ["good"])
@@ -87,9 +89,9 @@ final class LinearClientTests: XCTestCase {
 // MARK: - URLProtocol stub
 
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) private static var _data = Data()
-    nonisolated(unsafe) private static var _statusCode = 200
-    nonisolated(unsafe) static var onRequest: ((URLRequest) -> Void)? = nil
+    private nonisolated(unsafe) static var _data = Data()
+    private nonisolated(unsafe) static var _statusCode = 200
+    nonisolated(unsafe) static var onRequest: ((URLRequest) -> Void)?
 
     static func respond(json: String, statusCode: Int = 200) {
         _data = Data(json.utf8)
@@ -97,8 +99,13 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         // Does not clear onRequest — callers can set the hook before or after this call
     }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
         // URLProtocol moves httpBody into httpBodyStream — read both so callers see the body.
@@ -122,7 +129,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             url: request.url!,
             statusCode: Self._statusCode,
             httpVersion: nil,
-            headerFields: ["Content-Type": "application/json"]
+            headerFields: ["Content-Type": "application/json"],
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Self._data)

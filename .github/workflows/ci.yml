@@ -20,6 +20,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode 26.5
+        run: |
+          APP="$(ls -d /Applications/Xcode_26.5*.app 2>/dev/null | sort | tail -n1)"
+          if [ -z "$APP" ]; then
+            echo "::error::Xcode 26.5 not found on this runner image"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          sudo xcode-select -s "$APP"
+
       - name: Show toolchain
         run: |
           sw_vers
@@ -37,3 +47,20 @@ jobs:
           xcodebuild -project app/Lemon.xcodeproj -scheme Lemon -configuration Debug \
             ONLY_ACTIVE_ARCH=YES OTHER_SWIFT_FLAGS="-warnings-as-errors" \
             CODE_SIGNING_ALLOWED=NO -destination 'platform=macOS' test
+
+  lint:
+    name: lint
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install linters
+        run: brew install swiftformat swiftlint
+
+      - name: SwiftFormat (lint)
+        run: swiftformat --lint app/Lemon app/LemonTests
+
+      - name: SwiftLint (strict)
+        run: swiftlint lint --strict

@@ -1,5 +1,5 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class LocalLLMTests: XCTestCase {
     private var session: URLSession!
@@ -42,7 +42,7 @@ final class LocalLLMTests: XCTestCase {
     func testClassifyDecodesRunningState() async throws {
         stubResponse(state: "running", summary: "Making progress")
         let result = try await llm().classify(issue: issue(), logLines: ["doing stuff"])
-        XCTAssertEqual(result.state,   "running")
+        XCTAssertEqual(result.state, "running")
         XCTAssertEqual(result.summary, "Making progress")
         XCTAssertNil(result.action)
     }
@@ -59,7 +59,7 @@ final class LocalLLMTests: XCTestCase {
         let action = #"{"type":"notify_user","message":"Need your input"}"#
         stubResponse(state: "waiting", summary: "Blocked on auth", action: action)
         let result = try await llm().classify(issue: issue(), logLines: [])
-        XCTAssertEqual(result.action?.type,    "notify_user")
+        XCTAssertEqual(result.action?.type, "notify_user")
         XCTAssertEqual(result.action?.message, "Need your input")
     }
 
@@ -101,7 +101,7 @@ final class LocalLLMTests: XCTestCase {
         }
     }
 
-    func testClassifySendsIssueContextInRequest() async throws {
+    func testClassifySendsIssueContextInRequest() async {
         stubResponse(state: "running", summary: "ok")
         RequestBodyCapture.last = nil
         StubURLProtocol.onRequest = { req in
@@ -119,7 +119,7 @@ final class LocalLLMTests: XCTestCase {
     }
 }
 
-// Capture the last request body for inspection
+/// Capture the last request body for inspection
 enum RequestBodyCapture {
     nonisolated(unsafe) static var last: String?
 }

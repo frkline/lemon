@@ -2,7 +2,7 @@ import Foundation
 
 struct LinearIssue: Identifiable, Codable, Equatable {
     let id: String
-    let identifier: String  // e.g. "LEM-42"
+    let identifier: String // e.g. "LEM-42"
     let title: String
     let description: String?
     let labelNames: [String]
@@ -14,14 +14,15 @@ struct LinearIssue: Identifiable, Codable, Equatable {
 }
 
 struct WorkspaceRepo: Codable, Identifiable {
-    var id: UUID = UUID()
-    var issuePrefix: String        // e.g. "LEM" matches "LEM-42"
-    var path: String               // single repo path OR parent folder
+    var id: UUID = .init()
+    var issuePrefix: String // e.g. "LEM" matches "LEM-42"
+    var path: String // single repo path OR parent folder
     var allReposInFolder: Bool = false
-    var homeRepo: String = ""      // subdirectory to launch Claude in (e.g. "memory"); empty = session root
+    var homeRepo: String = "" // subdirectory to launch Claude in (e.g. "memory"); empty = session root
 }
 
 // MARK: - Source-agnostic issue model
+
 //
 // `IssueRef` is the lingua franca between Orchestrator/WorktreeRunner and the
 // per-source clients (LinearClient, GitHubClient). Each client maps its own
@@ -34,8 +35,8 @@ enum IssueSource: String, Codable, Hashable {
 
     var displayName: String {
         switch self {
-        case .linear: return "Linear"
-        case .github: return "GitHub"
+        case .linear: "Linear"
+        case .github: "GitHub"
         }
     }
 }
@@ -46,8 +47,8 @@ enum IssueScope: Codable, Equatable, Hashable {
 }
 
 struct IssueRef: Identifiable, Codable, Equatable, Hashable {
-    let id: String              // opaque source-side id (Linear node id, or "owner/repo#n")
-    let identifier: String      // human-facing label, e.g. "HRP-42" or "acme/widgets#7"
+    let id: String // opaque source-side id (Linear node id, or "owner/repo#n")
+    let identifier: String // human-facing label, e.g. "HRP-42" or "acme/widgets#7"
     let title: String
     let description: String?
     let labelNames: [String]
@@ -55,38 +56,40 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
 
     var source: IssueSource {
         switch scope {
-        case .linearTeam:  return .linear
-        case .githubRepo:  return .github
+        case .linearTeam: .linear
+        case .githubRepo: .github
         }
     }
 
-    // Linear-style prefix ("HRP" for "HRP-42"). For GitHub identifiers this
-    // returns whatever leading-letters happen to be there; routing for GH
-    // pairs goes through scope, not prefix, so the value is unused in that path.
+    /// Linear-style prefix ("HRP" for "HRP-42"). For GitHub identifiers this
+    /// returns whatever leading-letters happen to be there; routing for GH
+    /// pairs goes through scope, not prefix, so the value is unused in that path.
     var identifierPrefix: String {
         String(identifier.prefix(while: { $0.isLetter }))
     }
 
-    // Namespaced so Linear node IDs and GitHub identifiers can't collide in
-    // SessionStore.isTracking — see plan §5.
-    var trackingKey: String { "\(source.rawValue):\(id)" }
+    /// Namespaced so Linear node IDs and GitHub identifiers can't collide in
+    /// SessionStore.isTracking — see plan §5.
+    var trackingKey: String {
+        "\(source.rawValue):\(id)"
+    }
 
-    // Drives /tmp/lemon-{slug} worktree paths. Linear: "lem-42". GitHub:
-    // "acme-widgets-7" — slashes flatten to dashes, lowercased so filesystem
-    // case-insensitivity on APFS doesn't bite.
+    /// Drives /tmp/lemon-{slug} worktree paths. Linear: "lem-42". GitHub:
+    /// "acme-widgets-7" — slashes flatten to dashes, lowercased so filesystem
+    /// case-insensitivity on APFS doesn't bite.
     var pathSlug: String {
         switch scope {
         case .linearTeam:
-            return identifier.lowercased()
-        case .githubRepo(let owner, let repo, let number):
-            return "\(owner)-\(repo)-\(number)"
+            identifier.lowercased()
+        case let .githubRepo(owner, repo, number):
+            "\(owner)-\(repo)-\(number)"
                 .lowercased()
                 .replacingOccurrences(of: "/", with: "-")
         }
     }
 
-    // Adapter from the Linear-specific issue shape used by LinearClient
-    // internals. Mirrors LinearIssue field-for-field.
+    /// Adapter from the Linear-specific issue shape used by LinearClient
+    /// internals. Mirrors LinearIssue field-for-field.
     init(linearIssue i: LinearIssue) {
         self.id = i.id
         self.identifier = i.identifier
@@ -97,7 +100,8 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
     }
 
     init(id: String, identifier: String, title: String, description: String?,
-         labelNames: [String], scope: IssueScope) {
+         labelNames: [String], scope: IssueScope)
+    {
         self.id = id
         self.identifier = identifier
         self.title = title
@@ -107,8 +111,8 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
     }
 }
 
-// Source-agnostic comment used by both LinearClient and GitHubClient. The
-// shared LemonMarkerExtractor consumes these.
+/// Source-agnostic comment used by both LinearClient and GitHubClient. The
+/// shared LemonMarkerExtractor consumes these.
 struct IssueComment: Identifiable, Equatable {
     let id: String
     let body: String
@@ -116,6 +120,7 @@ struct IssueComment: Identifiable, Equatable {
 }
 
 // MARK: - Identity → Surface → Workspace
+
 //
 // The richer mental model that supersedes WorkspacePair. Three layers:
 //   • Identity  — a credential (Linear key, GitHub PAT, future MCP/Git).
@@ -139,15 +144,15 @@ enum IdentityKind: String, Codable, Hashable {
 
     var displayName: String {
         switch self {
-        case .linear: return "Linear"
-        case .github: return "GitHub"
+        case .linear: "Linear"
+        case .github: "GitHub"
         }
     }
 
     var issueSource: IssueSource {
         switch self {
-        case .linear: return .linear
-        case .github: return .github
+        case .linear: .linear
+        case .github: .github
         }
     }
 }
@@ -166,7 +171,7 @@ struct Surface: Codable, Hashable, Identifiable {
 
 /// One credential + the surfaces it can reach.
 struct Identity: Codable, Identifiable, Hashable {
-    var id: UUID = UUID()
+    var id: UUID = .init()
     var kind: IdentityKind
 
     /// User-facing label in the editor — "Linear · work", "GitHub · @frkline".
@@ -204,7 +209,7 @@ struct Routing: Codable, Hashable {
 
 /// Local folder + a single routing.
 struct Workspace: Codable, Identifiable, Hashable {
-    var id: UUID = UUID()
+    var id: UUID = .init()
     var path: String
     var allReposInFolder: Bool = false
     var homeRepo: String = ""
@@ -214,28 +219,28 @@ struct Workspace: Codable, Identifiable, Hashable {
 // MARK: - Legacy WorkspacePair surface (migration source)
 
 struct SourceConfig: Codable, Identifiable, Hashable {
-    var id: UUID = UUID()
+    var id: UUID = .init()
     var source: IssueSource
     var displayName: String
-    var linearTeamKeys: [String]?   // optional allowlist; nil = all teams
-    var githubRepos: [String]?      // "owner/repo" entries
+    var linearTeamKeys: [String]? // optional allowlist; nil = all teams
+    var githubRepos: [String]? // "owner/repo" entries
 }
 
 struct WorkspaceMapping: Codable, Hashable {
-    var matchKey: String            // Linear team key ("HRP") or GH "owner/repo"
+    var matchKey: String // Linear team key ("HRP") or GH "owner/repo"
     var path: String
     var allReposInFolder: Bool = false
     var homeRepo: String = ""
 }
 
 struct WorkspacePair: Codable, Identifiable, Hashable {
-    var id: UUID = UUID()
+    var id: UUID = .init()
     var source: SourceConfig
     var workspace: WorkspaceMapping
 }
 
-// Lemon label state, mapped through each client to its source-specific
-// representation (Linear label ID, GitHub label name).
+/// Lemon label state, mapped through each client to its source-specific
+/// representation (Linear label ID, GitHub label name).
 enum LemonState: String, CaseIterable, Equatable {
     case trigger
     case inProgress
@@ -244,10 +249,10 @@ enum LemonState: String, CaseIterable, Equatable {
 
     var labelName: String {
         switch self {
-        case .trigger:    return "🍋"
-        case .inProgress: return "🍋 In Progress"
-        case .waiting:    return "🍋 Waiting"
-        case .complete:   return "🍋 Complete"
+        case .trigger: "🍋"
+        case .inProgress: "🍋 In Progress"
+        case .waiting: "🍋 Waiting"
+        case .complete: "🍋 Complete"
         }
     }
 
@@ -255,28 +260,28 @@ enum LemonState: String, CaseIterable, Equatable {
 }
 
 enum SessionStatus: Equatable {
-    case planning    // worktree setup
-    case executing   // claude session running
-    case waiting     // claude paused, awaiting human input
-    case reviewing   // PR open, Lemon comment posted
-    case done        // issue moved to completed state
-    case failed      // worktree/process error
+    case planning // worktree setup
+    case executing // claude session running
+    case waiting // claude paused, awaiting human input
+    case reviewing // PR open, Lemon comment posted
+    case done // issue moved to completed state
+    case failed // worktree/process error
 
     var displayLabel: String {
         switch self {
-        case .planning:  return "Planning"
-        case .executing: return "Executing"
-        case .waiting:   return "Waiting"
-        case .reviewing: return "Reviewing"
-        case .done:      return "Done"
-        case .failed:    return "Failed"
+        case .planning: "Planning"
+        case .executing: "Executing"
+        case .waiting: "Waiting"
+        case .reviewing: "Reviewing"
+        case .done: "Done"
+        case .failed: "Failed"
         }
     }
 
     var isTerminal: Bool {
         switch self {
-        case .done, .failed: return true
-        default: return false
+        case .done, .failed: true
+        default: false
         }
     }
 }
@@ -286,8 +291,8 @@ struct LemonMarker: Equatable {
     let prNumber: String
     let commentId: String
     let repoPath: String
-    // Pre-upgrade comments omit this line; nil parses as .linear so existing
-    // re-trigger flows keep working after the multi-source migration.
+    /// Pre-upgrade comments omit this line; nil parses as .linear so existing
+    /// re-trigger flows keep working after the multi-source migration.
     let source: IssueSource?
 }
 
@@ -311,7 +316,7 @@ struct WorktreeCleanupInfo: Equatable {
 
 @Observable
 final class Session: Identifiable {
-    let id: UUID = UUID()
+    let id: UUID = .init()
     let issue: IssueRef
     let startedAt: Date
     var status: SessionStatus = .planning
@@ -334,10 +339,10 @@ final class Session: Identifiable {
     }
 
     #if DEBUG
-    init(issue: IssueRef, startedAt: Date) {
-        self.issue = issue
-        self.startedAt = startedAt
-    }
+        init(issue: IssueRef, startedAt: Date) {
+            self.issue = issue
+            self.startedAt = startedAt
+        }
     #endif
 
     func appendLog(_ line: String) {
@@ -359,12 +364,12 @@ struct GemmaResponse: Decodable {
         case decodeFailed(String)
     }
 
-    // Robust parser for the inner JSON content returned by SwiftLM's
-    // /v1/chat/completions choices[0].message.content. Chat-tuned models
-    // sometimes wrap the JSON in markdown fences (```json ... ```), prefix it
-    // with prose, or trail commentary. This locates the JSON body, strips
-    // fences/prose, and decodes — handing back a typed ParseError when it
-    // can't recover, so callers can degrade gracefully instead of crashing.
+    /// Robust parser for the inner JSON content returned by SwiftLM's
+    /// /v1/chat/completions choices[0].message.content. Chat-tuned models
+    /// sometimes wrap the JSON in markdown fences (```json ... ```), prefix it
+    /// with prose, or trail commentary. This locates the JSON body, strips
+    /// fences/prose, and decodes — handing back a typed ParseError when it
+    /// can't recover, so callers can degrade gracefully instead of crashing.
     static func parse(_ raw: String) throws -> GemmaResponse {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ParseError.empty }
@@ -376,7 +381,7 @@ struct GemmaResponse: Decodable {
             let afterOpenFence = trimmed
                 .drop(while: { $0 == "`" })
                 .drop(while: { !$0.isNewline })
-                .dropFirst()  // the newline itself
+                .dropFirst() // the newline itself
             // Drop the trailing fence + any trailing whitespace.
             var body = String(afterOpenFence)
             if let range = body.range(of: "```", options: .backwards) {
@@ -390,9 +395,9 @@ struct GemmaResponse: Decodable {
         let jsonString: String = {
             if fenced.hasPrefix("{") { return fenced }
             guard let start = fenced.firstIndex(of: "{"),
-                  let end   = fenced.lastIndex(of: "}"),
+                  let end = fenced.lastIndex(of: "}"),
                   start < end else { return fenced }
-            return String(fenced[start...end])
+            return String(fenced[start ... end])
         }()
 
         guard jsonString.hasPrefix("{") else { throw ParseError.noJSON }
@@ -405,7 +410,7 @@ struct GemmaResponse: Decodable {
 }
 
 struct GemmaAction: Decodable {
-    let type: String       // "send_keys" | "notify_user"
+    let type: String // "send_keys" | "notify_user"
     let keys: String?
     let message: String?
 }

@@ -1,5 +1,5 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class SessionStoreTests: XCTestCase {
     private func issue(id: String = "i1") -> IssueRef {
@@ -35,7 +35,7 @@ final class SessionStoreTests: XCTestCase {
 
     func testRecentCappedAt20() {
         let store = SessionStore()
-        for i in 0..<25 {
+        for i in 0 ..< 25 {
             let s = Session(issue: issue(id: "i\(i)"))
             store.add(s); store.finish(s)
         }
@@ -68,19 +68,21 @@ final class SessionStoreTests: XCTestCase {
 
     func testAppendLogCapsAt2000Lines() {
         let s = Session(issue: issue())
-        for i in 0..<2005 { s.appendLog("line \(i)") }
+        for i in 0 ..< 2005 {
+            s.appendLog("line \(i)")
+        }
         XCTAssertEqual(s.logLines.count, 2000)
         XCTAssertEqual(s.logLines.first, "line 5")
     }
 
-    // Locks down the fix for the stopSession-vs-natural-finish race that
-    // would otherwise double-insert the same session into `recent`.
+    /// Locks down the fix for the stopSession-vs-natural-finish race that
+    /// would otherwise double-insert the same session into `recent`.
     func testFinishIsIdempotent() {
         let store = SessionStore()
         let s = Session(issue: issue(id: "race"))
         store.add(s)
         store.finish(s)
-        store.finish(s)  // simulates stopSession racing with runner's onStatusChange terminal callback
+        store.finish(s) // simulates stopSession racing with runner's onStatusChange terminal callback
         XCTAssertEqual(store.recent.count, 1, "Double-finish must not duplicate the session in recent")
         XCTAssertEqual(store.recent.first?.issue.id, "race")
     }

@@ -1,9 +1,9 @@
 import Foundation
 import os
 
-// Manages git worktrees and a claude --auto --remote-control session for one
-// issue (Linear or GitHub). Supports single-repo and multi-repo (all git
-// repos in a folder) modes.
+/// Manages git worktrees and a claude --auto --remote-control session for one
+/// issue (Linear or GitHub). Supports single-repo and multi-repo (all git
+/// repos in a folder) modes.
 final class WorktreeRunner: @unchecked Sendable {
     private var pollTask: Task<Void, Never>?
     private var stopped = false
@@ -29,7 +29,8 @@ final class WorktreeRunner: @unchecked Sendable {
     // MARK: - Entry point
 
     func run(ref: IssueRef, pair: WorkspacePair, client: any IssueSourceClient,
-             auth: SourceAuth, retrigger: LemonMarker? = nil) async {
+             auth: SourceAuth, retrigger: LemonMarker? = nil) async
+    {
         let workspace = pair.workspace
         let identifier = ref.identifier
         let slug = ref.pathSlug
@@ -49,7 +50,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 onStatusChange?(.failed)
                 return
             }
-            log("[lemon] found repos: \(repos.map { $0.name }.joined(separator: ", "))")
+            log("[lemon] found repos: \(repos.map(\.name).joined(separator: ", "))")
         } else {
             let name = URL(fileURLWithPath: workspace.path).lastPathComponent
             repos = [(name: name, repoPath: workspace.path)]
@@ -62,7 +63,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 sessionPath: sessionPath,
                 isMultiRepo: workspace.allReposInFolder,
                 branch: branch,
-                isRetrigger: retrigger != nil
+                isRetrigger: retrigger != nil,
             )
         } catch {
             let msg = error.localizedDescription
@@ -74,7 +75,7 @@ final class WorktreeRunner: @unchecked Sendable {
             _ = try? await client.postComment(
                 ref: ref,
                 body: "🍋 Session failed to start: \(msg)\n\nRe-add the 🍋 label to retry.",
-                auth: auth
+                auth: auth,
             )
             onStatusChange?(.failed)
             return
@@ -94,7 +95,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 revisionComments = try await client.fetchCommentsAfter(
                     ref: ref,
                     afterCommentId: marker.commentId,
-                    auth: auth
+                    auth: auth,
                 )
                 if !revisionComments.isEmpty {
                     log("[lemon] re-trigger with \(revisionComments.count) revision comment(s)")
@@ -110,7 +111,7 @@ final class WorktreeRunner: @unchecked Sendable {
             repos: workspace.allReposInFolder ? repos : [],
             lemonMdPath: lemonMdPath,
             devPort: devPort,
-            revisionComments: revisionComments
+            revisionComments: revisionComments,
         )
 
         // Update source state labels.
@@ -133,14 +134,15 @@ final class WorktreeRunner: @unchecked Sendable {
                                              slug: slug)
 
         guard launchTmux(sessionPath: launchPath, slug: slug,
-                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath) else {
+                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath)
+        else {
             log("[lemon] tmux launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
             try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
             _ = try? await client.postComment(
                 ref: ref,
                 body: "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry.",
-                auth: auth
+                auth: auth,
             )
             onStatusChange?(.failed)
             return
@@ -159,7 +161,7 @@ final class WorktreeRunner: @unchecked Sendable {
             branch: branch,
             retrigger: retrigger,
             workspacePath: workspace.path,
-            sentinelPath: sentinelPath
+            sentinelPath: sentinelPath,
         )
     }
 
@@ -188,7 +190,7 @@ final class WorktreeRunner: @unchecked Sendable {
         sessionPath: String,
         isMultiRepo: Bool,
         branch: String,
-        isRetrigger: Bool
+        isRetrigger: Bool,
     ) async throws {
         if isMultiRepo {
             // Create the session root directory (not a worktree itself).
@@ -207,7 +209,7 @@ final class WorktreeRunner: @unchecked Sendable {
         repoPath: String,
         worktreePath: String,
         branch: String,
-        isRetrigger: Bool
+        isRetrigger: Bool,
     ) async throws {
         // Remove any leftover worktree and orphaned branch from a previous failed run.
         _ = try? await shell("git -C \(q(repoPath)) worktree remove \(q(worktreePath)) --force")
@@ -286,7 +288,7 @@ final class WorktreeRunner: @unchecked Sendable {
         repos: [(name: String, repoPath: String)],
         sessionPath: String,
         isMultiRepo: Bool,
-        slug: String
+        slug: String,
     ) async {
         if isMultiRepo {
             for repo in repos {
@@ -319,25 +321,25 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Context file
 
-    // Returns true when the silence detector should fire Gemma.
-    // Extracted for unit testability — call sites pass `now` explicitly.
+    /// Returns true when the silence detector should fire Gemma.
+    /// Extracted for unit testability — call sites pass `now` explicitly.
     static func shouldInvokeGemma(
         lastActivityAt: Date,
         lastGemmaAt: Date?,
         now: Date = Date(),
         silenceThreshold: TimeInterval = 120,
-        cooldown: TimeInterval = 180
+        cooldown: TimeInterval = 180,
     ) -> Bool {
         let silence = now.timeIntervalSince(lastActivityAt)
         let gemmaCooldown = lastGemmaAt.map { now.timeIntervalSince($0) } ?? .infinity
         return silence > silenceThreshold && gemmaCooldown > cooldown
     }
 
-    // Derives a stable dev server port from the issue number (e.g. HRP-42 → 3042).
-    // Keeps concurrent sessions on different ports without coordination.
+    /// Derives a stable dev server port from the issue number (e.g. HRP-42 → 3042).
+    /// Keeps concurrent sessions on different ports without coordination.
     static func devPort(for identifier: String) -> Int {
         let n = Int(identifier.split(separator: "-").last.flatMap(String.init) ?? "0") ?? 0
-        return 3000 + (n % 1000)   // stays in 3000–3999, wraps for very large issue numbers
+        return 3000 + (n % 1000) // stays in 3000–3999, wraps for very large issue numbers
     }
 
     private func writeContext(
@@ -346,14 +348,15 @@ final class WorktreeRunner: @unchecked Sendable {
         repos: [(name: String, repoPath: String)],
         lemonMdPath: String?,
         devPort: Int,
-        revisionComments: [String] = []
+        revisionComments: [String] = [],
     ) {
         var content = ""
 
         // Team operating instructions come first — Claude reads this before the issue.
         if let path = lemonMdPath,
            let instructions = try? String(contentsOfFile: path, encoding: .utf8),
-           !instructions.isEmpty {
+           !instructions.isEmpty
+        {
             content += instructions.trimmingCharacters(in: .whitespacesAndNewlines)
             content += "\n\n---\n\n"
             log("[lemon] loaded team instructions from \(path)")
@@ -404,12 +407,10 @@ final class WorktreeRunner: @unchecked Sendable {
 
         // Source-specific completion instructions. The label set is identical
         // (🍋 / 🍋 In Progress / 🍋 Waiting / 🍋 Complete); the verb differs.
-        let completeInstruction: String = {
-            switch ref.source {
-            case .linear: return "Apply the Linear label **🍋 Complete** to issue \(ref.identifier) via `gh`, the Linear MCP, or any Linear client."
-            case .github: return "Apply the GitHub label **🍋 Complete** to issue \(ref.identifier) via `gh issue edit \(ref.identifier.components(separatedBy: "#").last ?? "") --add-label '🍋 Complete'` (run inside the worktree where `gh` knows the repo)."
-            }
-        }()
+        let completeInstruction = switch ref.source {
+        case .linear: "Apply the Linear label **🍋 Complete** to issue \(ref.identifier) via `gh`, the Linear MCP, or any Linear client."
+        case .github: "Apply the GitHub label **🍋 Complete** to issue \(ref.identifier) via `gh issue edit \(ref.identifier.components(separatedBy: "#").last ?? "") --add-label '🍋 Complete'` (run inside the worktree where `gh` knows the repo)."
+        }
 
         // Completion checklist — universal across stacks.
         content += """
@@ -449,6 +450,7 @@ final class WorktreeRunner: @unchecked Sendable {
     }
 
     // MARK: - Session naming helpers
+
     //
     // Paths/tmux names are keyed off the IssueRef.pathSlug, not the human-facing
     // identifier — slashes and `#` in GitHub identifiers ("acme/widgets#7")
@@ -465,13 +467,14 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - MCP config preparation
 
-    // Merges .mcp.json files from all worktree repos into a single config file.
-    // Returns the path to the merged file, or nil if no MCP servers were found.
-    // Passing this via --mcp-config bypasses Claude's interactive MCP discovery prompt.
+    /// Merges .mcp.json files from all worktree repos into a single config file.
+    /// Returns the path to the merged file, or nil if no MCP servers were found.
+    /// Passing this via --mcp-config bypasses Claude's interactive MCP discovery prompt.
     private func prepareMcpConfig(sessionPath: String, repos: [(name: String, repoPath: String)],
-                                  isMultiRepo: Bool, slug: String) -> String? {
+                                  isMultiRepo: Bool, slug: String) -> String?
+    {
         var mcpServers: [String: Any] = [:]
-        var sourceOf: [String: String] = [:]   // server name → repo it came from (for conflict logging)
+        var sourceOf: [String: String] = [:] // server name → repo it came from (for conflict logging)
         let searchPaths: [(label: String, path: String)] = isMultiRepo
             ? repos.map { (label: $0.name, path: "\(sessionPath)/\($0.name)") }
             : [(label: "session", path: sessionPath)]
@@ -503,22 +506,23 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - tmux launch
 
-    // Creates a named tmux session running Claude, pipes output to a log file,
-    // and opens the session in iTerm2 (tmux -CC for native tabs) if available.
-    // The launcher script writes sentinelPath when claude exits so pollUntilDone
-    // can detect early exits without waiting for the 8h deadline.
+    /// Creates a named tmux session running Claude, pipes output to a log file,
+    /// and opens the session in iTerm2 (tmux -CC for native tabs) if available.
+    /// The launcher script writes sentinelPath when claude exits so pollUntilDone
+    /// can detect early exits without waiting for the 8h deadline.
     @discardableResult
     private func launchTmux(sessionPath: String, slug: String,
-                             sentinelPath: String, mcpConfigPath: String? = nil) -> Bool {
+                            sentinelPath: String, mcpConfigPath: String? = nil) -> Bool
+    {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
             log("[lemon] tmux not found — install with: brew install tmux", level: .error)
             return false
         }
 
-        let sessionName  = tmuxSessionName(slug: slug)
+        let sessionName = tmuxSessionName(slug: slug)
         let launcherPath = "/tmp/lemon-launch-\(slug).sh"
-        let mcpFlag      = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
+        let mcpFlag = mcpConfigPath.map { "--mcp-config '\($0)'" } ?? ""
 
         // Trailing positional kickoff prompt — `claude [options] [--] [prompt]`.
         // Without this Claude opens an empty REPL and just sits there; the
@@ -575,9 +579,9 @@ final class WorktreeRunner: @unchecked Sendable {
         let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
         if hasITerm {
             let ok = runSync("""
-                osascript -e 'tell application "iTerm" to create window with default profile \
-                command "tmux -CC attach -t \(sessionName)"' 2>/dev/null
-                """)
+            osascript -e 'tell application "iTerm" to create window with default profile \
+            command "tmux -CC attach -t \(sessionName)"' 2>/dev/null
+            """)
             if !ok {
                 Logger.worktree.warning("iTerm window open failed for \(sessionName); falling back to Terminal.app")
                 openInTerminalApp(sessionName: sessionName)
@@ -589,16 +593,16 @@ final class WorktreeRunner: @unchecked Sendable {
         return true
     }
 
-    // Auto-launch path: the user didn't ask for this window — Lemon decided to
-    // open it. So we deliberately omit `activate` to avoid stealing focus from
-    // whatever they were typing in. Terminal.app's window still appears in the
-    // window list and Mission Control; the user can switch to it when ready.
-    // The Join button (PopoverView) uses an activate-ing variant for the case
-    // where the user explicitly clicked Join.
+    /// Auto-launch path: the user didn't ask for this window — Lemon decided to
+    /// open it. So we deliberately omit `activate` to avoid stealing focus from
+    /// whatever they were typing in. Terminal.app's window still appears in the
+    /// window list and Mission Control; the user can switch to it when ready.
+    /// The Join button (PopoverView) uses an activate-ing variant for the case
+    /// where the user explicitly clicked Join.
     private func openInTerminalApp(sessionName: String) {
         runSync("""
-            osascript -e 'tell application "Terminal" to do script "tmux attach -t \(sessionName)"' 2>/dev/null || true
-            """)
+        osascript -e 'tell application "Terminal" to do script "tmux attach -t \(sessionName)"' 2>/dev/null || true
+        """)
     }
 
     // MARK: - Gemma orchestration
@@ -667,27 +671,27 @@ final class WorktreeRunner: @unchecked Sendable {
         }
     }
 
-    // tmux special key names that don't need an Enter-suffix and must not be quoted.
+    /// tmux special key names that don't need an Enter-suffix and must not be quoted.
     static let specialKeys: Set<String> = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right"]
 
-    // Safe confirmations: single keystrokes Claude/claude-code prompts accept,
-    // numeric menu selections (1-9), yes/no, and the navigation/confirmation
-    // special keys an MCP-picker style menu needs (Enter to confirm a
-    // pre-checked list, Space to toggle, Escape to reject).
+    /// Safe confirmations: single keystrokes Claude/claude-code prompts accept,
+    /// numeric menu selections (1-9), yes/no, and the navigation/confirmation
+    /// special keys an MCP-picker style menu needs (Enter to confirm a
+    /// pre-checked list, Space to toggle, Escape to reject).
     static func isSafeSendKeys(_ keys: String) -> Bool {
-        let allowed: Set<String> = [
+        let allowed: Set = [
             "", "y", "Y", "n", "N",
             "yes", "Yes", "YES", "no", "No", "NO",
-            "1", "2", "3", "4", "5", "6", "7", "8", "9"
+            "1", "2", "3", "4", "5", "6", "7", "8", "9",
         ]
         return allowed.contains(keys) || specialKeys.contains(keys)
     }
 
     // MARK: - Log tail helper
 
-    // Counts non-empty lines in the pane log. Used by the silence detector
-    // instead of byte-count so ANSI cursor-redraw inflation doesn't reset the
-    // activity timer.
+    /// Counts non-empty lines in the pane log. Used by the silence detector
+    /// instead of byte-count so ANSI cursor-redraw inflation doesn't reset the
+    /// activity timer.
     private func countLogLines(at path: String) -> Int {
         guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
         return content.split(separator: "\n", omittingEmptySubsequences: true).count
@@ -703,12 +707,12 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Synchronous shell helper (used for setup/teardown, not in async hot paths)
 
-    // Use a login shell (`zsh -l -c`) so Homebrew's PATH on Apple Silicon
-    // (/opt/homebrew/bin) is sourced from .zprofile. Without -l, tools like
-    // tmux installed via `brew install` are invisible at runtime even though
-    // the onboarding step (which also uses -l) correctly detects them — that
-    // mismatch caused "tmux not found" failures live, despite tmux being
-    // installed and verified at setup.
+    /// Use a login shell (`zsh -l -c`) so Homebrew's PATH on Apple Silicon
+    /// (/opt/homebrew/bin) is sourced from .zprofile. Without -l, tools like
+    /// tmux installed via `brew install` are invisible at runtime even though
+    /// the onboarding step (which also uses -l) correctly detects them — that
+    /// mismatch caused "tmux not found" failures live, despite tmux being
+    /// installed and verified at setup.
     @discardableResult
     private func runSync(_ command: String) -> Bool {
         let p = Process()
@@ -734,15 +738,15 @@ final class WorktreeRunner: @unchecked Sendable {
         branch: String,
         retrigger: LemonMarker?,
         workspacePath: String,
-        sentinelPath: String
+        sentinelPath: String,
     ) async {
-        let deadline = Date().addingTimeInterval(8 * 3600)  // 8h max; prevents forever-stuck icon
+        let deadline = Date().addingTimeInterval(8 * 3600) // 8h max; prevents forever-stuck icon
         let slug = ref.pathSlug
-        var lastLineCount: Int = 0
+        var lastLineCount = 0
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
 
-        while !stopped && Date() < deadline {
+        while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
             guard !stopped else { break }
 
@@ -767,7 +771,7 @@ final class WorktreeRunner: @unchecked Sendable {
                         isMultiRepo: isMultiRepo,
                         branch: branch,
                         retrigger: retrigger,
-                        workspacePath: workspacePath
+                        workspacePath: workspacePath,
                     )
                     return
                 }
@@ -807,7 +811,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 _ = try? await client.postComment(
                     ref: ref,
                     body: "🍋 Session ended without completing — \(cause). Re-add the 🍋 label to retry.",
-                    auth: auth
+                    auth: auth,
                 )
                 try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
                 try? await client.clearState(ref: ref, state: .waiting, auth: auth)
@@ -842,7 +846,7 @@ final class WorktreeRunner: @unchecked Sendable {
 
     private func handleComplete(
         ref: IssueRef,
-        pair: WorkspacePair,
+        pair _: WorkspacePair,
         client: any IssueSourceClient,
         auth: SourceAuth,
         sessionPath: String,
@@ -850,7 +854,7 @@ final class WorktreeRunner: @unchecked Sendable {
         isMultiRepo: Bool,
         branch: String,
         retrigger: LemonMarker?,
-        workspacePath: String
+        workspacePath: String,
     ) async {
         onStatusChange?(.reviewing)
         log("[lemon] 🍋 Complete detected for \(ref.identifier)")
@@ -871,7 +875,7 @@ final class WorktreeRunner: @unchecked Sendable {
             prNumber: prNumber,
             branch: branch,
             summary: summary,
-            repoPath: markerPath
+            repoPath: markerPath,
         )
 
         if retrigger != nil {
@@ -892,9 +896,9 @@ final class WorktreeRunner: @unchecked Sendable {
         // alongside 🍋 Complete. GitHub doesn't auto-remove labels when
         // a new one is applied (Linear's source-state machinery does,
         // GH doesn't), so we have to be explicit at the transition.
-        try? await client.clearState(ref: ref, state: .trigger,    auth: auth)
+        try? await client.clearState(ref: ref, state: .trigger, auth: auth)
         try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
-        try? await client.clearState(ref: ref, state: .waiting,    auth: auth)
+        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
 
         // Stash cleanup info on the Session via the orchestrator's
         // callback. The runner stops here — the user fires the actual
@@ -907,7 +911,7 @@ final class WorktreeRunner: @unchecked Sendable {
             sessionPath: sessionPath,
             isMultiRepo: isMultiRepo,
             repos: repos.map { WorktreeCleanupInfo.RepoRef(name: $0.name, repoPath: $0.repoPath) },
-            slug: ref.pathSlug
+            slug: ref.pathSlug,
         )
         onCleanupReady?(cleanup)
         log("[lemon] ready for review — worktree at \(sessionPath). Click Cleanup to tear down.")
@@ -921,7 +925,7 @@ final class WorktreeRunner: @unchecked Sendable {
         prNumber: String,
         branch: String,
         summary: String,
-        repoPath: String
+        repoPath: String,
     ) -> String {
         var md = "## 🍋 Lemon Report — \(ref.identifier)\n\n"
         if let url = prUrl {
@@ -965,7 +969,7 @@ final class WorktreeRunner: @unchecked Sendable {
 
     private func detectPRInRepo(branch: String, repoPath: String) async -> String? {
         guard let output = try? await shell(
-            "cd \(q(repoPath)) && gh pr list --head \(branch) --json url --jq '.[0].url' 2>/dev/null"
+            "cd \(q(repoPath)) && gh pr list --head \(branch) --json url --jq '.[0].url' 2>/dev/null",
         ) else { return nil }
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty || trimmed == "null" ? nil : trimmed
@@ -973,7 +977,7 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Shell helper
 
-    // Login shell for the same PATH reason as runSync above.
+    /// Login shell for the same PATH reason as runSync above.
     @discardableResult
     private func shell(_ command: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
@@ -1001,7 +1005,9 @@ final class WorktreeRunner: @unchecked Sendable {
         onLogLine?(line)
     }
 
-    private func q(_ s: String) -> String { "\"\(s)\"" }
+    private func q(_ s: String) -> String {
+        "\"\(s)\""
+    }
 }
 
 struct ShellError: Error, LocalizedError {

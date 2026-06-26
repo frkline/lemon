@@ -4,44 +4,44 @@ import SwiftUI
 
 enum LD {
     // Brand
-    static let lemon      = Color(r: 0.969, g: 0.784, b: 0.259)  // #F7C842
-    static let lemondrop  = Color(r: 0.996, g: 0.957, b: 0.800)  // pale yellow tint
-    static let coral      = Color(r: 1.000, g: 0.420, b: 0.275)  // #FF6B46
-    static let citrus     = Color(r: 0.176, g: 0.290, b: 0.118)  // deep citrus green (use on light)
+    static let lemon = Color(r: 0.969, g: 0.784, b: 0.259) // #F7C842
+    static let lemondrop = Color(r: 0.996, g: 0.957, b: 0.800) // pale yellow tint
+    static let coral = Color(r: 1.000, g: 0.420, b: 0.275) // #FF6B46
+    static let citrus = Color(r: 0.176, g: 0.290, b: 0.118) // deep citrus green (use on light)
 
     // Source marks — bright enough to read on the warm-dark chrome. Linear
     // gets a honey-amber that nods to lemon without competing with the
     // primary-action yellow; GitHub gets the status-done green so the source
     // identifier is consistent with the "complete" semantics across views.
-    static let linearMark = Color(r: 0.918, g: 0.682, b: 0.227)  // #EAAE3A — warmer than lemon, distinct
-    static let githubMark = Color(r: 0.420, g: 0.820, b: 0.500)  // brightened statusDone for chip glyphs
+    static let linearMark = Color(r: 0.918, g: 0.682, b: 0.227) // #EAAE3A — warmer than lemon, distinct
+    static let githubMark = Color(r: 0.420, g: 0.820, b: 0.500) // brightened statusDone for chip glyphs
 
     // Status palette
-    static let statusPlanning  = Color(r: 0.38, g: 0.59, b: 0.98)
+    static let statusPlanning = Color(r: 0.38, g: 0.59, b: 0.98)
     static let statusExecuting = lemon
-    static let statusWaiting   = coral
+    static let statusWaiting = coral
     static let statusReviewing = Color(r: 0.40, g: 0.78, b: 0.56)
-    static let statusDone      = Color(r: 0.27, g: 0.76, b: 0.48)
-    static let statusFailed    = Color(r: 0.95, g: 0.27, b: 0.27)
+    static let statusDone = Color(r: 0.27, g: 0.76, b: 0.48)
+    static let statusFailed = Color(r: 0.95, g: 0.27, b: 0.27)
 
     // Console
-    static let consoleBackground = Color(r: 0.102, g: 0.078, b: 0.031)  // warm near-black
-    static let consoleText       = Color(r: 0.910, g: 0.878, b: 0.800)  // warm off-white
-    static let consoleLemon      = lemon
-    static let consoleSage       = Color(r: 0.553, g: 0.671, b: 0.529)
-    static let consoleGemma      = Color(r: 0.420, g: 0.710, b: 0.580)  // teal-green for [gemma] lines
+    static let consoleBackground = Color(r: 0.102, g: 0.078, b: 0.031) // warm near-black
+    static let consoleText = Color(r: 0.910, g: 0.878, b: 0.800) // warm off-white
+    static let consoleLemon = lemon
+    static let consoleSage = Color(r: 0.553, g: 0.671, b: 0.529)
+    static let consoleGemma = Color(r: 0.420, g: 0.710, b: 0.580) // teal-green for [gemma] lines
 
     // Radius
-    static let r3:  CGFloat = 3
-    static let r6:  CGFloat = 6
+    static let r3: CGFloat = 3
+    static let r6: CGFloat = 6
     static let r10: CGFloat = 10
     static let r14: CGFloat = 14
     static let r20: CGFloat = 20
 
     // Animation
-    static let snappy  = Animation.spring(duration: 0.28, bounce: 0.15)
-    static let smooth  = Animation.easeInOut(duration: 0.22)
-    static let slide   = Animation.easeInOut(duration: 0.30)
+    static let snappy = Animation.spring(duration: 0.28, bounce: 0.15)
+    static let smooth = Animation.easeInOut(duration: 0.22)
+    static let slide = Animation.easeInOut(duration: 0.30)
 }
 
 // MARK: - Color initialiser
@@ -57,8 +57,8 @@ extension Color {
         Scanner(string: h).scanHexInt64(&rgb)
         self.init(
             r: Double((rgb >> 16) & 0xFF) / 255,
-            g: Double((rgb >>  8) & 0xFF) / 255,
-            b: Double( rgb        & 0xFF) / 255
+            g: Double((rgb >> 8) & 0xFF) / 255,
+            b: Double(rgb & 0xFF) / 255,
         )
     }
 }
@@ -68,23 +68,23 @@ extension Color {
 extension SessionStatus {
     var color: Color {
         switch self {
-        case .planning:  return LD.statusPlanning
-        case .executing: return LD.statusExecuting
-        case .waiting:   return LD.statusWaiting
-        case .reviewing: return LD.statusReviewing
-        case .done:      return LD.statusDone
-        case .failed:    return LD.statusFailed
+        case .planning: LD.statusPlanning
+        case .executing: LD.statusExecuting
+        case .waiting: LD.statusWaiting
+        case .reviewing: LD.statusReviewing
+        case .done: LD.statusDone
+        case .failed: LD.statusFailed
         }
     }
 
     var symbol: String {
         switch self {
-        case .planning:  return "brain"
-        case .executing: return "hammer.fill"
-        case .waiting:   return "pause.circle.fill"
-        case .reviewing: return "checklist"
-        case .done:      return "checkmark"
-        case .failed:    return "xmark"
+        case .planning: "brain"
+        case .executing: "hammer.fill"
+        case .waiting: "pause.circle.fill"
+        case .reviewing: "checklist"
+        case .done: "checkmark"
+        case .failed: "xmark"
         }
     }
 }
@@ -141,7 +141,7 @@ struct LemonButtonStyle: ButtonStyle {
             .padding(.vertical, 8)
             .background(
                 isDestructive ? LD.coral : LD.lemon,
-                in: RoundedRectangle(cornerRadius: LD.r6)
+                in: RoundedRectangle(cornerRadius: LD.r6),
             )
             .opacity(configuration.isPressed ? 0.82 : isEnabled ? 1 : 0.35)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
@@ -164,6 +164,7 @@ struct GhostButtonStyle: ButtonStyle {
 }
 
 // MARK: - Source surfacing
+
 //
 // `SourceGlyph` is the canonical way to indicate which provider (Linear or
 // GitHub) backs an `IssueRef` or `WorkspacePair`. Typographic, not chromatic —
@@ -176,8 +177,8 @@ extension IssueSource {
     /// Compact two-character marker for chips and badges.
     var glyph: String {
         switch self {
-        case .linear: return "L"
-        case .github: return "gh"
+        case .linear: "L"
+        case .github: "gh"
         }
     }
 
@@ -189,8 +190,8 @@ extension IssueSource {
     /// the user already learned.
     var accent: Color {
         switch self {
-        case .linear: return LD.linearMark
-        case .github: return LD.githubMark
+        case .linear: LD.linearMark
+        case .github: LD.githubMark
         }
     }
 }
@@ -199,7 +200,7 @@ extension IssueSource {
 struct SourceGlyph: View {
     let source: IssueSource
     var size: CGFloat = 9
-    var label: String? = nil  // optional matchKey-style sublabel for inline use
+    var label: String? // optional matchKey-style sublabel for inline use
 
     var body: some View {
         HStack(spacing: 4) {
@@ -212,10 +213,10 @@ struct SourceGlyph: View {
                 .padding(.vertical, 2)
                 .background(
                     Capsule()
-                        .fill(source.accent.opacity(0.10))
+                        .fill(source.accent.opacity(0.10)),
                 )
                 .overlay(
-                    Capsule().strokeBorder(source.accent.opacity(0.25), lineWidth: 0.5)
+                    Capsule().strokeBorder(source.accent.opacity(0.25), lineWidth: 0.5),
                 )
             if let label {
                 Text(label)
@@ -228,8 +229,8 @@ struct SourceGlyph: View {
 
     private var tooltipText: String {
         switch source {
-        case .linear: return "Linear" + (label.map { " · \($0)" } ?? "")
-        case .github: return "GitHub" + (label.map { " · \($0)" } ?? "")
+        case .linear: "Linear" + (label.map { " · \($0)" } ?? "")
+        case .github: "GitHub" + (label.map { " · \($0)" } ?? "")
         }
     }
 }
@@ -239,9 +240,9 @@ extension IssueRef {
     var sourceTitle: String {
         switch scope {
         case .linearTeam:
-            return "Linear · \(identifierPrefix)"
-        case .githubRepo(let owner, let repo, _):
-            return "GitHub · \(owner)/\(repo)"
+            "Linear · \(identifierPrefix)"
+        case let .githubRepo(owner, repo, _):
+            "GitHub · \(owner)/\(repo)"
         }
     }
 }

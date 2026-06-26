@@ -45,7 +45,7 @@ final class AppNavigation {
     }
 
     func editIdentity(_ id: UUID) {
-        showingSettings = true   // editor is nested in Settings — Back returns there
+        showingSettings = true // editor is nested in Settings — Back returns there
         selectedSession = nil
         editingWorkspace = nil
         editingIdentity = .existing(id)
@@ -79,9 +79,14 @@ final class AppNavigation {
         if editingWorkspace != nil { editingWorkspace = nil; return }
     }
 
-    // Back-compat for the existing call sites; keep the same semantics.
-    func showWorkspaceEditor() { addWorkspace() }
-    func dismissWorkspaceEditor() { editingWorkspace = nil }
+    /// Back-compat for the existing call sites; keep the same semantics.
+    func showWorkspaceEditor() {
+        addWorkspace()
+    }
+
+    func dismissWorkspaceEditor() {
+        editingWorkspace = nil
+    }
 
     func showList() {
         selectedSession = nil
