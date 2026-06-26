@@ -1,29 +1,31 @@
-import SwiftUI
 import os
+import SwiftUI
 
-// Small UInt16 helper for the MCP port default — guards against UserDefaults
-// returning 0 when the key has never been set.
+/// Small UInt16 helper for the MCP port default — guards against UserDefaults
+/// returning 0 when the key has never been set.
 private extension UInt16 {
-    func nonZeroOr(_ fallback: UInt16) -> UInt16 { self == 0 ? fallback : self }
+    func nonZeroOr(_ fallback: UInt16) -> UInt16 {
+        self == 0 ? fallback : self
+    }
 }
 
 private extension Int {
     var asUInt16: UInt16 {
-        guard self >= 0 && self <= Int(UInt16.max) else { return 0 }
+        guard self >= 0, self <= Int(UInt16.max) else { return 0 }
         return UInt16(self)
     }
 }
 
 @main
 struct LemonApp: App {
-    // AppDelegate is always installed — in DEBUG it boots smoke-test mode;
-    // in Release it pops the menu-bar popover on first launch so the
-    // wizard is visible without the user having to hunt for the icon.
+    /// AppDelegate is always installed — in DEBUG it boots smoke-test mode;
+    /// in Release it pops the menu-bar popover on first launch so the
+    /// wizard is visible without the user having to hunt for the icon.
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     @State private var orchestrator: Orchestrator = {
         #if DEBUG
-        if KeychainStore.isMockMode { return MockAppState.shared.orchestrator }
+            if KeychainStore.isMockMode { return MockAppState.shared.orchestrator }
         #endif
         let o = Orchestrator()
         // Start polling at launch when already configured — otherwise polling
@@ -39,10 +41,10 @@ struct LemonApp: App {
         return o
     }()
 
-    // Bring up the MCP server when the user opted in — either via the
-    // Settings toggle (lemon-mcp-enabled UserDefault) or by setting
-    // LEMON_ENABLE_MCP=1 in the launch environment. The env var wins, so
-    // power users can flip the server on for one launch without persisting.
+    /// Bring up the MCP server when the user opted in — either via the
+    /// Settings toggle (lemon-mcp-enabled UserDefault) or by setting
+    /// LEMON_ENABLE_MCP=1 in the launch environment. The env var wins, so
+    /// power users can flip the server on for one launch without persisting.
     @MainActor
     static func startMCPServerIfRequested(orchestrator: Orchestrator) {
         let env = ProcessInfo.processInfo.environment
@@ -63,7 +65,7 @@ struct LemonApp: App {
 
     @State private var nav: AppNavigation = {
         #if DEBUG
-        if KeychainStore.isMockMode { return MockAppState.shared.nav }
+            if KeychainStore.isMockMode { return MockAppState.shared.nav }
         #endif
         return AppNavigation()
     }()

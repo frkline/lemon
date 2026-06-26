@@ -1,9 +1,10 @@
-import SwiftUI
 import AppKit
-import ServiceManagement
 import os
+import ServiceManagement
+import SwiftUI
 
 // MARK: - Step enum
+
 //
 // `trackers` collapses the old `linear` + `workspace` steps into a single
 // pane where you pick a source, paste a credential, point at a workspace,
@@ -23,17 +24,17 @@ private enum OnboardingStep: Int, CaseIterable {
 struct DraftPair: Identifiable, Equatable {
     let id = UUID()
     var sourceKind: IssueSource = .linear
-    var identityRef: UUID?       // existing identity to route through (nil = create new)
+    var identityRef: UUID? // existing identity to route through (nil = create new)
     var newIdentityToken: String = ""
     var newIdentityHost: String = ""
-    var newIdentityVerified: VerifiedSnapshot? = nil
+    var newIdentityVerified: VerifiedSnapshot?
     var surfaceId: String = ""
     var path: String = ""
     var allReposInFolder: Bool = false
     var homeRepo: String = ""
 
     struct VerifiedSnapshot: Equatable {
-        let identityId: UUID    // ID assigned at verify time so later Add-anothers can route back to it
+        let identityId: UUID // ID assigned at verify time so later Add-anothers can route back to it
         let handle: String
         let label: String
         let principalId: String
@@ -71,7 +72,6 @@ struct OnboardingView: View {
         return saved.isEmpty ? [WorkspaceRepo(issuePrefix: "", path: "")] : saved
     }()
 
-
     var body: some View {
         ZStack(alignment: .top) {
             GeometryReader { geo in
@@ -106,24 +106,24 @@ struct OnboardingView: View {
             TrackersStep(
                 savedPairs: $savedPairs,
                 verifiedIdentities: $verifiedIdentities,
-                onNext: { advance() }
+                onNext: { advance() },
             )
         case .lemonMd:
             LemonMdStep(
                 repos: synthesizedRepos,
                 onNext: { advance() },
-                onBack: { back() }
+                onBack: { back() },
             )
         case .localAI:
             LocalAIStep(
                 onNext: { advance() },
-                onBack: { back() }
+                onBack: { back() },
             )
         case .ready:
             ReadyStep(
                 apiKey: linearApiKey,
                 onFinish: { finish() },
-                onBack: { back() }
+                onBack: { back() },
             )
         }
     }
@@ -137,7 +137,7 @@ struct OnboardingView: View {
                 issuePrefix: pair.surfaceId,
                 path: pair.path,
                 allReposInFolder: pair.allReposInFolder,
-                homeRepo: pair.homeRepo
+                homeRepo: pair.homeRepo,
             )
         }
     }
@@ -145,7 +145,7 @@ struct OnboardingView: View {
     private var slideTransition: AnyTransition {
         .asymmetric(
             insertion: .move(edge: direction > 0 ? .trailing : .leading).combined(with: .opacity),
-            removal:   .move(edge: direction > 0 ? .leading  : .trailing).combined(with: .opacity)
+            removal: .move(edge: direction > 0 ? .leading : .trailing).combined(with: .opacity),
         )
     }
 
@@ -172,14 +172,15 @@ struct OnboardingView: View {
 
         // Stamp the migration sentinel up front so the (legacy) workspace
         // → pairs migration doesn't fire and overwrite us on first read.
-        k.workspaces = k.workspaces  // touches the getter, triggers no-op migration if any
+        k.workspaces = k.workspaces // touches the getter, triggers no-op migration if any
 
         var identities: [Identity] = []
         for snap in verifiedIdentities {
             // Only persist identities that are actually referenced by at
             // least one saved pair — verified-but-unused gets dropped.
             guard savedPairs.contains(where: { $0.identityRef == snap.identityId
-                                              || $0.newIdentityVerified?.identityId == snap.identityId })
+                    || $0.newIdentityVerified?.identityId == snap.identityId
+            })
             else { continue }
             let kind: IdentityKind = snap.label.lowercased().contains("github") ? .github : .linear
             let identity = Identity(
@@ -190,7 +191,7 @@ struct OnboardingView: View {
                 principalId: snap.principalId,
                 host: nil,
                 knownSurfaces: snap.surfaces,
-                surfacesFetchedAt: Date()
+                surfacesFetchedAt: Date(),
             )
             identities.append(identity)
         }
@@ -212,7 +213,7 @@ struct OnboardingView: View {
                 path: pair.path,
                 allReposInFolder: pair.allReposInFolder,
                 homeRepo: pair.homeRepo,
-                routing: Routing(identityId: identityId, surfaceId: pair.surfaceId)
+                routing: Routing(identityId: identityId, surfaceId: pair.surfaceId),
             )
         }
         k.workspaces = workspaces
@@ -243,30 +244,29 @@ struct OnboardingView: View {
 }
 
 #if DEBUG
-extension OnboardingView {
-    // stepIndex: 0=trackers, 1=lemonMd, 2=localAI, 3=ready
-    init(isComplete: Binding<Bool>, forcedStep stepIndex: Int) {
-        // Legacy 5-step indices map cleanly onto the new 4-step shape: 0+1
-        // both went into Trackers; 2/3/4 shift down by one.
-        let target: OnboardingStep
-        switch stepIndex {
-        case 0, 1: target = .trackers
-        case 2:    target = .lemonMd
-        case 3:    target = .localAI
-        case 4:    target = .ready
-        default:   target = OnboardingStep(rawValue: stepIndex) ?? .trackers
+    extension OnboardingView {
+        // stepIndex: 0=trackers, 1=lemonMd, 2=localAI, 3=ready
+        init(isComplete: Binding<Bool>, forcedStep stepIndex: Int) {
+            // Legacy 5-step indices map cleanly onto the new 4-step shape: 0+1
+            // both went into Trackers; 2/3/4 shift down by one.
+            let target: OnboardingStep = switch stepIndex {
+            case 0, 1: .trackers
+            case 2: .lemonMd
+            case 3: .localAI
+            case 4: .ready
+            default: OnboardingStep(rawValue: stepIndex) ?? .trackers
+            }
+            self._isComplete = isComplete
+            self._step = State(initialValue: target)
+            self._direction = State(initialValue: 1)
+            self._savedPairs = State(initialValue: [])
+            self._verifiedIdentities = State(initialValue: [])
+            self._linearApiKey = State(initialValue: "lin_api_smoke_key")
+            self._linearUserId = State(initialValue: "u_smoke")
+            self._linearUserName = State(initialValue: "")
+            self._repos = State(initialValue: [WorkspaceRepo(issuePrefix: "LEM", path: "/Users/you/Projects/lemon")])
         }
-        self._isComplete = isComplete
-        self._step = State(initialValue: target)
-        self._direction = State(initialValue: 1)
-        self._savedPairs = State(initialValue: [])
-        self._verifiedIdentities = State(initialValue: [])
-        self._linearApiKey = State(initialValue: "lin_api_smoke_key")
-        self._linearUserId = State(initialValue: "u_smoke")
-        self._linearUserName = State(initialValue: "")
-        self._repos = State(initialValue: [WorkspaceRepo(issuePrefix: "LEM", path: "/Users/you/Projects/lemon")])
     }
-}
 #endif
 
 // MARK: - Shared shell
@@ -275,16 +275,16 @@ private struct StepShell<Content: View>: View {
     let emoji: String
     let title: String
     let subtitle: String
-    var backAction: (() -> Void)? = nil
+    var backAction: (() -> Void)?
     var nextLabel: String = "Continue"
     var nextEnabled: Bool = true
     var nextAction: () -> Void
     // Optional secondary "Add another" action — renders adjacent to the
     // primary CTA in the footer in ghost style. Used by TrackersStep so
     // the action lives in the same row as Continue.
-    var addAnotherLabel: String? = nil
+    var addAnotherLabel: String?
     var addAnotherEnabled: Bool = false
-    var addAnotherAction: (() -> Void)? = nil
+    var addAnotherAction: (() -> Void)?
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -356,6 +356,7 @@ private struct StepShell<Content: View>: View {
 }
 
 // MARK: - Trackers (replaces Linear + Workspace as one combined step)
+
 //
 // One pane, repeatable. Each pass: pick a source (or re-use an identity
 // already verified earlier this session), enter the credential the first
@@ -374,28 +375,35 @@ private struct TrackersStep: View {
     @State private var draft = DraftPair()
     @State private var verifyState: VerifyState = .idle
     @State private var typingCustomSurface = false
-    // Once a pair has been saved this session, the editor collapses into
-    // an "Add another pair" affordance so the page reads as a tidy list
-    // rather than a saved row with a half-filled form below it.
-    // `editorOpen` reflects whether the editor is currently expanded.
+    /// Once a pair has been saved this session, the editor collapses into
+    /// an "Add another pair" affordance so the page reads as a tidy list
+    /// rather than a saved row with a half-filled form below it.
+    /// `editorOpen` reflects whether the editor is currently expanded.
     @State private var editorOpen: Bool = true
 
     enum VerifyState: Equatable {
         case idle, verifying, ok, failed(String)
     }
 
-    // Continue advances if EITHER:
-    //   • there's at least one already-saved pair, OR
-    //   • the current draft is complete (Save-on-Continue: nobody should
-    //     have to click "Add another" before "Continue" for the single-pair
-    //     happy path).
-    private var canContinue: Bool { !savedPairs.isEmpty || draft.isSavable }
-    private var canAddCurrent: Bool { draft.isSavable }
+    /// Continue advances if EITHER:
+    ///   • there's at least one already-saved pair, OR
+    ///   • the current draft is complete (Save-on-Continue: nobody should
+    ///     have to click "Add another" before "Continue" for the single-pair
+    ///     happy path).
+    private var canContinue: Bool {
+        !savedPairs.isEmpty || draft.isSavable
+    }
 
-    // Editor is implicitly open whenever there's nothing saved yet —
-    // there's no list to show, the form is the whole page. Once the
-    // first pair lands, the user can collapse it back.
-    private var isEditorVisible: Bool { savedPairs.isEmpty || editorOpen }
+    private var canAddCurrent: Bool {
+        draft.isSavable
+    }
+
+    /// Editor is implicitly open whenever there's nothing saved yet —
+    /// there's no list to show, the form is the whole page. Once the
+    /// first pair lands, the user can collapse it back.
+    private var isEditorVisible: Bool {
+        savedPairs.isEmpty || editorOpen
+    }
 
     var body: some View {
         StepShell(
@@ -407,7 +415,7 @@ private struct TrackersStep: View {
             nextAction: { commitDraftIfReadyAndContinue() },
             addAnotherLabel: addAnotherLabelText,
             addAnotherEnabled: addAnotherEnabledFlag,
-            addAnotherAction: { handleAddAnother() }
+            addAnotherAction: { handleAddAnother() },
         ) {
             VStack(alignment: .leading, spacing: 18) {
                 if !savedPairs.isEmpty { savedPairsList }
@@ -420,19 +428,19 @@ private struct TrackersStep: View {
         }
     }
 
-    // Footer label adapts to context. While the editor is open with a
-    // valid draft and other pairs already exist, the primary action is
-    // explicitly "Save & Continue" so the click-saves-the-draft behavior
-    // doesn't read as a surprise.
+    /// Footer label adapts to context. While the editor is open with a
+    /// valid draft and other pairs already exist, the primary action is
+    /// explicitly "Save & Continue" so the click-saves-the-draft behavior
+    /// doesn't read as a surprise.
     private var continueLabel: String {
         if isEditorVisible, canAddCurrent, !savedPairs.isEmpty { return "Save & Continue" }
         return "Continue"
     }
 
-    // Secondary button label: with the editor collapsed (>=1 saved
-    // pair, no draft in progress) it offers to open a fresh editor.
-    // With the editor open and a valid draft, it commits the draft and
-    // resets for the next pair.
+    /// Secondary button label: with the editor collapsed (>=1 saved
+    /// pair, no draft in progress) it offers to open a fresh editor.
+    /// With the editor open and a valid draft, it commits the draft and
+    /// resets for the next pair.
     private var addAnotherLabelText: String? {
         if isEditorVisible { return "Add another" }
         return "Add another"
@@ -440,7 +448,7 @@ private struct TrackersStep: View {
 
     private var addAnotherEnabledFlag: Bool {
         if isEditorVisible { return canAddCurrent }
-        return true  // collapsed → button just reopens the editor
+        return true // collapsed → button just reopens the editor
     }
 
     private func handleAddAnother() {
@@ -463,8 +471,8 @@ private struct TrackersStep: View {
         onNext()
     }
 
-    // Collapsed editor surface — a single ghost row that reads as a
-    // "create new" affordance. Tap expands the editor back open.
+    /// Collapsed editor surface — a single ghost row that reads as a
+    /// "create new" affordance. Tap expands the editor back open.
     private var addAnotherPlaceholder: some View {
         Button {
             withAnimation(LD.snappy) { editorOpen = true }
@@ -482,7 +490,7 @@ private struct TrackersStep: View {
             .background(LD.lemon.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
             .overlay(
                 RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(LD.lemon.opacity(0.22), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                    .strokeBorder(LD.lemon.opacity(0.22), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])),
             )
         }
         .buttonStyle(.plain)
@@ -587,9 +595,9 @@ private struct TrackersStep: View {
         }
     }
 
-    // Compact horizontal identity picker — no boxes, no radio circles.
-    // Each existing identity is a pill; "Connect new" appears as the
-    // final pill.
+    /// Compact horizontal identity picker — no boxes, no radio circles.
+    /// Each existing identity is a pill; "Connect new" appears as the
+    /// final pill.
     private var inlineIdentityPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -628,13 +636,13 @@ private struct TrackersStep: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
                 selected ? AnyShapeStyle(kind.accent.opacity(0.14)) : AnyShapeStyle(.primary.opacity(0.04)),
-                in: Capsule()
+                in: Capsule(),
             )
             .overlay(
                 Capsule().strokeBorder(
                     selected ? kind.accent.opacity(0.40) : Color.primary.opacity(0.08),
-                    lineWidth: 0.5
-                )
+                    lineWidth: 0.5,
+                ),
             )
         }
         .buttonStyle(.plain)
@@ -658,13 +666,13 @@ private struct TrackersStep: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
                 selected ? AnyShapeStyle(LD.lemon.opacity(0.10)) : AnyShapeStyle(Color.clear),
-                in: Capsule()
+                in: Capsule(),
             )
             .overlay(
                 Capsule().strokeBorder(
                     selected ? LD.lemon.opacity(0.32) : LD.lemon.opacity(0.20),
-                    style: StrokeStyle(lineWidth: 0.5, dash: selected ? [] : [3, 3])
-                )
+                    style: StrokeStyle(lineWidth: 0.5, dash: selected ? [] : [3, 3]),
+                ),
             )
         }
         .buttonStyle(.plain)
@@ -695,7 +703,8 @@ private struct TrackersStep: View {
 
     private var currentAssignedCount: Int? {
         if let ref = draft.identityRef,
-           let snap = verifiedIdentities.first(where: { $0.identityId == ref }) {
+           let snap = verifiedIdentities.first(where: { $0.identityId == ref })
+        {
             return snap.assignedIssueCount
         }
         return draft.newIdentityVerified?.assignedIssueCount
@@ -772,13 +781,13 @@ private struct TrackersStep: View {
                 selected
                     ? AnyShapeStyle(kind.accent.opacity(0.14))
                     : AnyShapeStyle(Color.clear),
-                in: Capsule()
+                in: Capsule(),
             )
             .overlay(
                 Capsule().strokeBorder(
                     selected ? kind.accent.opacity(0.40) : Color.clear,
-                    lineWidth: 0.5
-                )
+                    lineWidth: 0.5,
+                ),
             )
             .padding(2)
         }
@@ -800,7 +809,7 @@ private struct TrackersStep: View {
                     .padding(.vertical, 7).padding(.horizontal, 9)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
                     )
                     .onChange(of: draft.newIdentityToken) { _, _ in
                         draft.newIdentityVerified = nil
@@ -827,23 +836,23 @@ private struct TrackersStep: View {
     private var tokenProviderURL: URL {
         switch draft.sourceKind {
         case .linear:
-            return URL(string: "https://linear.app/settings/api")!
+            URL(string: "https://linear.app/settings/api")!
         case .github:
             // Fine-grained PAT page. Lemon needs Issues (read/write) on the
             // repos you want polled; the page lets you scope to specific
             // repos which is the safer default.
-            return URL(string: "https://github.com/settings/personal-access-tokens/new")!
+            URL(string: "https://github.com/settings/personal-access-tokens/new")!
         }
     }
 
     private var tokenProviderHint: String {
         switch draft.sourceKind {
         case .linear:
-            return "Personal API Key. Workspace-scoped; never leaves Keychain."
+            "Personal API Key. Workspace-scoped; never leaves Keychain."
         case .github:
             // Match GitHub's exact wording from the fine-grained PAT
             // Permissions section so the user can scan for it visually.
-            return "Required: Issues · Read and write. Pick the repos Lemon should watch."
+            "Required: Issues · Read and write. Pick the repos Lemon should watch."
         }
     }
 
@@ -857,7 +866,7 @@ private struct TrackersStep: View {
             .padding(.vertical, 7).padding(.horizontal, 9)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
             )
     }
 
@@ -883,13 +892,13 @@ private struct TrackersStep: View {
                     canVerify
                         ? AnyShapeStyle(LD.lemon)
                         : AnyShapeStyle(Color.primary.opacity(0.06)),
-                    in: Capsule()
+                    in: Capsule(),
                 )
                 .overlay(
                     Capsule().strokeBorder(
                         canVerify ? Color.clear : Color.primary.opacity(0.10),
-                        lineWidth: 0.5
-                    )
+                        lineWidth: 0.5,
+                    ),
                 )
             }
             .buttonStyle(.plain)
@@ -915,7 +924,7 @@ private struct TrackersStep: View {
                         .foregroundStyle(LD.statusDone)
                 }
             }
-        case .failed(let msg):
+        case let .failed(msg):
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.octagon.fill")
                     .font(.system(size: 10))
@@ -927,10 +936,11 @@ private struct TrackersStep: View {
         }
     }
 
-    // Surface picker — populated from the chosen identity
+    /// Surface picker — populated from the chosen identity
     private var currentSurfaceList: [Surface] {
         if let ref = draft.identityRef,
-           let snap = verifiedIdentities.first(where: { $0.identityId == ref }) {
+           let snap = verifiedIdentities.first(where: { $0.identityId == ref })
+        {
             return snap.surfaces
         }
         return draft.newIdentityVerified?.surfaces ?? []
@@ -956,8 +966,8 @@ private struct TrackersStep: View {
             ForEach(currentSurfaceList) { s in
                 Button(action: { draft.surfaceId = s.id }) {
                     Text(s.key.caseInsensitiveCompare(s.displayName) == .orderedSame
-                         ? s.displayName
-                         : "\(s.key) — \(s.displayName)")
+                        ? s.displayName
+                        : "\(s.key) — \(s.displayName)")
                 }
             }
         } label: {
@@ -980,7 +990,7 @@ private struct TrackersStep: View {
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
             )
             .opacity(enabled ? 1 : 0.55)
         }
@@ -988,10 +998,10 @@ private struct TrackersStep: View {
         .disabled(!enabled)
     }
 
-    // Path field — type or drag a folder onto it. The NSOpenPanel Browse
-    // button was removed because it auto-dismisses the popover when used
-    // from inside the in-app editor; keeping behavior consistent across
-    // onboarding + editor surfaces.
+    /// Path field — type or drag a folder onto it. The NSOpenPanel Browse
+    /// button was removed because it auto-dismisses the popover when used
+    /// from inside the in-app editor; keeping behavior consistent across
+    /// onboarding + editor surfaces.
     private var pathField: some View {
         // The eyebrow lives on workspaceSection; this view is just the
         // input + drag-drop affordance.
@@ -1002,7 +1012,7 @@ private struct TrackersStep: View {
                 .padding(.vertical, 7).padding(.horizontal, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
                 )
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     for p in providers {
@@ -1038,7 +1048,7 @@ private struct TrackersStep: View {
                         .padding(.vertical, 7).padding(.horizontal, 9)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
                         )
                 }
                 .padding(.leading, 20)
@@ -1053,7 +1063,8 @@ private struct TrackersStep: View {
         // Promote a verified-but-not-yet-saved identity into the global list so
         // the next draft can reuse it without re-verifying.
         if let snap = draft.newIdentityVerified,
-           !verifiedIdentities.contains(where: { $0.identityId == snap.identityId }) {
+           !verifiedIdentities.contains(where: { $0.identityId == snap.identityId })
+        {
             verifiedIdentities.append(snap)
         }
         savedPairs.append(draft)
@@ -1072,16 +1083,16 @@ private struct TrackersStep: View {
         verifyState = .verifying
         let kind = draft.sourceKind
         let token = draft.newIdentityToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let host  = draft.newIdentityHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = draft.newIdentityHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedHost = host.isEmpty ? nil : host
 
         do {
             let cli = kind == .linear ? (LinearClient() as any IssueSourceClient) : (GitHubClient() as any IssueSourceClient)
             let cred = try await cli.verifyCredential(token: token, host: resolvedHost)
-            let surfaces = (try? await cli.listSurfaces(token: token, host: resolvedHost)) ?? []
+            let surfaces = await (try? cli.listSurfaces(token: token, host: resolvedHost)) ?? []
             let principal: String = (kind == .linear) ? cred.id : cred.handle
-            let assignedCount = (try? await cli.countAssignedOpenIssues(
-                token: token, host: resolvedHost, principalId: principal
+            let assignedCount = await (try? cli.countAssignedOpenIssues(
+                token: token, host: resolvedHost, principalId: principal,
             )) ?? 0
             let snap = DraftPair.VerifiedSnapshot(
                 identityId: UUID(),
@@ -1089,7 +1100,7 @@ private struct TrackersStep: View {
                 label: "\(kind.displayName) · \(cred.displayName)",
                 principalId: cred.id,
                 surfaces: surfaces,
-                assignedIssueCount: assignedCount
+                assignedIssueCount: assignedCount,
             )
             await MainActor.run {
                 draft.newIdentityVerified = snap
@@ -1140,7 +1151,9 @@ private struct LinearStep: View {
     @State private var isVerifying = false
     @State private var verifyError: String?
 
-    private var canContinue: Bool { !userId.isEmpty }
+    private var canContinue: Bool {
+        !userId.isEmpty
+    }
 
     var body: some View {
         StepShell(
@@ -1148,7 +1161,7 @@ private struct LinearStep: View {
             title: "Connect Linear",
             subtitle: "Lemon polls your Linear queue for issues tagged 🍋\nand works on them automatically.",
             nextEnabled: canContinue,
-            nextAction: onNext
+            nextAction: onNext,
         ) {
             VStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -1249,12 +1262,12 @@ private struct WorkspaceStep: View {
 
     struct ToolCheck {
         let present: Bool
-        let hint: String?   // non-nil only when not present or needs attention
+        let hint: String? // non-nil only when not present or needs attention
     }
 
     private let requiredTools: [(name: String, installHint: String)] = [
-        ("git",    "Included with Xcode Command Line Tools"),
-        ("gh",     "brew install gh  →  gh auth login"),
+        ("git", "Included with Xcode Command Line Tools"),
+        ("gh", "brew install gh  →  gh auth login"),
         ("claude", "Install from claude.ai/code"),
     ]
 
@@ -1266,7 +1279,9 @@ private struct WorkspaceStep: View {
         requiredTools.allSatisfy { toolStatus[$0.name]?.present == true }
     }
 
-    private var canContinue: Bool { reposValid && toolsOK }
+    private var canContinue: Bool {
+        reposValid && toolsOK
+    }
 
     var body: some View {
         StepShell(
@@ -1275,7 +1290,7 @@ private struct WorkspaceStep: View {
             subtitle: "Map your Linear teams to local repos.",
             backAction: onBack,
             nextEnabled: canContinue,
-            nextAction: onNext
+            nextAction: onNext,
         ) {
             VStack(spacing: 14) {
                 prereqBar
@@ -1369,7 +1384,7 @@ private struct WorkspaceStep: View {
         guard !apiKey.isEmpty else { teamsLoading = false; return }
         Task.detached {
             let client = LinearClient()
-            let fetched = (try? await client.fetchTeams(apiKey: apiKey)) ?? []
+            let fetched = await (try? client.fetchTeams(apiKey: apiKey)) ?? []
             Logger.onboarding.info("Fetched \(fetched.count) Linear teams")
             await MainActor.run {
                 teams = fetched
@@ -1396,7 +1411,7 @@ private struct WorkspaceStep: View {
                 var present = p.terminationStatus == 0
 
                 var hint: String? = nil
-                if present && tool.name == "gh" {
+                if present, tool.name == "gh" {
                     let auth = Process()
                     auth.executableURL = URL(fileURLWithPath: "/bin/zsh")
                     auth.arguments = ["-l", "-c", "cd /tmp && gh auth status"]
@@ -1550,29 +1565,37 @@ private struct LocalAIStep: View {
 
     enum ModelSize: String, CaseIterable, Identifiable {
         case e4b, e2b
-        var id: String { rawValue }
+        var id: String {
+            rawValue
+        }
+
         var hfId: String {
             switch self {
             // Canonical mlx-community 4-bit. OptiQ-4bit variants exist but SwiftLM b648
             // can't load them (k_norm.weight missing at decode time — verified end-to-end
             // on Apple Silicon). Stick with the plain 4-bit quant SwiftLM's README lists.
-            case .e4b: return "mlx-community/gemma-4-e4b-it-4bit"
-            case .e2b: return "mlx-community/gemma-4-e2b-it-4bit"
+            case .e4b: "mlx-community/gemma-4-e4b-it-4bit"
+            case .e2b: "mlx-community/gemma-4-e2b-it-4bit"
             }
         }
+
         var dirName: String {
             switch self {
-            case .e4b: return "gemma-4-e4b-it-4bit"
-            case .e2b: return "gemma-4-e2b-it-4bit"
+            case .e4b: "gemma-4-e4b-it-4bit"
+            case .e2b: "gemma-4-e2b-it-4bit"
             }
         }
+
         var label: String {
             switch self {
-            case .e4b: return "4B  (~5.2 GB)"
-            case .e2b: return "2B  (~3.6 GB)"
+            case .e4b: "4B  (~5.2 GB)"
+            case .e2b: "2B  (~3.6 GB)"
             }
         }
-        var approxMB: Int { self == .e4b ? 5200 : 3600 }
+
+        var approxMB: Int {
+            self == .e4b ? 5200 : 3600
+        }
     }
 
     private var modelDir: String {
@@ -1587,16 +1610,26 @@ private struct LocalAIStep: View {
             .path
     }
 
-    private var tmuxOK: Bool { toolStatus["tmux"] == true }
-    private var hfOK: Bool { toolStatus["hf"] == true }
+    private var tmuxOK: Bool {
+        toolStatus["tmux"] == true
+    }
+
+    private var hfOK: Bool {
+        toolStatus["hf"] == true
+    }
+
     private var modelReady: Bool {
         if case .done = downloadState { return true }
         return FileManager.default.fileExists(atPath: modelDir + "/config.json")
     }
+
     private var swiftLMReady: Bool {
         !swiftLMPath.isEmpty && FileManager.default.isExecutableFile(atPath: swiftLMPath)
     }
-    private var canEnable: Bool { tmuxOK && modelReady && swiftLMReady }
+
+    private var canEnable: Bool {
+        tmuxOK && modelReady && swiftLMReady
+    }
 
     var body: some View {
         StepShell(
@@ -1606,7 +1639,7 @@ private struct LocalAIStep: View {
             backAction: onBack,
             nextLabel: "Continue",
             nextEnabled: canEnable,
-            nextAction: { save(); onNext() }
+            nextAction: { save(); onNext() },
         ) {
             VStack(spacing: 10) {
                 prereqBar
@@ -1670,7 +1703,7 @@ private struct LocalAIStep: View {
         switch hfLoginStatus {
         case .unknown:
             EmptyView()
-        case .loggedIn(let user):
+        case let .loggedIn(user):
             HStack(spacing: 4) {
                 Image(systemName: "person.circle.fill")
                     .foregroundStyle(LD.statusDone).font(.system(size: 10))
@@ -1782,7 +1815,7 @@ private struct LocalAIStep: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
 
-            case .failed(let err):
+            case let .failed(err):
                 VStack(alignment: .leading, spacing: 6) {
                     ScrollView {
                         Text(err)
@@ -1804,7 +1837,6 @@ private struct LocalAIStep: View {
 
     private enum DotState { case running, done, failed }
 
-    @ViewBuilder
     private func statusDot(_ state: DotState, _ label: String) -> some View {
         HStack(spacing: 5) {
             switch state {
@@ -1876,7 +1908,7 @@ private struct LocalAIStep: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
 
-            case .failed(let err):
+            case let .failed(err):
                 VStack(alignment: .leading, spacing: 6) {
                     ScrollView {
                         Text(err)
@@ -1941,9 +1973,8 @@ private struct LocalAIStep: View {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-l", "-c",
-            "cd /tmp && hf download \(hfId)" +
-            " --local-dir '\(dir)' 2>&1"
-        ]
+                       "cd /tmp && hf download \(hfId)" +
+                           " --local-dir '\(dir)' 2>&1"]
         let outPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = outPipe
@@ -1954,7 +1985,7 @@ private struct LocalAIStep: View {
         downloadTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             Task { @MainActor in
                 downloadedMB = dirSizeMB(dir)
-                if modelReady && downloadState == .running {
+                if modelReady, downloadState == .running {
                     downloadState = .done
                     downloadTimer?.invalidate()
                 }
@@ -2003,7 +2034,8 @@ private struct LocalAIStep: View {
         for case let file as String in enumerator {
             let full = (path as NSString).appendingPathComponent(file)
             if let attrs = try? FileManager.default.attributesOfItem(atPath: full),
-               let size = attrs[.size] as? Int64 {
+               let size = attrs[.size] as? Int64
+            {
                 total += size
             }
         }
@@ -2031,13 +2063,13 @@ private struct LocalAIStep: View {
         // -sS makes curl silent except errors → avoids the progress-bar firehose
         // that overflows the Pipe buffer and deadlocks the process.
         p.arguments = ["-l", "-c", """
-            cd /tmp && \
-            mkdir -p '\(dir)' && \
-            curl -fLsS '\(url)' -o '\(dir)/swiftlm.tar.gz' 2>&1 && \
-            tar -xzf '\(dir)/swiftlm.tar.gz' -C '\(dir)' 2>&1 && \
-            rm -f '\(dir)/swiftlm.tar.gz' && \
-            echo "extract-ok"
-            """]
+        cd /tmp && \
+        mkdir -p '\(dir)' && \
+        curl -fLsS '\(url)' -o '\(dir)/swiftlm.tar.gz' 2>&1 && \
+        tar -xzf '\(dir)/swiftlm.tar.gz' -C '\(dir)' 2>&1 && \
+        rm -f '\(dir)/swiftlm.tar.gz' && \
+        echo "extract-ok"
+        """]
         let outPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = outPipe
@@ -2080,9 +2112,9 @@ private struct LocalAIStep: View {
         swiftLMState = .idle
     }
 
-    nonisolated private func findSwiftLMBinary(in dir: String) -> String? {
+    private nonisolated func findSwiftLMBinary(in dir: String) -> String? {
         let fm = FileManager.default
-        let candidateNames: Set<String> = ["SwiftLM", "swiftlm", "swift-lm", "SwiftLM-cli"]
+        let candidateNames: Set = ["SwiftLM", "swiftlm", "swift-lm", "SwiftLM-cli"]
         guard let enumerator = fm.enumerator(atPath: dir) else { return nil }
         for case let rel as String in enumerator {
             let name = (rel as NSString).lastPathComponent
@@ -2123,18 +2155,18 @@ private struct ReadyStep: View {
     enum TerminalAutomationState: Equatable {
         case checking
         case granted
-        case denied(String)   // app name that was denied
+        case denied(String) // app name that was denied
     }
 
     enum LabelState { case pending, creating, done(Int), failed(String) }
     @State private var labelState: LabelState = .pending
 
-    // The 🍋 labels (Tag it / In Progress / Waiting / Complete) are the
-    // protocol Lemon listens for. Without them, nothing the user does
-    // post-onboarding will register. So Continue is gated on
-    // `.done` — pending/creating block (work in flight) and `.failed`
-    // surfaces a Retry instead of letting the user advance into a
-    // broken state.
+    /// The 🍋 labels (Tag it / In Progress / Waiting / Complete) are the
+    /// protocol Lemon listens for. Without them, nothing the user does
+    /// post-onboarding will register. So Continue is gated on
+    /// `.done` — pending/creating block (work in flight) and `.failed`
+    /// surfaces a Retry instead of letting the user advance into a
+    /// broken state.
     private var canStart: Bool {
         guard claudeChecked else { return false }
         if case .done = labelState { return true }
@@ -2154,7 +2186,7 @@ private struct ReadyStep: View {
             backAction: onBack,
             nextLabel: "Start Lemon",
             nextEnabled: canStart,
-            nextAction: onFinish
+            nextAction: onFinish,
         ) {
             VStack(spacing: 9) {
                 // Claude auth status
@@ -2165,7 +2197,7 @@ private struct ReadyStep: View {
                     successTitle: claudeAccount.map { "Using Claude Code as \($0)" } ?? "Using Claude Code",
                     successColor: LD.statusDone,
                     warningTitle: "Claude Code not authenticated",
-                    warningDetail: "Run `claude login` in Terminal, then come back."
+                    warningDetail: "Run `claude login` in Terminal, then come back.",
                 )
 
                 // Linear labels + workflow education
@@ -2195,15 +2227,15 @@ private struct ReadyStep: View {
         }
     }
 
-    // Trigger the macOS Apple Events authorization dialog for Terminal.app
-    // (and iTerm2 if installed) at onboarding time, so the user clicks Allow
-    // while they're at their desk. Without this, the dialog fires the first
-    // time a 🍋 session tries to open a terminal window — exactly when the
-    // user is most likely AFK, and the session sits blocked forever.
-    //
-    // Also detects "Don't Allow" so we can surface a fallback path
-    // (System Settings → Privacy & Security → Automation) instead of
-    // silently failing to open windows later.
+    /// Trigger the macOS Apple Events authorization dialog for Terminal.app
+    /// (and iTerm2 if installed) at onboarding time, so the user clicks Allow
+    /// while they're at their desk. Without this, the dialog fires the first
+    /// time a 🍋 session tries to open a terminal window — exactly when the
+    /// user is most likely AFK, and the session sits blocked forever.
+    ///
+    /// Also detects "Don't Allow" so we can surface a fallback path
+    /// (System Settings → Privacy & Security → Automation) instead of
+    /// silently failing to open windows later.
     private func preauthorizeTerminalAutomation() {
         Task.detached {
             var apps = ["Terminal"]
@@ -2245,7 +2277,7 @@ private struct ReadyStep: View {
         switch terminalAutomation {
         case .checking, .granted:
             EmptyView()
-        case .denied(let app):
+        case let .denied(app):
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(LD.coral).font(.system(size: 16))
@@ -2307,12 +2339,12 @@ private struct ReadyStep: View {
                     ProgressView().scaleEffect(0.6).frame(width: 14, height: 14)
                     Text("Creating 🍋 labels in your trackers…")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
-                case .done(let count):
+                case let .done(count):
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(LD.statusDone).font(.system(size: 13))
                     Text("🍋 labels created in \(count) place\(count == 1 ? "" : "s")")
                         .font(.system(size: 11, weight: .semibold))
-                case .failed(let err):
+                case let .failed(err):
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(LD.coral).font(.system(size: 13))
                     VStack(alignment: .leading, spacing: 1) {
@@ -2350,7 +2382,6 @@ private struct ReadyStep: View {
         .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
     }
 
-    @ViewBuilder
     private func workflowRow(_ emoji: String, _ name: String?, _ action: String, _ detail: String, _ color: Color, _ isLast: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(spacing: 0) {
@@ -2402,7 +2433,7 @@ private struct ReadyStep: View {
         successTitle: String,
         successColor: Color,
         warningTitle: String,
-        warningDetail: String
+        warningDetail: String,
     ) -> some View {
         Group {
             if !checked {
@@ -2452,7 +2483,7 @@ private struct ReadyStep: View {
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {
                         if enabled { try SMAppService.mainApp.register() }
-                        else       { try SMAppService.mainApp.unregister() }
+                        else { try SMAppService.mainApp.unregister() }
                     } catch {
                         Logger.onboarding.error("SMAppService toggle failed: \(error.localizedDescription)")
                         launchAtLogin = (SMAppService.mainApp.status == .enabled)
@@ -2475,6 +2506,7 @@ private struct ReadyStep: View {
     }
 
     // MARK: - Label creation
+
     //
     // Walks the persisted (Identity, Workspace) pairs and bootstraps the
     // four 🍋 labels in each routed surface. One Linear team and one
@@ -2510,17 +2542,16 @@ private struct ReadyStep: View {
                     continue
                 }
                 let cli: any IssueSourceClient = (identity.kind == .linear) ? linear : github
-                let config: SourceConfig
-                switch identity.kind {
+                let config = switch identity.kind {
                 case .linear:
-                    config = SourceConfig(
+                    SourceConfig(
                         source: .linear, displayName: identity.label,
-                        linearTeamKeys: [surfaceId], githubRepos: nil
+                        linearTeamKeys: [surfaceId], githubRepos: nil,
                     )
                 case .github:
-                    config = SourceConfig(
+                    SourceConfig(
                         source: .github, displayName: identity.label,
-                        linearTeamKeys: nil, githubRepos: [surfaceId]
+                        linearTeamKeys: nil, githubRepos: [surfaceId],
                     )
                 }
                 do {
@@ -2599,7 +2630,7 @@ private struct LemonMdStep: View {
 
     private var lemonMdPath: String? {
         guard let repo = primaryRepo else { return nil }
-        if repo.allReposInFolder && !repo.homeRepo.isEmpty {
+        if repo.allReposInFolder, !repo.homeRepo.isEmpty {
             return "\(repo.path)/\(repo.homeRepo)/LEMON.md"
         }
         return "\(repo.path)/LEMON.md"
@@ -2627,7 +2658,7 @@ private struct LemonMdStep: View {
             nextAction: isReadyToSave ? { save() } : onNext,
             addAnotherLabel: isReadyToSave ? "Skip for now" : nil,
             addAnotherEnabled: isReadyToSave,
-            addAnotherAction: isReadyToSave ? onNext : nil
+            addAnotherAction: isReadyToSave ? onNext : nil,
         ) {
             VStack(spacing: 14) {
                 switch proposalState {
@@ -2637,7 +2668,7 @@ private struct LemonMdStep: View {
                     analyzingView
                 case .ready:
                     editorView
-                case .failed(let err):
+                case let .failed(err):
                     failedView(err)
                 }
 
@@ -2823,7 +2854,7 @@ private struct LemonMdStep: View {
                 Logger.onboarding.info("LEMON.md claude exit \(p.terminationStatus), out=\(trimmed.count) chars, err=\(errOutput.prefix(200))")
 
                 await MainActor.run {
-                    if p.terminationStatus == 0 && !trimmed.isEmpty {
+                    if p.terminationStatus == 0, !trimmed.isEmpty {
                         editedContent = trimmed
                         proposalState = .ready
                     } else {

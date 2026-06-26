@@ -9,7 +9,6 @@ import Foundation
 /// Tier 1 of the "smart routing" plan. The fuzzy Gemma-backed tier is
 /// reserved for ambiguous folders and lives separately (issue followup).
 enum WorkspaceAnalyzer {
-
     static func suggest(for path: String, identities: [Identity]) -> WorkspaceEditorPane.PathSuggestion? {
         let trimmed = path.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
@@ -30,7 +29,7 @@ enum WorkspaceAnalyzer {
     // MARK: - Remote parsing
 
     struct ParsedRemote: Equatable {
-        let host: String          // "github.com" / "github.acmecorp.com"
+        let host: String // "github.com" / "github.acmecorp.com"
         let owner: String
         let repo: String
     }
@@ -47,7 +46,7 @@ enum WorkspaceAnalyzer {
         var foundURL: String?
         for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") && line.hasSuffix("]") {
+            if line.hasPrefix("["), line.hasSuffix("]") {
                 inOriginBlock = line.contains("[remote \"origin\"]")
                 continue
             }
@@ -63,7 +62,7 @@ enum WorkspaceAnalyzer {
     static func parseRemoteURL(_ url: String) -> ParsedRemote? {
         // SSH form: git@github.com:owner/repo.git
         if let at = url.firstIndex(of: "@"), let colon = url.firstIndex(of: ":"), at < colon {
-            let host = String(url[url.index(after: at)..<colon])
+            let host = String(url[url.index(after: at) ..< colon])
             let pathPart = String(url[url.index(after: colon)...])
             return splitOwnerRepo(pathPart).map {
                 ParsedRemote(host: host, owner: $0.0, repo: $0.1)
@@ -93,7 +92,7 @@ enum WorkspaceAnalyzer {
         guard parts.count >= 2 else { return nil }
         // For nested paths (GitLab subgroups), take the last two segments.
         let owner = String(parts[parts.count - 2])
-        let repo  = String(parts[parts.count - 1])
+        let repo = String(parts[parts.count - 1])
         guard !owner.isEmpty, !repo.isEmpty else { return nil }
         return (owner, repo)
     }
@@ -119,12 +118,13 @@ enum WorkspaceAnalyzer {
         // Match GitHub identities first, scoped by host.
         for ident in identities where ident.kind == .github {
             if matchesHost(parsedHost: parsed.host, identity: ident),
-               ident.knownSurfaces.contains(where: { $0.id.caseInsensitiveCompare(ownerRepo) == .orderedSame }) {
+               ident.knownSurfaces.contains(where: { $0.id.caseInsensitiveCompare(ownerRepo) == .orderedSame })
+            {
                 return WorkspaceEditorPane.PathSuggestion(
                     identityId: ident.id,
                     surfaceKey: ownerRepo,
                     label: "Route through \(ident.label) · \(ownerRepo)",
-                    detail: "Detected from .git/config — exact match on a known repo."
+                    detail: "Detected from .git/config — exact match on a known repo.",
                 )
             }
         }
@@ -136,7 +136,7 @@ enum WorkspaceAnalyzer {
                     identityId: ident.id,
                     surfaceKey: ownerRepo,
                     label: "Route through \(ident.label) · \(ownerRepo)",
-                    detail: "Detected from .git/config — repo not yet listed; consider Refresh."
+                    detail: "Detected from .git/config — repo not yet listed; consider Refresh.",
                 )
             }
         }

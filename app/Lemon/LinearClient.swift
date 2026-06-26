@@ -1,19 +1,19 @@
 import Foundation
 import os
 
-// GraphQL client for the Linear API.
-// Polls for 🍋-labeled issues and manages Lemon status labels.
+/// GraphQL client for the Linear API.
+/// Polls for 🍋-labeled issues and manages Lemon status labels.
 final class LinearClient: Sendable {
     private let endpoint = URL(string: "https://api.linear.app/graphql")!
     private let session: URLSession
 
-    static let labelTrigger    = "🍋"
+    static let labelTrigger = "🍋"
     static let labelInProgress = "🍋 In Progress"
-    static let labelWaiting    = "🍋 Waiting"
-    static let labelComplete   = "🍋 Complete"
+    static let labelWaiting = "🍋 Waiting"
+    static let labelComplete = "🍋 Complete"
 
     private let activeLabels: Set<String> = [
-        labelInProgress, labelWaiting, labelComplete
+        labelInProgress, labelWaiting, labelComplete,
     ]
 
     init(session: URLSession = .shared) {
@@ -34,7 +34,7 @@ final class LinearClient: Sendable {
         let json = try await graphql(query: query, variables: [:], apiKey: apiKey)
         guard
             let viewer = (json["data"] as? [String: Any])?["viewer"] as? [String: Any],
-            let id   = viewer["id"]   as? String,
+            let id = viewer["id"] as? String,
             let name = viewer["name"] as? String,
             let email = viewer["email"] as? String
         else { throw LinearError.unexpectedShape }
@@ -43,10 +43,10 @@ final class LinearClient: Sendable {
 
     // MARK: - Issue queues
 
-    // Issues with 🍋 label but none of the active labels — new work to pick up.
-    // Includes both issues assigned to the user AND unassigned issues, since solo
-    // developers commonly don't self-assign. Workspace prefix → repo mapping in the
-    // Orchestrator still scopes the issues that can actually be acted on.
+    /// Issues with 🍋 label but none of the active labels — new work to pick up.
+    /// Includes both issues assigned to the user AND unassigned issues, since solo
+    /// developers commonly don't self-assign. Workspace prefix → repo mapping in the
+    /// Orchestrator still scopes the issues that can actually be acted on.
     func fetchLemonQueue(apiKey: String, userId: String) async throws -> [LinearIssue] {
         let query = """
         query LemonQueue($label: String!, $activeStates: [String!]!, $userId: ID!) {
@@ -73,7 +73,7 @@ final class LinearClient: Sendable {
         let variables: [String: Any] = [
             "label": Self.labelTrigger,
             "activeStates": ["completed", "cancelled"],
-            "userId": userId
+            "userId": userId,
         ]
         let json = try await graphql(query: query, variables: variables, apiKey: apiKey)
         let nodes = issueNodes(from: json, key: "issues")
@@ -82,8 +82,8 @@ final class LinearClient: Sendable {
         }
     }
 
-    // Issues with 🍋 Complete label that are still open. Same assignee semantics
-    // as fetchLemonQueue: assigned to the user OR unassigned.
+    /// Issues with 🍋 Complete label that are still open. Same assignee semantics
+    /// as fetchLemonQueue: assigned to the user OR unassigned.
     func fetchCompleteIssues(apiKey: String, userId: String) async throws -> [LinearIssue] {
         let query = """
         query LemonComplete($label: String!, $activeStates: [String!]!, $userId: ID!) {
@@ -110,16 +110,16 @@ final class LinearClient: Sendable {
         let variables: [String: Any] = [
             "label": Self.labelComplete,
             "activeStates": ["completed", "cancelled"],
-            "userId": userId
+            "userId": userId,
         ]
         let json = try await graphql(query: query, variables: variables, apiKey: apiKey)
         return issueNodes(from: json, key: "issues").compactMap { parseIssue($0) }
     }
 
-    // Returns the current label names for one issue, or nil if the issue is
-    // unreachable. Used by WorktreeRunner.pollUntilDone to track waiting /
-    // in-progress transitions during an active session, where the trigger
-    // label has already been removed (so fetchLemonQueue can't see the issue).
+    /// Returns the current label names for one issue, or nil if the issue is
+    /// unreachable. Used by WorktreeRunner.pollUntilDone to track waiting /
+    /// in-progress transitions during an active session, where the trigger
+    /// label has already been removed (so fetchLemonQueue can't see the issue).
     func fetchIssueLabels(issueId: String, apiKey: String) async throws -> [String]? {
         let query = """
         query IssueLabels($id: String!) {
@@ -154,10 +154,10 @@ final class LinearClient: Sendable {
         """
         let json = try await graphql(query: query, variables: ["id": issueId], apiKey: apiKey)
         guard
-            let data     = json["data"] as? [String: Any],
-            let issue    = data["issue"] as? [String: Any],
+            let data = json["data"] as? [String: Any],
+            let issue = data["issue"] as? [String: Any],
             let comments = issue["comments"] as? [String: Any],
-            let nodes    = comments["nodes"] as? [[String: Any]]
+            let nodes = comments["nodes"] as? [[String: Any]]
         else {
             return []
         }
@@ -168,9 +168,9 @@ final class LinearClient: Sendable {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let parsed = nodes.compactMap { node -> IssueComment? in
             guard
-                let id   = node["id"]   as? String,
+                let id = node["id"] as? String,
                 let body = node["body"] as? String,
-                let ts   = node["createdAt"] as? String,
+                let ts = node["createdAt"] as? String,
                 let date = iso.date(from: ts)
             else { return nil }
             return IssueComment(id: id, body: body, createdAt: date)
@@ -183,8 +183,8 @@ final class LinearClient: Sendable {
         return parsed.sorted { $0.createdAt < $1.createdAt }
     }
 
-    // Re-trigger detection helpers — thin wrappers over LemonMarkerExtractor
-    // so LinearClient and GitHubClient share one parser.
+    /// Re-trigger detection helpers — thin wrappers over LemonMarkerExtractor
+    /// so LinearClient and GitHubClient share one parser.
     func hasNewComment(issueId: String, afterCommentId: String, apiKey: String) async throws -> Bool {
         let comments = try await fetchComments(issueId: issueId, apiKey: apiKey)
         return LemonMarkerExtractor.hasNewComment(in: comments, afterCommentId: afterCommentId)
@@ -214,7 +214,7 @@ final class LinearClient: Sendable {
         let json = try await graphql(
             query: mutation,
             variables: ["issueId": issueId, "body": body],
-            apiKey: apiKey
+            apiKey: apiKey,
         )
         guard let commentId = ((json["data"] as? [String: Any])?["commentCreate"] as? [String: Any])?["comment"].flatMap({ ($0 as? [String: Any])?["id"] as? String })
         else { throw LinearError.unexpectedShape }
@@ -223,15 +223,15 @@ final class LinearClient: Sendable {
 
     // MARK: - Mutations: labels
 
-    // Colors for auto-created Lemon labels.
+    /// Colors for auto-created Lemon labels.
     static let labelColors: [String: String] = [
-        labelTrigger:    "#F7C842",  // lemon yellow
-        labelInProgress: "#F7C842",  // lemon yellow
-        labelWaiting:    "#FF6B46",  // coral
-        labelComplete:   "#4EC97B",  // green
+        labelTrigger: "#F7C842", // lemon yellow
+        labelInProgress: "#F7C842", // lemon yellow
+        labelWaiting: "#FF6B46", // coral
+        labelComplete: "#4EC97B", // green
     ]
 
-    // Returns the label ID, creating the label first if it doesn't exist.
+    /// Returns the label ID, creating the label first if it doesn't exist.
     func ensureLabelId(name: String, teamId: String, apiKey: String) async throws -> String {
         if let existing = try await fetchLabelId(name: name, teamId: teamId, apiKey: apiKey) {
             return existing
@@ -251,7 +251,7 @@ final class LinearClient: Sendable {
         let json = try await graphql(
             query: mutation,
             variables: ["teamId": teamId, "name": name, "color": color],
-            apiKey: apiKey
+            apiKey: apiKey,
         )
         guard let id = ((json["data"] as? [String: Any])?["issueLabelCreate"] as? [String: Any])?["issueLabel"].flatMap({ ($0 as? [String: Any])?["id"] as? String })
         else { throw LinearError.unexpectedShape }
@@ -295,7 +295,7 @@ final class LinearClient: Sendable {
     struct LinearTeam: Identifiable {
         let id: String
         let name: String
-        let key: String   // issue identifier prefix, e.g. "HRP"
+        let key: String // issue identifier prefix, e.g. "HRP"
     }
 
     func fetchTeams(apiKey: String) async throws -> [LinearTeam] {
@@ -312,9 +312,9 @@ final class LinearClient: Sendable {
         } ?? []
         return nodes.compactMap { node -> LinearTeam? in
             guard
-                let id   = node["id"]   as? String,
+                let id = node["id"] as? String,
                 let name = node["name"] as? String,
-                let key  = node["key"]  as? String
+                let key = node["key"] as? String
             else { return nil }
             return LinearTeam(id: id, name: name, key: key)
         }
@@ -344,7 +344,8 @@ final class LinearClient: Sendable {
         }
         // Surface GraphQL-level errors (Linear returns 200 with {"errors":[...]}).
         if let errors = json["errors"] as? [[String: Any]],
-           let first = errors.first {
+           let first = errors.first
+        {
             let message = first["message"] as? String ?? "unknown error"
             let code = (first["extensions"] as? [String: Any])?["code"] as? String
             Logger.linear.error("GraphQL error (\(code ?? "?")): \(message)")
@@ -362,10 +363,10 @@ final class LinearClient: Sendable {
 
     private func parseIssue(_ node: [String: Any]) -> LinearIssue? {
         guard
-            let id         = node["id"]         as? String,
+            let id = node["id"] as? String,
             let identifier = node["identifier"] as? String,
-            let title      = node["title"]      as? String,
-            let teamId     = (node["team"] as? [String: Any])?["id"] as? String
+            let title = node["title"] as? String,
+            let teamId = (node["team"] as? [String: Any])?["id"] as? String
         else { return nil }
         let labelNames = ((node["labels"] as? [String: Any])?["nodes"] as? [[String: Any]])?
             .compactMap { $0["name"] as? String } ?? []
@@ -375,7 +376,7 @@ final class LinearClient: Sendable {
             title: title,
             description: node["description"] as? String,
             labelNames: labelNames,
-            teamId: teamId
+            teamId: teamId,
         )
     }
 
@@ -387,10 +388,10 @@ final class LinearClient: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .http(let code, let body): return "HTTP \(code): \(body.prefix(200))"
-            case .graphql(let msg):         return "Linear: \(msg)"
-            case .rateLimited:              return "Linear rate limit hit (2,500 req/hr). Slow down polling."
-            case .unexpectedShape:          return "Unexpected response shape"
+            case let .http(code, body): "HTTP \(code): \(body.prefix(200))"
+            case let .graphql(msg): "Linear: \(msg)"
+            case .rateLimited: "Linear rate limit hit (2,500 req/hr). Slow down polling."
+            case .unexpectedShape: "Unexpected response shape"
             }
         }
     }
@@ -399,16 +400,15 @@ final class LinearClient: Sendable {
 // MARK: - IssueSourceClient conformance
 
 extension LinearClient: IssueSourceClient {
-
     private func linearAuth(_ auth: SourceAuth) throws -> (apiKey: String, userId: String) {
-        guard case .linear(let apiKey, let userId) = auth else {
+        guard case let .linear(apiKey, userId) = auth else {
             throw IssueSourceError.authMismatch(expected: .linear, got: auth.source)
         }
         return (apiKey, userId)
     }
 
     private func linearScope(_ ref: IssueRef) throws -> String {
-        guard case .linearTeam(let teamId) = ref.scope else {
+        guard case let .linearTeam(teamId) = ref.scope else {
             throw IssueSourceError.authMismatch(expected: .linear, got: ref.source)
         }
         return teamId
@@ -505,7 +505,7 @@ extension LinearClient: IssueSourceClient {
             id: viewer.id,
             displayName: viewer.name,
             handle: viewer.name,
-            avatarUrl: viewer.avatarUrl
+            avatarUrl: viewer.avatarUrl,
         )
     }
 

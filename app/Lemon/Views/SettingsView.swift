@@ -1,5 +1,5 @@
-import SwiftUI
 import ServiceManagement
+import SwiftUI
 
 extension Notification.Name {
     static let lemonRerunSetup = Notification.Name("com.lemon.rerunSetup")
@@ -21,13 +21,13 @@ struct SettingsView: View {
     // MCP server state — mirrors UserDefaults but lets the toggle drive
     // start/stop on change. The port text field is also a UserDefault.
     @AppStorage("lemon-mcp-enabled") private var mcpEnabled = false
-    @AppStorage("lemon-mcp-port")    private var mcpPort   = Int(LemonMCPServer.defaultPort)
+    @AppStorage("lemon-mcp-port") private var mcpPort = Int(LemonMCPServer.defaultPort)
     @State private var mcpCopyHint: String?
 
     enum AITestState: Equatable {
         case idle
-        case starting      // launching SwiftLM subprocess + waiting for /health
-        case classifying   // server up, running classify()
+        case starting // launching SwiftLM subprocess + waiting for /health
+        case classifying // server up, running classify()
         case passed(state: String, summary: String, elapsedSec: Int)
         case failed(String)
     }
@@ -98,8 +98,13 @@ struct SettingsView: View {
 
     @Environment(AppNavigation.self) private var nav
 
-    private var allIdentities: [Identity] { KeychainStore.shared.identities }
-    private var allWorkspaces: [Workspace] { KeychainStore.shared.workspaces }
+    private var allIdentities: [Identity] {
+        KeychainStore.shared.identities
+    }
+
+    private var allWorkspaces: [Workspace] {
+        KeychainStore.shared.workspaces
+    }
 
     @State private var addIdentityPickerShown: Bool = false
 
@@ -349,7 +354,7 @@ struct SettingsView: View {
                         if ws.allReposInFolder {
                             editorialChip("folder", tint: .secondary)
                         }
-                        if ws.allReposInFolder && !ws.homeRepo.isEmpty {
+                        if ws.allReposInFolder, !ws.homeRepo.isEmpty {
                             editorialChip("→ \(ws.homeRepo)/", tint: LD.lemon, mono: true)
                         }
                         Spacer(minLength: 0)
@@ -432,7 +437,7 @@ struct SettingsView: View {
 
     private var githubSection: some View {
         let connectedDetail: String? = {
-            if case .ok(let login) = ghVerifyState { return "@\(login)" }
+            if case let .ok(login) = ghVerifyState { return "@\(login)" }
             if !githubUser.isEmpty { return "@\(githubUser)" }
             return nil
         }()
@@ -445,12 +450,12 @@ struct SettingsView: View {
             connectedDetail: connectedDetail,
             keyBinding: $githubToken,
             verifyAction: { Task { await verifyGitHubToken() } },
-            verifyState: ghVerifyState
+            verifyState: ghVerifyState,
         )
     }
 
-    // Shared editorial credential card. Eyebrow + serif-leaning subhead,
-    // monospace token field, optional Verify action with inline state.
+    /// Shared editorial credential card. Eyebrow + serif-leaning subhead,
+    /// monospace token field, optional Verify action with inline state.
     private func sourceCredentialSection(
         source: IssueSource,
         heading: String,
@@ -460,7 +465,7 @@ struct SettingsView: View {
         connectedDetail: String?,
         keyBinding: Binding<String>,
         verifyAction: (() -> Void)?,
-        verifyState: VerifyState?
+        verifyState: VerifyState?,
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -488,7 +493,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5),
                     )
                 if let verifyAction {
                     HStack(spacing: 8) {
@@ -504,7 +509,7 @@ struct SettingsView: View {
             .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
             .overlay(
                 RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(source.accent.opacity(connected ? 0.20 : 0.08), lineWidth: 0.5)
+                    .strokeBorder(source.accent.opacity(connected ? 0.20 : 0.08), lineWidth: 0.5),
             )
         }
     }
@@ -519,7 +524,7 @@ struct SettingsView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-        case .ok(let login):
+        case let .ok(login):
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 10))
@@ -528,7 +533,7 @@ struct SettingsView: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(LD.statusDone)
             }
-        case .failed(let msg):
+        case let .failed(msg):
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.octagon.fill")
                     .font(.system(size: 10))
@@ -584,7 +589,7 @@ struct SettingsView: View {
         }
     }
 
-    // Tiny "N · 10" pair count, set in monospace for editorial restraint.
+    /// Tiny "N · 10" pair count, set in monospace for editorial restraint.
     private var pairCountChip: some View {
         HStack(spacing: 3) {
             Text("\(pairs.count)")
@@ -611,8 +616,8 @@ struct SettingsView: View {
             VStack(spacing: 4) {
                 SourceGlyph(source: pair.source.source, size: 9)
                 Image(systemName: pair.workspace.allReposInFolder
-                                    ? "folder.fill.badge.plus"
-                                    : "folder.fill")
+                    ? "folder.fill.badge.plus"
+                    : "folder.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(.quaternary)
             }
@@ -626,7 +631,7 @@ struct SettingsView: View {
                     if pair.workspace.allReposInFolder {
                         editorialChip("folder", tint: .secondary)
                     }
-                    if pair.workspace.allReposInFolder && !pair.workspace.homeRepo.isEmpty {
+                    if pair.workspace.allReposInFolder, !pair.workspace.homeRepo.isEmpty {
                         editorialChip("→ \(pair.workspace.homeRepo)/", tint: LD.lemon, mono: true)
                     }
                     Spacer()
@@ -652,13 +657,13 @@ struct SettingsView: View {
         .contentShape(Rectangle())
     }
 
-    // Editorial chip — kerned uppercase or monospace, hairline border for restraint.
+    /// Editorial chip — kerned uppercase or monospace, hairline border for restraint.
     private func editorialChip(_ text: String, tint: Color, mono: Bool = false) -> some View {
         Text(text)
             .font(.system(
                 size: 9,
                 weight: mono ? .medium : .semibold,
-                design: mono ? .monospaced : .default
+                design: mono ? .monospaced : .default,
             ))
             .kerning(mono ? 0 : 0.4)
             .foregroundStyle(tint)
@@ -669,7 +674,7 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func pairConnectionChip(pair: WorkspacePair, status: PairStatus?) -> some View {
+    private func pairConnectionChip(pair _: WorkspacePair, status: PairStatus?) -> some View {
         if let status, status.error != nil {
             // Coral dot — error state needs attention.
             HStack(spacing: 3) {
@@ -724,7 +729,7 @@ struct SettingsView: View {
                 aiRow(icon: "terminal.fill", label: "SwiftLM runner",
                       path: swiftLMPath.isEmpty ? "Not configured" : swiftLMPath,
                       ready: swiftLMReady)
-                if modelReady && swiftLMReady {
+                if modelReady, swiftLMReady {
                     Divider().padding(.leading, 54)
                     aiTestRow
                 }
@@ -734,12 +739,13 @@ struct SettingsView: View {
     }
 
     // MARK: - MCP server section
-    //
-    // Opt-in HTTP+JSON-RPC server that exposes Lemon's session state and
-    // control surface to Claude Code (or any MCP-speaking client). Localhost
-    // bind only — anyone on this Mac who can reach loopback can hit it.
-    // Same threat model as Lemon's running process; we don't add a bearer
-    // token to keep setup friction at zero.
+
+    ///
+    /// Opt-in HTTP+JSON-RPC server that exposes Lemon's session state and
+    /// control surface to Claude Code (or any MCP-speaking client). Localhost
+    /// bind only — anyone on this Mac who can reach loopback can hit it.
+    /// Same threat model as Lemon's running process; we don't add a bearer
+    /// token to keep setup friction at zero.
     private var mcpSection: some View {
         let running = LemonMCPServer.shared.isRunning
         let endpoint = "http://127.0.0.1:\(mcpPort)/mcp"
@@ -766,8 +772,8 @@ struct SettingsView: View {
                             mcpRunningChip(running: running)
                         }
                         Text(running
-                             ? endpoint
-                             : "Flip on to let another Claude observe and steer Lemon sessions.")
+                            ? endpoint
+                            : "Flip on to let another Claude observe and steer Lemon sessions.")
                             .font(.system(size: 10, design: running ? .monospaced : .default))
                             .foregroundStyle(.tertiary)
                             .lineLimit(2)
@@ -803,7 +809,7 @@ struct SettingsView: View {
                             .padding(.vertical, 5)
                             .background(
                                 RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5),
                             )
                     }
                     .padding(.horizontal, 14).padding(.vertical, 11)
@@ -849,7 +855,7 @@ struct SettingsView: View {
                 try LemonMCPServer.shared.start(port: port)
                 LemonMCPTools.registerAll(server: LemonMCPServer.shared, orchestrator: orchestrator)
             } catch {
-                mcpEnabled = false  // bind failed — reflect the actual state
+                mcpEnabled = false // bind failed — reflect the actual state
                 mcpCopyHint = "Failed to start: \(error.localizedDescription)"
             }
         } else {
@@ -922,10 +928,10 @@ struct SettingsView: View {
 
     private var aiTestTint: Color {
         switch aiTestState {
-        case .idle:                return .secondary
-        case .starting, .classifying: return LD.lemon
-        case .passed:              return LD.statusDone
-        case .failed:              return LD.coral
+        case .idle: .secondary
+        case .starting, .classifying: LD.lemon
+        case .passed: LD.statusDone
+        case .failed: LD.coral
         }
     }
 
@@ -956,11 +962,11 @@ struct SettingsView: View {
 
     private var aiTestDetail: String {
         switch aiTestState {
-        case .idle: return "Boot SwiftLM + run one classify() call. ~60-90 s for first run."
-        case .starting: return "Loading model into GPU — first launch can take 60-90 s."
-        case .classifying: return "Sent test prompt; waiting for Gemma to respond…"
-        case .passed(let s, let summary, let secs): return "state=\(s) · summary=\(summary) · \(secs) s"
-        case .failed(let msg): return msg
+        case .idle: "Boot SwiftLM + run one classify() call. ~60-90 s for first run."
+        case .starting: "Loading model into GPU — first launch can take 60-90 s."
+        case .classifying: "Sent test prompt; waiting for Gemma to respond…"
+        case let .passed(s, summary, secs): "state=\(s) · summary=\(summary) · \(secs) s"
+        case let .failed(msg): msg
         }
     }
 
@@ -975,12 +981,11 @@ struct SettingsView: View {
                 // ~2 s when the model files are missing or incompatible —
                 // saying "didn't become healthy within 180 s" lies about both
                 // the time elapsed and the actual cause.
-                let detail: String
-                switch LocalLLM.shared.state() {
-                case .failed(let msg):  detail = msg
-                case .starting:         detail = "Still loading after \(Int(Date().timeIntervalSince(startedAt))) s — Gemma 4 model may be unusually large or disk-bound."
-                case .notConfigured:    detail = "Local AI isn't configured. Re-run setup to download the model + SwiftLM binary."
-                case .ready:            detail = "Race: state went .ready but isReady() returned false. Re-run."
+                let detail: String = switch LocalLLM.shared.state() {
+                case let .failed(msg): msg
+                case .starting: "Still loading after \(Int(Date().timeIntervalSince(startedAt))) s — Gemma 4 model may be unusually large or disk-bound."
+                case .notConfigured: "Local AI isn't configured. Re-run setup to download the model + SwiftLM binary."
+                case .ready: "Race: state went .ready but isReady() returned false. Re-run."
                 }
                 await MainActor.run { aiTestState = .failed(detail) }
                 return
@@ -993,11 +998,11 @@ struct SettingsView: View {
                 title: "Self-test",
                 description: "Lemon settings self-test — verifies SwiftLM + Gemma respond correctly.",
                 labelNames: [],
-                scope: .linearTeam(id: "test")
+                scope: .linearTeam(id: "test"),
             )
             let logs = [
                 "$ claude --permission-mode auto --remote-control",
-                "Trust this MCP server (linear)? [y/N]"
+                "Trust this MCP server (linear)? [y/N]",
             ]
             do {
                 let resp = try await LocalLLM.shared.classify(issue: fixture, logLines: logs)
@@ -1225,6 +1230,7 @@ struct SettingsView: View {
 }
 
 // MARK: - Workspace editor sheet
+
 //
 // Editorial polish: eyebrow + dateline-style metadata, generous whitespace,
 // one primary action (Done) in lemon-yellow, restrained typography. Each
@@ -1238,7 +1244,10 @@ struct WorkspaceEditorView: View {
     @State private var confirmingDeleteId: UUID? = nil
     @State private var deleteTask: Task<Void, Never>?
 
-    private var atCap: Bool { pairs.count >= KeychainStore.maxPairs }
+    private var atCap: Bool {
+        pairs.count >= KeychainStore.maxPairs
+    }
+
     private var duplicateMatchKeys: Set<String> {
         // Helps surface "you've got two LEM rows pointing at different paths".
         // Case-insensitive within the same source.
@@ -1268,9 +1277,9 @@ struct WorkspaceEditorView: View {
                 HStack(spacing: 10) {
                     metaItem(label: "Configured", value: "\(pairs.count) of \(KeychainStore.maxPairs)")
                     metaDivider
-                    metaItem(label: "Linear", value: "\(pairs.filter { $0.source.source == .linear }.count)")
+                    metaItem(label: "Linear", value: "\(pairs.count(where: { $0.source.source == .linear }))")
                     metaDivider
-                    metaItem(label: "GitHub", value: "\(pairs.filter { $0.source.source == .github }.count)")
+                    metaItem(label: "GitHub", value: "\(pairs.count(where: { $0.source.source == .github }))")
                 }
             }
             .padding(.horizontal, 24)
@@ -1286,16 +1295,16 @@ struct WorkspaceEditorView: View {
                         PairRowView(
                             pair: $pair,
                             isDuplicate: duplicateMatchKeys.contains(
-                                "\(pair.source.source.rawValue):\(pair.workspace.matchKey.lowercased())"
+                                "\(pair.source.source.rawValue):\(pair.workspace.matchKey.lowercased())",
                             ) && !pair.workspace.matchKey.isEmpty,
                             confirmingDelete: confirmingDeleteId == pair.id,
-                            onDelete: { handleDelete(pair.id) }
+                            onDelete: { handleDelete(pair.id) },
                         )
                         .transition(
                             .asymmetric(
                                 insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                removal: .opacity.combined(with: .move(edge: .leading))
-                            )
+                                removal: .opacity.combined(with: .move(edge: .leading)),
+                            ),
                         )
                     }
 
@@ -1342,8 +1351,8 @@ struct WorkspaceEditorView: View {
                 RoundedRectangle(cornerRadius: LD.r10)
                     .strokeBorder(
                         atCap ? Color.secondary.opacity(0.15) : LD.lemon.opacity(0.35),
-                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
-                    )
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3]),
+                    ),
             )
             .foregroundStyle(atCap ? AnyShapeStyle(.tertiary) : AnyShapeStyle(LD.lemon))
         }
@@ -1356,7 +1365,7 @@ struct WorkspaceEditorView: View {
         withAnimation(LD.snappy) {
             pairs.append(WorkspacePair(
                 source: SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: [""]),
-                workspace: WorkspaceMapping(matchKey: "", path: "")
+                workspace: WorkspaceMapping(matchKey: "", path: ""),
             ))
         }
     }
@@ -1414,7 +1423,7 @@ struct PairRowView: View {
         if pair.workspace.path.trimmingCharacters(in: .whitespaces).isEmpty {
             return .missingPath
         }
-        if pair.source.source == .github && !pair.workspace.matchKey.contains("/") {
+        if pair.source.source == .github, !pair.workspace.matchKey.contains("/") {
             return .ghShape
         }
         if isDuplicate {
@@ -1428,17 +1437,18 @@ struct PairRowView: View {
 
         var hint: String? {
             switch self {
-            case .ok:           return nil
-            case .missingKey:   return "Add a Linear team prefix or owner/repo."
-            case .missingPath:  return "Point this pair at a local repo or folder."
-            case .ghShape:      return "GitHub matchKey should be owner/repo (e.g. acme/widgets)."
-            case .duplicate:    return "Another row already claims this key."
+            case .ok: nil
+            case .missingKey: "Add a Linear team prefix or owner/repo."
+            case .missingPath: "Point this pair at a local repo or folder."
+            case .ghShape: "GitHub matchKey should be owner/repo (e.g. acme/widgets)."
+            case .duplicate: "Another row already claims this key."
             }
         }
+
         var color: Color? {
             switch self {
-            case .ok:                                          return nil
-            case .missingKey, .missingPath, .duplicate, .ghShape: return LD.coral
+            case .ok: nil
+            case .missingKey, .missingPath, .duplicate, .ghShape: LD.coral
             }
         }
     }
@@ -1449,7 +1459,7 @@ struct PairRowView: View {
             HStack(spacing: 10) {
                 Picker("", selection: Binding(
                     get: { pair.source.source },
-                    set: { syncSource($0) }
+                    set: { syncSource($0) },
                 )) {
                     Label("Linear", systemImage: "circle.hexagongrid.fill").tag(IssueSource.linear)
                     Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right").tag(IssueSource.github)
@@ -1476,7 +1486,7 @@ struct PairRowView: View {
                     .padding(.horizontal, confirmingDelete ? 8 : 6)
                     .padding(.vertical, 5)
                     .background(
-                        Capsule().fill(confirmingDelete ? LD.coral : LD.coral.opacity(0.10))
+                        Capsule().fill(confirmingDelete ? LD.coral : LD.coral.opacity(0.10)),
                     )
                     .animation(LD.snappy, value: confirmingDelete)
                 }
@@ -1488,7 +1498,7 @@ struct PairRowView: View {
             field(
                 label: pair.source.source == .github ? "REPO" : "TEAM",
                 placeholder: pair.source.source == .github ? "owner/repo" : "e.g. HRP",
-                text: $pair.workspace.matchKey
+                text: $pair.workspace.matchKey,
             )
             .onChange(of: pair.workspace.matchKey) { _, newKey in
                 // Keep SourceConfig allowlist in sync with matchKey.
@@ -1501,7 +1511,7 @@ struct PairRowView: View {
             field(
                 label: pair.workspace.allReposInFolder ? "FOLDER" : "PATH",
                 placeholder: pair.workspace.allReposInFolder ? "/path/to/projects" : "/path/to/repo",
-                text: $pair.workspace.path
+                text: $pair.workspace.path,
             )
 
             // Multi-repo toggle + (conditional) home subdir
@@ -1520,7 +1530,7 @@ struct PairRowView: View {
                     label: "HOME",
                     placeholder: "e.g. memory",
                     text: $pair.workspace.homeRepo,
-                    helper: "Optional — subdirectory where Claude launches. Put a LEMON.md there with team-specific guidance."
+                    helper: "Optional — subdirectory where Claude launches. Put a LEMON.md there with team-specific guidance.",
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -1546,16 +1556,16 @@ struct PairRowView: View {
                 RoundedRectangle(cornerRadius: LD.r10)
                     .strokeBorder(
                         validation.color?.opacity(0.30) ?? Color.primary.opacity(0.08),
-                        lineWidth: 0.5
+                        lineWidth: 0.5,
                     )
-            }
+            },
         )
         .onHover { hovered = $0 }
         .animation(LD.smooth, value: hovered)
         .animation(LD.smooth, value: pair.workspace.allReposInFolder)
     }
 
-    // Editorial form field: eyebrow label, monospace input, optional helper line.
+    /// Editorial form field: eyebrow label, monospace input, optional helper line.
     private func field(label: String, placeholder: String, text: Binding<String>, helper: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
@@ -1569,7 +1579,7 @@ struct PairRowView: View {
                 .padding(.horizontal, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5),
                 )
             if let helper {
                 Text(helper)
@@ -1585,7 +1595,7 @@ struct PairRowView: View {
             source: newSource,
             displayName: newSource.displayName,
             linearTeamKeys: newSource == .linear ? [pair.workspace.matchKey] : nil,
-            githubRepos: newSource == .github ? [pair.workspace.matchKey] : nil
+            githubRepos: newSource == .github ? [pair.workspace.matchKey] : nil,
         )
     }
 
@@ -1594,13 +1604,13 @@ struct PairRowView: View {
             pair.source = SourceConfig(
                 id: pair.source.id, source: .linear,
                 displayName: "Linear",
-                linearTeamKeys: [newKey], githubRepos: nil
+                linearTeamKeys: [newKey], githubRepos: nil,
             )
         } else {
             pair.source = SourceConfig(
                 id: pair.source.id, source: .github,
                 displayName: "GitHub",
-                linearTeamKeys: nil, githubRepos: [newKey]
+                linearTeamKeys: nil, githubRepos: [newKey],
             )
         }
     }

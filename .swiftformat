@@ -1,0 +1,8 @@
+--swiftversion 6.3
+
+# redundantSelf can strip `self.` that Swift requires for explicit closure
+# capture (e.g. escaping Network handlers), breaking the build. Leave self alone.
+--disable redundantSelf
+
+# Scope
+--exclude **/.build,**/build,**/DerivedData

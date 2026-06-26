@@ -1,10 +1,10 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
-// End-to-end tests that boot a real LemonMCPServer on an ephemeral high port,
-// register a couple of synthetic tools, and exercise the JSON-RPC surface via
-// URLSession. These prove the wire works without touching the real Orchestrator
-// or live SwiftLM — the tool handlers we register are entirely self-contained.
+/// End-to-end tests that boot a real LemonMCPServer on an ephemeral high port,
+/// register a couple of synthetic tools, and exercise the JSON-RPC surface via
+/// URLSession. These prove the wire works without touching the real Orchestrator
+/// or live SwiftLM — the tool handlers we register are entirely self-contained.
 final class LemonMCPServerTests: XCTestCase {
     private var server: LemonMCPServer!
     private var port: UInt16 = 0
@@ -15,7 +15,7 @@ final class LemonMCPServerTests: XCTestCase {
         // on it and clean up on tearDown. Pick a random port in the ephemeral
         // range so parallel xcodebuild invocations don't collide.
         server = LemonMCPServer.shared
-        port = UInt16.random(in: 30_000...60_000)
+        port = UInt16.random(in: 30000 ... 60000)
         try server.start(port: port)
 
         // Echo tool: returns its arguments verbatim. Validates arg passthrough.
@@ -25,7 +25,7 @@ final class LemonMCPServerTests: XCTestCase {
             inputSchema: ["type": "object"],
             handler: { args in
                 LemonMCPServer.encode(args)
-            }
+            },
         ))
         // Add tool: returns the sum of two integers. Validates typed-arg parsing.
         server.register(LemonMCPServer.Tool(
@@ -35,15 +35,15 @@ final class LemonMCPServerTests: XCTestCase {
                 "type": "object",
                 "properties": [
                     "a": ["type": "integer"],
-                    "b": ["type": "integer"]
+                    "b": ["type": "integer"],
                 ],
-                "required": ["a", "b"]
+                "required": ["a", "b"],
             ],
             handler: { args in
                 let a = (args["a"] as? Int) ?? 0
                 let b = (args["b"] as? Int) ?? 0
                 return LemonMCPServer.encode(["sum": a + b])
-            }
+            },
         ))
         // Throwing tool: validates the dispatcher's MCPError → JSON-RPC error
         // mapping plus the isError-true content shape for tool execution errors.
@@ -53,7 +53,7 @@ final class LemonMCPServerTests: XCTestCase {
             inputSchema: ["type": "object"],
             handler: { _ in
                 throw MCPError(code: -32099, message: "intentional test failure")
-            }
+            },
         ))
     }
 
@@ -147,7 +147,7 @@ final class LemonMCPServerTests: XCTestCase {
     }
 
     func testMalformedJSONReturnsParseError() async throws {
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp")!)
+        var req = try URLRequest(url: XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/mcp")))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = Data("{this is not json".utf8)

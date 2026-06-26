@@ -1,15 +1,15 @@
 import Foundation
-import SwiftUI
 import os
+import SwiftUI
 
-// Per-workspace diagnostic snapshot — surfaced in Settings so the user can
-// see at a glance whether each configured workspace is healthy. Updated
-// after every pollWorkspace call (success or failure).
+/// Per-workspace diagnostic snapshot — surfaced in Settings so the user can
+/// see at a glance whether each configured workspace is healthy. Updated
+/// after every pollWorkspace call (success or failure).
 struct WorkspaceStatus: Equatable {
     var lastPolledAt: Date?
     var triggerCount: Int = 0
     var completeCount: Int = 0
-    var error: String? = nil
+    var error: String?
 
     /// One-line settings subtitle: "polled 12s ago · 0 queued · 1 complete".
     /// Returns nil pre-first-poll so the row stays editorial-quiet.
@@ -37,15 +37,22 @@ final class Orchestrator {
     var isPolling = false
     var aiState: LocalLLM.AIState = .notConfigured
 
-    // Per-workspace diagnostics keyed on Workspace.id. Settings reads this
-    // to render each workspace row's connection chip + subtitle line.
+    /// Per-workspace diagnostics keyed on Workspace.id. Settings reads this
+    /// to render each workspace row's connection chip + subtitle line.
     var workspaceStatuses: [UUID: WorkspaceStatus] = [:]
 
-    func workspaceStatus(for workspaceId: UUID) -> WorkspaceStatus? { workspaceStatuses[workspaceId] }
+    func workspaceStatus(for workspaceId: UUID) -> WorkspaceStatus? {
+        workspaceStatuses[workspaceId]
+    }
 
-    // Back-compat readers for any view still keyed on the old pair shape.
-    var pairStatuses: [UUID: WorkspaceStatus] { workspaceStatuses }
-    func pairStatus(for pairId: UUID) -> WorkspaceStatus? { workspaceStatuses[pairId] }
+    /// Back-compat readers for any view still keyed on the old pair shape.
+    var pairStatuses: [UUID: WorkspaceStatus] {
+        workspaceStatuses
+    }
+
+    func pairStatus(for pairId: UUID) -> WorkspaceStatus? {
+        workspaceStatuses[pairId]
+    }
 
     // Per-source clients, lazily created on first use per process.
     private let linearClient = LinearClient()
@@ -61,8 +68,8 @@ final class Orchestrator {
     /// (verify + list surfaces) before the identity is persisted.
     func client(for kind: IdentityKind) -> any IssueSourceClient {
         switch kind {
-        case .linear: return linearClient
-        case .github: return githubClient
+        case .linear: linearClient
+        case .github: githubClient
         }
     }
 
@@ -82,23 +89,21 @@ final class Orchestrator {
     func verifyAndDiscover(kind: IdentityKind, token: String, host: String?) async throws -> IdentityVerifyResult {
         let cli = client(for: kind)
         let credential = try await cli.verifyCredential(token: token, host: host)
-        let surfaces = (try? await cli.listSurfaces(token: token, host: host)) ?? []
+        let surfaces = await (try? cli.listSurfaces(token: token, host: host)) ?? []
         // For Linear, the assigned-count query uses the user node id; for
         // GitHub, the search expects the `login` (handle). The credential
         // exposes both via `id` and `handle` so we pick the right one per kind.
-        let principal: String = {
-            switch kind {
-            case .linear: return credential.id
-            case .github: return credential.handle
-            }
-        }()
-        let assignedCount = (try? await cli.countAssignedOpenIssues(
-            token: token, host: host, principalId: principal
+        let principal: String = switch kind {
+        case .linear: credential.id
+        case .github: credential.handle
+        }
+        let assignedCount = await (try? cli.countAssignedOpenIssues(
+            token: token, host: host, principalId: principal,
         )) ?? 0
         return IdentityVerifyResult(
             credential: credential,
             surfaces: surfaces,
-            assignedIssueCount: assignedCount
+            assignedIssueCount: assignedCount,
         )
     }
 
@@ -180,7 +185,7 @@ final class Orchestrator {
             if sessions.recent.contains(where: { $0.cleanupInfo?.slug == slug }) { continue }
 
             guard let (ref, info) = matchSlugToWorkspace(slug: slug, sessionPath: sessionPath,
-                                                        workspaces: workspaces) else { continue }
+                                                         workspaces: workspaces) else { continue }
             let session = Session(issue: ref)
             session.status = .reviewing
             session.worktreePath = sessionPath
@@ -195,17 +200,20 @@ final class Orchestrator {
     /// workspace's expected slug shape. Returns the synthesized IssueRef
     /// and cleanupInfo on a hit, nil otherwise.
     private func matchSlugToWorkspace(slug: String, sessionPath: String,
-                                      workspaces: [Workspace]) -> (IssueRef, WorktreeCleanupInfo)? {
+                                      workspaces: [Workspace]) -> (IssueRef, WorktreeCleanupInfo)?
+    {
         for ws in workspaces {
             let surfaceId = ws.routing.surfaceId
             guard !surfaceId.isEmpty else { continue }
             // Linear: surfaceId is the team key (e.g. "LEM"); slug is
             // "lem-<number>".
             if let identity = KeychainStore.shared.identity(for: ws),
-               identity.kind == .linear {
+               identity.kind == .linear
+            {
                 let prefix = surfaceId.lowercased() + "-"
                 if slug.hasPrefix(prefix),
-                   let _ = Int(slug.dropFirst(prefix.count)) {
+                   let _ = Int(slug.dropFirst(prefix.count))
+                {
                     let identifier = slug.uppercased().replacingOccurrences(of: "-", with: "-")
                     let ref = IssueRef(
                         id: "reconstructed-\(slug)",
@@ -213,7 +221,7 @@ final class Orchestrator {
                         title: identifier,
                         description: nil,
                         labelNames: [],
-                        scope: .linearTeam(id: surfaceId)
+                        scope: .linearTeam(id: surfaceId),
                     )
                     return (ref, makeCleanupInfo(slug: slug, sessionPath: sessionPath, workspace: ws))
                 }
@@ -221,10 +229,12 @@ final class Orchestrator {
             // GitHub: surfaceId is "owner/repo"; slug is
             // "owner-repo-<number>" lowercased.
             if let identity = KeychainStore.shared.identity(for: ws),
-               identity.kind == .github {
+               identity.kind == .github
+            {
                 let flat = surfaceId.lowercased().replacingOccurrences(of: "/", with: "-") + "-"
                 if slug.hasPrefix(flat),
-                   let number = Int(slug.dropFirst(flat.count)) {
+                   let number = Int(slug.dropFirst(flat.count))
+                {
                     let parts = surfaceId.split(separator: "/", maxSplits: 1)
                     guard parts.count == 2 else { continue }
                     let owner = String(parts[0]); let repo = String(parts[1])
@@ -235,7 +245,7 @@ final class Orchestrator {
                         title: identifier,
                         description: nil,
                         labelNames: [],
-                        scope: .githubRepo(owner: owner, repo: repo, number: number)
+                        scope: .githubRepo(owner: owner, repo: repo, number: number),
                     )
                     return (ref, makeCleanupInfo(slug: slug, sessionPath: sessionPath, workspace: ws))
                 }
@@ -245,7 +255,8 @@ final class Orchestrator {
     }
 
     private func makeCleanupInfo(slug: String, sessionPath: String,
-                                 workspace: Workspace) -> WorktreeCleanupInfo {
+                                 workspace: Workspace) -> WorktreeCleanupInfo
+    {
         // For allReposInFolder workspaces, we can't reliably know which
         // repos were checked out without rescanning — fall back to the
         // single-repo shape pointing at the workspace path. The cleanup
@@ -256,7 +267,7 @@ final class Orchestrator {
             sessionPath: sessionPath,
             isMultiRepo: workspace.allReposInFolder,
             repos: [WorktreeCleanupInfo.RepoRef(name: workspaceName, repoPath: workspace.path)],
-            slug: slug
+            slug: slug,
         )
     }
 
@@ -300,7 +311,7 @@ final class Orchestrator {
             guard let identity = keychain.identity(for: workspace) else {
                 workspaceStatuses[workspace.id] = WorkspaceStatus(
                     lastPolledAt: Date(),
-                    error: "Routing points at a deleted identity. Edit the workspace."
+                    error: "Routing points at a deleted identity. Edit the workspace.",
                 )
                 continue
             }
@@ -308,7 +319,7 @@ final class Orchestrator {
                 Logger.orchestrator.info("Skip workspace \(workspace.path): \(identity.label) credentials missing")
                 workspaceStatuses[workspace.id] = WorkspaceStatus(
                     lastPolledAt: Date(),
-                    error: "\(identity.label): credentials missing"
+                    error: "\(identity.label): credentials missing",
                 )
                 continue
             }
@@ -319,7 +330,8 @@ final class Orchestrator {
 
     @MainActor
     private func pollWorkspace(workspace: Workspace, identity: Identity,
-                               client: any IssueSourceClient, auth: SourceAuth) async {
+                               client: any IssueSourceClient, auth: SourceAuth) async
+    {
         var status = workspaceStatuses[workspace.id] ?? WorkspaceStatus()
         let config = sourceConfig(identity: identity, surfaceId: workspace.routing.surfaceId)
         let scopeTag = "\(identity.kind.rawValue)/\(workspace.routing.surfaceId)"
@@ -391,19 +403,21 @@ final class Orchestrator {
     private func sourceConfig(identity: Identity, surfaceId: String) -> SourceConfig {
         switch identity.kind {
         case .linear:
-            return SourceConfig(
+            SourceConfig(
                 source: .linear, displayName: identity.label,
-                linearTeamKeys: [surfaceId], githubRepos: nil
+                linearTeamKeys: [surfaceId], githubRepos: nil,
             )
         case .github:
-            return SourceConfig(
+            SourceConfig(
                 source: .github, displayName: identity.label,
-                linearTeamKeys: nil, githubRepos: [surfaceId]
+                linearTeamKeys: nil, githubRepos: [surfaceId],
             )
         }
     }
 
-    private var maxConcurrent: Int { 2 }
+    private var maxConcurrent: Int {
+        2
+    }
 
     // MARK: - Label bootstrapping
 
@@ -441,7 +455,9 @@ final class Orchestrator {
     func reseedLabels(identityId: UUID, surfaceId: String) async throws -> Int {
         struct ReseedError: LocalizedError {
             let errorDescription: String?
-            init(_ msg: String) { self.errorDescription = msg }
+            init(_ msg: String) {
+                self.errorDescription = msg
+            }
         }
         let keychain = KeychainStore.shared
         guard let identity = keychain.identities.first(where: { $0.id == identityId }) else {
@@ -462,7 +478,8 @@ final class Orchestrator {
     @MainActor
     private func startSession(ref: IssueRef, workspace: Workspace, identity: Identity,
                               client: any IssueSourceClient, auth: SourceAuth,
-                              retrigger: LemonMarker?) async {
+                              retrigger: LemonMarker?) async
+    {
         let session = Session(issue: ref)
         session.worktreePath = "/tmp/lemon-\(ref.pathSlug)"
         session.terminalWindowName = "Lemon · \(ref.identifier)"
@@ -506,8 +523,8 @@ final class Orchestrator {
                 matchKey: workspace.routing.surfaceId,
                 path: workspace.path,
                 allReposInFolder: workspace.allReposInFolder,
-                homeRepo: workspace.homeRepo
-            )
+                homeRepo: workspace.homeRepo,
+            ),
         )
 
         Task.detached(priority: .background) {
@@ -564,7 +581,8 @@ final class Orchestrator {
     @MainActor
     private func finishCleanedUpSession(sessionId: UUID) {
         guard let session = sessions.active.first(where: { $0.id == sessionId })
-                ?? sessions.recent.first(where: { $0.id == sessionId }) else {
+            ?? sessions.recent.first(where: { $0.id == sessionId })
+        else {
             runners.removeValue(forKey: sessionId)
             return
         }
@@ -577,119 +595,123 @@ final class Orchestrator {
     // MARK: - Mock data (--mock launch argument)
 
     #if DEBUG
-    func seedMockSessions() {
-        // Fixed anchor: pins all relative timestamps so screenshots are stable across runs
-        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        func seedMockSessions() {
+            // Fixed anchor: pins all relative timestamps so screenshots are stable across runs
+            let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
-        let active1 = Session(issue: IssueRef(
-            id: "mock-1", identifier: "DEMO-42",
-            title: "Add dark mode to dashboard cards",
-            description: "All card components need a dark variant matching the system appearance.",
-            labelNames: ["🍋 In Progress"], scope: .linearTeam(id: "mock-team")
-        ), startedAt: now.addingTimeInterval(-180))
-        active1.status = .executing
-        active1.aiSummary = "Updating ColorScheme tokens in CardView and running snapshot tests"
-        for line in [
-            "[lemon] Starting session for DEMO-42",
-            "[lemon] Worktree ready at /tmp/lemon-demo-42",
-            "[lemon] Claude session launched in tmux: lemon-demo-42",
-            "Reading CardView.swift...",
-            "Checking existing color tokens in DesignSystem.swift...",
-            "✓ Snapshot tests passed successfully",
-            "[gemma] Session active — modifying color tokens across 4 files"
-        ] { active1.appendLog(line) }
+            let active1 = Session(issue: IssueRef(
+                id: "mock-1", identifier: "DEMO-42",
+                title: "Add dark mode to dashboard cards",
+                description: "All card components need a dark variant matching the system appearance.",
+                labelNames: ["🍋 In Progress"], scope: .linearTeam(id: "mock-team"),
+            ), startedAt: now.addingTimeInterval(-180))
+            active1.status = .executing
+            active1.aiSummary = "Updating ColorScheme tokens in CardView and running snapshot tests"
+            for line in [
+                "[lemon] Starting session for DEMO-42",
+                "[lemon] Worktree ready at /tmp/lemon-demo-42",
+                "[lemon] Claude session launched in tmux: lemon-demo-42",
+                "Reading CardView.swift...",
+                "Checking existing color tokens in DesignSystem.swift...",
+                "✓ Snapshot tests passed successfully",
+                "[gemma] Session active — modifying color tokens across 4 files",
+            ] {
+                active1.appendLog(line)
+            }
 
-        let active2 = Session(issue: IssueRef(
-            id: "mock-2", identifier: "acme/widgets#39",
-            title: "Fix auth redirect loop on token expiry",
-            description: "Users are stuck in a redirect loop when their JWT expires mid-session.",
-            labelNames: ["🍋 In Progress"], scope: .githubRepo(owner: "acme", repo: "widgets", number: 39)
-        ), startedAt: now.addingTimeInterval(-420))
-        active2.worktreePath = "/tmp/lemon-\(active2.issue.pathSlug)"
-        active2.terminalWindowName = "Lemon · \(active2.issue.identifier)"
-        active2.status = .waiting
-        active2.aiSummary = "Needs decision: refresh token silently or redirect to login?"
-        active2.pendingAction = "Accepting MCP servers… (Cancel to abort)"
-        for line in [
-            "[lemon] Starting session for acme/widgets#39",
-            "[lemon] Worktree ready at /tmp/lemon-acme-widgets-39",
-            "Reviewing AuthMiddleware.swift...",
-            "Found expired token handling at line 84",
-            "[error] Multiple redirect paths detected — needs clarification",
-            "[gemma] Session waiting for input — ambiguous auth strategy"
-        ] { active2.appendLog(line) }
+            let active2 = Session(issue: IssueRef(
+                id: "mock-2", identifier: "acme/widgets#39",
+                title: "Fix auth redirect loop on token expiry",
+                description: "Users are stuck in a redirect loop when their JWT expires mid-session.",
+                labelNames: ["🍋 In Progress"], scope: .githubRepo(owner: "acme", repo: "widgets", number: 39),
+            ), startedAt: now.addingTimeInterval(-420))
+            active2.worktreePath = "/tmp/lemon-\(active2.issue.pathSlug)"
+            active2.terminalWindowName = "Lemon · \(active2.issue.identifier)"
+            active2.status = .waiting
+            active2.aiSummary = "Needs decision: refresh token silently or redirect to login?"
+            active2.pendingAction = "Accepting MCP servers… (Cancel to abort)"
+            for line in [
+                "[lemon] Starting session for acme/widgets#39",
+                "[lemon] Worktree ready at /tmp/lemon-acme-widgets-39",
+                "Reviewing AuthMiddleware.swift...",
+                "Found expired token handling at line 84",
+                "[error] Multiple redirect paths detected — needs clarification",
+                "[gemma] Session waiting for input — ambiguous auth strategy",
+            ] {
+                active2.appendLog(line)
+            }
 
-        let recent = Session(issue: IssueRef(
-            id: "mock-3", identifier: "DEMO-31",
-            title: "Migrate user table to UUID primary keys",
-            description: nil,
-            labelNames: ["🍋 Complete"], scope: .linearTeam(id: "mock-team")
-        ), startedAt: now.addingTimeInterval(-5400))
-        recent.status = .done
-        recent.prUrl = "https://github.com/example/repo/pull/201"
-        recent.endedAt = now.addingTimeInterval(-3600)
-        recent.aiSummary = "Migration complete — backfill ran in 4m, all FK constraints updated"
+            let recent = Session(issue: IssueRef(
+                id: "mock-3", identifier: "DEMO-31",
+                title: "Migrate user table to UUID primary keys",
+                description: nil,
+                labelNames: ["🍋 Complete"], scope: .linearTeam(id: "mock-team"),
+            ), startedAt: now.addingTimeInterval(-5400))
+            recent.status = .done
+            recent.prUrl = "https://github.com/example/repo/pull/201"
+            recent.endedAt = now.addingTimeInterval(-3600)
+            recent.aiSummary = "Migration complete — backfill ran in 4m, all FK constraints updated"
 
-        sessions.add(active1)
-        sessions.add(active2)
-        sessions.finish(recent)
+            sessions.add(active1)
+            sessions.add(active2)
+            sessions.finish(recent)
 
-        // Seed pairs + per-pair statuses so Settings renders a mixed-source
-        // state under --smoke-test without needing a real Linear/GitHub config.
-        seedMockPairs()
-    }
-
-    func seedMockPairs() {
-        let linearPair = WorkspacePair(
-            source: SourceConfig(source: .linear, displayName: "Linear",
-                                 linearTeamKeys: ["DEMO"], githubRepos: nil),
-            workspace: WorkspaceMapping(
-                matchKey: "DEMO",
-                path: "/Users/you/Projects/demo-app",
-                allReposInFolder: true,
-                homeRepo: "memory"
-            )
-        )
-        let githubPair = WorkspacePair(
-            source: SourceConfig(source: .github, displayName: "GitHub",
-                                 linearTeamKeys: nil, githubRepos: ["acme/widgets"]),
-            workspace: WorkspaceMapping(
-                matchKey: "acme/widgets",
-                path: "/Users/you/Projects/widgets",
-                allReposInFolder: false,
-                homeRepo: ""
-            )
-        )
-        KeychainStore.shared.pairs = [linearPair, githubPair]
-        KeychainStore.shared.linearApiKey = "lin_mock_demo_key"
-        KeychainStore.shared.linearUserId = "user-mock"
-        KeychainStore.shared.githubToken = "ghp_mock_demo_token"
-        KeychainStore.shared.githubUser = "frkline"
-
-        let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
-        workspaceStatuses[linearPair.id] = WorkspaceStatus(
-            lastPolledAt: now.addingTimeInterval(-12),
-            triggerCount: 0,
-            completeCount: 1,
-            error: nil
-        )
-        workspaceStatuses[githubPair.id] = WorkspaceStatus(
-            lastPolledAt: now.addingTimeInterval(-8),
-            triggerCount: 1,
-            completeCount: 0,
-            error: nil
-        )
-
-        // Also stamp workspace-keyed statuses so the new (identity-aware)
-        // settings view renders the same mock live state.
-        for ws in KeychainStore.shared.workspaces {
-            workspaceStatuses[ws.id] = WorkspaceStatus(
-                lastPolledAt: now.addingTimeInterval(-10),
-                triggerCount: 0,
-                completeCount: 0,
-                error: nil
-            )
+            // Seed pairs + per-pair statuses so Settings renders a mixed-source
+            // state under --smoke-test without needing a real Linear/GitHub config.
+            seedMockPairs()
         }
-    }
+
+        func seedMockPairs() {
+            let linearPair = WorkspacePair(
+                source: SourceConfig(source: .linear, displayName: "Linear",
+                                     linearTeamKeys: ["DEMO"], githubRepos: nil),
+                workspace: WorkspaceMapping(
+                    matchKey: "DEMO",
+                    path: "/Users/you/Projects/demo-app",
+                    allReposInFolder: true,
+                    homeRepo: "memory",
+                ),
+            )
+            let githubPair = WorkspacePair(
+                source: SourceConfig(source: .github, displayName: "GitHub",
+                                     linearTeamKeys: nil, githubRepos: ["acme/widgets"]),
+                workspace: WorkspaceMapping(
+                    matchKey: "acme/widgets",
+                    path: "/Users/you/Projects/widgets",
+                    allReposInFolder: false,
+                    homeRepo: "",
+                ),
+            )
+            KeychainStore.shared.pairs = [linearPair, githubPair]
+            KeychainStore.shared.linearApiKey = "lin_mock_demo_key"
+            KeychainStore.shared.linearUserId = "user-mock"
+            KeychainStore.shared.githubToken = "ghp_mock_demo_token"
+            KeychainStore.shared.githubUser = "frkline"
+
+            let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+            workspaceStatuses[linearPair.id] = WorkspaceStatus(
+                lastPolledAt: now.addingTimeInterval(-12),
+                triggerCount: 0,
+                completeCount: 1,
+                error: nil,
+            )
+            workspaceStatuses[githubPair.id] = WorkspaceStatus(
+                lastPolledAt: now.addingTimeInterval(-8),
+                triggerCount: 1,
+                completeCount: 0,
+                error: nil,
+            )
+
+            // Also stamp workspace-keyed statuses so the new (identity-aware)
+            // settings view renders the same mock live state.
+            for ws in KeychainStore.shared.workspaces {
+                workspaceStatuses[ws.id] = WorkspaceStatus(
+                    lastPolledAt: now.addingTimeInterval(-10),
+                    triggerCount: 0,
+                    completeCount: 0,
+                    error: nil,
+                )
+            }
+        }
     #endif
 }

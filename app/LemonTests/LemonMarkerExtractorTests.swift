@@ -1,8 +1,7 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class LemonMarkerExtractorTests: XCTestCase {
-
     // MARK: - parse
 
     func testParseFallsBackToHostCommentId() {

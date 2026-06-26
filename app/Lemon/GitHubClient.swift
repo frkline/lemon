@@ -35,9 +35,9 @@ final class GitHubClient: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .http(let code, let body): return "HTTP \(code): \(body.prefix(200))"
-            case .rateLimited(let reset):   return "GitHub rate limit hit\(reset.map { " (resets at epoch \($0))" } ?? "")."
-            case .unexpectedShape:          return "Unexpected response shape"
+            case let .http(code, body): "HTTP \(code): \(body.prefix(200))"
+            case let .rateLimited(reset): "GitHub rate limit hit\(reset.map { " (resets at epoch \($0))" } ?? "")."
+            case .unexpectedShape: "Unexpected response shape"
             }
         }
     }
@@ -45,7 +45,8 @@ final class GitHubClient: Sendable {
     // MARK: - REST plumbing
 
     private func authedRequest(_ method: String, path: String, query: [URLQueryItem] = [],
-                               token: String, host: String? = nil, body: Data? = nil) -> URLRequest {
+                               token: String, host: String? = nil, body: Data? = nil) -> URLRequest
+    {
         let base = Self.baseURL(host: host)
         var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
@@ -70,7 +71,7 @@ final class GitHubClient: Sendable {
         Logger.linear.debug("[gh] \(req.httpMethod ?? "?") \(req.url?.path ?? "?") → HTTP \(status) · \(bodyStr.prefix(300))")
 
         switch status {
-        case 200...299, 204:
+        case 200 ... 299, 204:
             return (status, data)
         case 404 where allow404:
             return (status, data)
@@ -79,7 +80,8 @@ final class GitHubClient: Sendable {
             // 403 with rate-limit-remaining=0 is rate limiting; 403 otherwise
             // is permission. Treat both as 403 surface for now.
             if let remaining = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-RateLimit-Remaining"),
-               remaining == "0" {
+               remaining == "0"
+            {
                 throw GitHubError.rateLimited(resetEpoch: reset)
             }
             throw GitHubError.http(status, bodyStr)
@@ -129,6 +131,7 @@ final class GitHubClient: Sendable {
     }
 
     // MARK: - Search
+
     //
     // Server-side query intentionally keeps to the proven shape that GH's
     // search engine handles reliably: assignee + repo scope + open issues.
@@ -153,7 +156,7 @@ final class GitHubClient: Sendable {
             path: "/search/issues",
             query: [URLQueryItem(name: "q", value: q), URLQueryItem(name: "per_page", value: "100")],
             token: token,
-            host: host
+            host: host,
         )
         let (_, data) = try await send(req)
         let result = try decode(data, as: SearchIssuesDTO.self)
@@ -165,7 +168,7 @@ final class GitHubClient: Sendable {
                 title: dto.title,
                 description: dto.body,
                 labelNames: dto.labels.map { Self.normalizeIncomingLabel($0.name) },
-                scope: .githubRepo(owner: owner, repo: repo, number: dto.number)
+                scope: .githubRepo(owner: owner, repo: repo, number: dto.number),
             )
         }
     }
@@ -183,23 +186,24 @@ final class GitHubClient: Sendable {
     }
 
     private func ghAuth(_ auth: SourceAuth) throws -> (token: String, login: String, host: String?) {
-        guard case .github(let pat, let login, let host) = auth else {
+        guard case let .github(pat, login, host) = auth else {
             throw IssueSourceError.authMismatch(expected: .github, got: auth.source)
         }
         return (pat, login, host)
     }
 
     private func ghScope(_ ref: IssueRef) throws -> (owner: String, repo: String, number: Int) {
-        guard case .githubRepo(let owner, let repo, let n) = ref.scope else {
+        guard case let .githubRepo(owner, repo, n) = ref.scope else {
             throw IssueSourceError.authMismatch(expected: .github, got: ref.source)
         }
         return (owner, repo, n)
     }
 
     // MARK: - Label colors
-    //
-    // GitHub expects bare hex (no leading '#'). LinearClient.labelColors has
-    // the canonical lemon palette with '#'; strip it before sending.
+
+    ///
+    /// GitHub expects bare hex (no leading '#'). LinearClient.labelColors has
+    /// the canonical lemon palette with '#'; strip it before sending.
     private static func bareHexColor(for state: LemonState) -> String {
         // Key off the canonical labelName ("🍋", "🍋 Complete", …) — the
         // GH rename below only changes what we send to GitHub's API, not
@@ -209,21 +213,22 @@ final class GitHubClient: Sendable {
     }
 
     // MARK: - GitHub label name translation
-    //
-    // GitHub rejects label names that are ONLY a native emoji
-    // ("Name must contain more than native emoji"), so the bare-🍋
-    // trigger label can't land. Map the trigger to "🍋 Lemon" on the
-    // GH wire and translate inbound labels back to the canonical
-    // labelName so downstream code (WorktreeRunner.pollUntilDone,
-    // SessionStore state checks) keeps comparing against
-    // LemonState.labelName directly. Linear has no such restriction
-    // and continues using bare "🍋".
+
+    ///
+    /// GitHub rejects label names that are ONLY a native emoji
+    /// ("Name must contain more than native emoji"), so the bare-🍋
+    /// trigger label can't land. Map the trigger to "🍋 Lemon" on the
+    /// GH wire and translate inbound labels back to the canonical
+    /// labelName so downstream code (WorktreeRunner.pollUntilDone,
+    /// SessionStore state checks) keeps comparing against
+    /// LemonState.labelName directly. Linear has no such restriction
+    /// and continues using bare "🍋".
     private static let ghTriggerLabelName = "🍋 Lemon"
 
     private static func ghLabelName(for state: LemonState) -> String {
         switch state {
-        case .trigger: return ghTriggerLabelName
-        default:       return state.labelName
+        case .trigger: ghTriggerLabelName
+        default: state.labelName
         }
     }
 
@@ -234,8 +239,8 @@ final class GitHubClient: Sendable {
         name == ghTriggerLabelName ? LemonState.trigger.labelName : name
     }
 
-    // Per-repo label bootstrap memo. Once we've ensured one state's label
-    // in a repo, we know the repo has been touched.
+    /// Per-repo label bootstrap memo. Once we've ensured one state's label
+    /// in a repo, we know the repo has been touched.
     private static let bootstrappedRepos = LockedSet()
 
     // MARK: - Label ensure / mutate
@@ -252,18 +257,18 @@ final class GitHubClient: Sendable {
         let body = try JSONEncoder().encode(CreateBody(
             name: Self.ghLabelName(for: state),
             color: Self.bareHexColor(for: state),
-            description: Self.labelDescription(for: state)
+            description: Self.labelDescription(for: state),
         ))
         let createReq = authedRequest(
             "POST",
             path: "/repos/\(owner)/\(repo)/labels",
             token: token,
             host: host,
-            body: body
+            body: body,
         )
         do {
             _ = try await send(createReq)
-        } catch GitHubError.http(let code, _) where code == 422 {
+        } catch let GitHubError.http(code, _) where code == 422 {
             return
         }
     }
@@ -273,14 +278,14 @@ final class GitHubClient: Sendable {
     /// each Lemon label means.
     private static func labelDescription(for state: LemonState) -> String {
         switch state {
-        case .trigger:    return "Lemon: add this label to queue an issue for Claude"
-        case .inProgress: return "Lemon: Claude is working on this in a worktree"
-        case .waiting:    return "Lemon: Claude paused — needs your input"
-        case .complete:   return "Lemon: PR open — reply to the Lemon comment to re-trigger"
+        case .trigger: "Lemon: add this label to queue an issue for Claude"
+        case .inProgress: "Lemon: Claude is working on this in a worktree"
+        case .waiting: "Lemon: Claude paused — needs your input"
+        case .complete: "Lemon: PR open — reply to the Lemon comment to re-trigger"
         }
     }
 
-    // URL-encode a single path segment. Emoji + spaces require encoding.
+    /// URL-encode a single path segment. Emoji + spaces require encoding.
     private func encodePathSegment(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s
     }
@@ -293,7 +298,7 @@ final class GitHubClient: Sendable {
             path: "/repos/\(owner)/\(repo)/issues/\(number)/labels",
             token: token,
             host: host,
-            body: body
+            body: body,
         )
         _ = try await send(req)
     }
@@ -303,16 +308,17 @@ final class GitHubClient: Sendable {
             "DELETE",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/labels/\(encodePathSegment(name))",
             token: token,
-            host: host
+            host: host,
         )
         // 404 = already absent → idempotent.
         _ = try await send(req, allow404: true)
     }
 
     // MARK: - Comments
-    //
-    // GET sort=created direction=asc matches the chronological invariant
-    // LemonMarkerExtractor relies on (and LinearClient also enforces).
+
+    ///
+    /// GET sort=created direction=asc matches the chronological invariant
+    /// LemonMarkerExtractor relies on (and LinearClient also enforces).
     private func fetchCommentsRaw(owner: String, repo: String, number: Int, token: String, host: String?) async throws -> [IssueComment] {
         let req = authedRequest(
             "GET",
@@ -320,10 +326,10 @@ final class GitHubClient: Sendable {
             query: [
                 URLQueryItem(name: "per_page", value: "100"),
                 URLQueryItem(name: "sort", value: "created"),
-                URLQueryItem(name: "direction", value: "asc")
+                URLQueryItem(name: "direction", value: "asc"),
             ],
             token: token,
-            host: host
+            host: host,
         )
         let (_, data) = try await send(req)
         let dtos = try decode(data, as: [CommentDTO].self)
@@ -336,8 +342,8 @@ final class GitHubClient: Sendable {
     }
 }
 
-// Tiny thread-safe set used to memoize the per-repo bootstrap status during
-// a single Lemon process lifetime.
+/// Tiny thread-safe set used to memoize the per-repo bootstrap status during
+/// a single Lemon process lifetime.
 final class LockedSet: @unchecked Sendable {
     private var storage = Set<String>()
     private let lock = NSLock()
@@ -356,7 +362,6 @@ final class LockedSet: @unchecked Sendable {
 // MARK: - IssueSourceClient conformance
 
 extension GitHubClient: IssueSourceClient {
-
     func fetchTriggerQueue(config: SourceConfig, auth: SourceAuth) async throws -> [IssueRef] {
         let (token, login, host) = try ghAuth(auth)
         let repos = reposFromConfig(config)
@@ -388,7 +393,7 @@ extension GitHubClient: IssueSourceClient {
             "GET",
             path: "/repos/\(owner)/\(repo)/issues/\(number)/labels",
             token: token,
-            host: host
+            host: host,
         )
         do {
             let (_, data) = try await send(req, allow404: true)
@@ -398,7 +403,7 @@ extension GitHubClient: IssueSourceClient {
             // canonical LemonState.labelName so callers can compare
             // against state.labelName directly.
             return labels.map { Self.normalizeIncomingLabel($0.name) }
-        } catch GitHubError.http(let code, _) where code == 404 {
+        } catch let GitHubError.http(code, _) where code == 404 {
             return nil
         }
     }
@@ -441,7 +446,7 @@ extension GitHubClient: IssueSourceClient {
             path: "/repos/\(owner)/\(repo)/issues/\(number)/comments",
             token: token,
             host: host,
-            body: payload
+            body: payload,
         )
         let (_, data) = try await send(req)
         struct Created: Decodable { let id: Int }
@@ -498,8 +503,8 @@ extension GitHubClient: IssueSourceClient {
         return CredentialIdentity(
             id: String(user.id),
             displayName: user.name ?? user.login,
-            handle: user.login,          // GitHub login, used as the assignee filter
-            avatarUrl: user.avatar_url
+            handle: user.login, // GitHub login, used as the assignee filter
+            avatarUrl: user.avatar_url,
         )
     }
 
@@ -517,7 +522,7 @@ extension GitHubClient: IssueSourceClient {
                 URLQueryItem(name: "per_page", value: "1"),
             ],
             token: token,
-            host: host
+            host: host,
         )
         let (_, data) = try await send(req)
         struct CountDTO: Decodable { let total_count: Int }
@@ -537,7 +542,7 @@ extension GitHubClient: IssueSourceClient {
                 URLQueryItem(name: "sort", value: "pushed"),
             ],
             token: token,
-            host: host
+            host: host,
         )
         let (_, data) = try await send(req)
         struct RepoDTO: Decodable { let full_name: String; let name: String }

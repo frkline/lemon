@@ -1,9 +1,9 @@
 import Foundation
 import os
 
-// Manages a SwiftLM subprocess and exposes a single classify() call.
-// SwiftLM serves an OpenAI-compatible HTTP API on localhost.
-// Invoked only on trigger (silence / completion) to minimise thermal impact.
+/// Manages a SwiftLM subprocess and exposes a single classify() call.
+/// SwiftLM serves an OpenAI-compatible HTTP API on localhost.
+/// Invoked only on trigger (silence / completion) to minimise thermal impact.
 final class LocalLLM: @unchecked Sendable {
     static let shared = LocalLLM(port: 8488, session: .shared)
     private var process: Process?
@@ -12,17 +12,21 @@ final class LocalLLM: @unchecked Sendable {
     private var _ready = false
     private var _state: AIState = .notConfigured
 
-    // Coarse-grained AI status surfaced to the UI. Snapshot at any time via state().
+    /// Coarse-grained AI status surfaced to the UI. Snapshot at any time via state().
     enum AIState: Equatable {
-        case notConfigured                   // aiEnabled=false or paths missing
-        case starting                        // SwiftLM subprocess launched, waiting for /health
-        case ready                           // /health 200, classify() should succeed
-        case failed(String)                  // exited / didn't respond / health-poll timeout
+        case notConfigured // aiEnabled=false or paths missing
+        case starting // SwiftLM subprocess launched, waiting for /health
+        case ready // /health 200, classify() should succeed
+        case failed(String) // exited / didn't respond / health-poll timeout
 
-        var isReady: Bool { if case .ready = self { return true } else { return false } }
+        var isReady: Bool {
+            if case .ready = self { true } else { false }
+        }
     }
 
-    func state() -> AIState { _state }
+    func state() -> AIState {
+        _state
+    }
 
     private init(port: Int, session: URLSession) {
         self.port = port
@@ -30,12 +34,12 @@ final class LocalLLM: @unchecked Sendable {
     }
 
     #if DEBUG
-    static func makeForTesting(port: Int, session: URLSession) -> LocalLLM {
-        let llm = LocalLLM(port: port, session: session)
-        llm._ready = true
-        llm._state = .ready
-        return llm
-    }
+        static func makeForTesting(port: Int, session: URLSession) -> LocalLLM {
+            let llm = LocalLLM(port: port, session: session)
+            llm._ready = true
+            llm._state = .ready
+            return llm
+        }
     #endif
 
     // MARK: - Lifecycle
@@ -109,7 +113,7 @@ final class LocalLLM: @unchecked Sendable {
         // (5 GB) takes ~60-90 s to load on M-series Macs; a 2 GB Qwen 0.5B was ~6 s in
         // standalone testing. The earlier 30 s cap timed out before real models loaded.
         let startedAt = Date()
-        for _ in 0..<180 {
+        for _ in 0 ..< 180 {
             try? await Task.sleep(for: .seconds(1))
             guard process?.isRunning == true else {
                 let secs = Int(Date().timeIntervalSince(startedAt))
@@ -139,16 +143,16 @@ final class LocalLLM: @unchecked Sendable {
         process = nil
     }
 
-    // In tests there is no process — treat nil process as "externally managed, assume running".
-    // Also detects a post-ready process death: SwiftLM crashed or got SIGKILLed
-    // after start() returned successfully. Without this detection, _state stays
-    // .ready forever even though the runner is gone, and runAITest's "Race"
-    // path keeps re-tripping with no escape — the next start() bails on
-    // `guard process == nil` because the dead Process is still parked there.
-    // Transition to .failed + clear process so a Re-run actually re-boots.
+    /// In tests there is no process — treat nil process as "externally managed, assume running".
+    /// Also detects a post-ready process death: SwiftLM crashed or got SIGKILLed
+    /// after start() returned successfully. Without this detection, _state stays
+    /// .ready forever even though the runner is gone, and runAITest's "Race"
+    /// path keeps re-tripping with no escape — the next start() bails on
+    /// `guard process == nil` because the dead Process is still parked there.
+    /// Transition to .failed + clear process so a Re-run actually re-boots.
     func isReady() -> Bool {
         let stillUp = process?.isRunning ?? true
-        if _ready && !stillUp {
+        if _ready, !stillUp {
             let tail = Self.readSwiftLMLogTail()
             Logger.orchestrator.error("SwiftLM process exited after reporting ready. Last lines:\n\(tail, privacy: .public)")
             _ready = false
@@ -160,9 +164,9 @@ final class LocalLLM: @unchecked Sendable {
         return _ready && stillUp
     }
 
-    // Find anything bound to our port (typically a zombie SwiftLM from a
-    // previous Lemon launch) and SIGTERM it. Synchronous + best-effort;
-    // we don't care if it fails (no process to kill is the same as success).
+    /// Find anything bound to our port (typically a zombie SwiftLM from a
+    /// previous Lemon launch) and SIGTERM it. Synchronous + best-effort;
+    /// we don't care if it fails (no process to kill is the same as success).
     static func killProcessHoldingPort(_ port: Int) {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -174,7 +178,7 @@ final class LocalLLM: @unchecked Sendable {
             try lsof.run(); lsof.waitUntilExit()
             let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             let pids = out.split(whereSeparator: { $0.isNewline })
-                          .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
             for pid in pids {
                 Logger.orchestrator.info("Killing zombie process pid=\(pid) on port \(port)")
                 kill(Int32(pid), SIGTERM)
@@ -188,14 +192,15 @@ final class LocalLLM: @unchecked Sendable {
         }
     }
 
-    // Reads the last ~80 lines (truncated to 1.5 KB) of the SwiftLM stream
-    // we've been draining to /tmp/lemon-swiftlm.log. Surfaces in the Self-test
-    // failure card so the user sees the actual SwiftLM error (model load fault,
-    // GPU OOM, missing tensor, etc.) instead of a generic "exited" message.
+    /// Reads the last ~80 lines (truncated to 1.5 KB) of the SwiftLM stream
+    /// we've been draining to /tmp/lemon-swiftlm.log. Surfaces in the Self-test
+    /// failure card so the user sees the actual SwiftLM error (model load fault,
+    /// GPU OOM, missing tensor, etc.) instead of a generic "exited" message.
     static func readSwiftLMLogTail(maxBytes: Int = 1500) -> String {
         let path = "/tmp/lemon-swiftlm.log"
         guard let content = try? String(contentsOfFile: path, encoding: .utf8),
-              !content.isEmpty else {
+              !content.isEmpty
+        else {
             return "(log empty or unreadable — see Console.app)"
         }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -299,13 +304,13 @@ final class LocalLLM: @unchecked Sendable {
         let issueCtx = "Issue: \(issue.identifier) — \(issue.title)\n" +
             (issue.description.map { String($0.prefix(400)) } ?? "")
         let terminal = logLines.isEmpty ? "(no output yet)" : logLines.joined(separator: "\n")
-        let userMsg  = "\(issueCtx)\n\nLast terminal output:\n\(terminal)"
+        let userMsg = "\(issueCtx)\n\nLast terminal output:\n\(terminal)"
 
         let body: [String: Any] = [
             "model": "local-model",
             "messages": [
                 ["role": "system", "content": systemPrompt],
-                ["role": "user",   "content": userMsg]
+                ["role": "user", "content": userMsg],
             ],
             "response_format": ["type": "json_object"],
             // 300 tokens — long enough to fit the verbose action.message field
@@ -316,18 +321,19 @@ final class LocalLLM: @unchecked Sendable {
             // silence cycle was 2 min away. 300 leaves headroom even for
             // chattier classifier responses.
             "max_tokens": 300,
-            "temperature": 0.1
+            "temperature": 0.1,
         ]
 
         // 127.0.0.1 (not localhost) — see comment in healthCheck() for why.
-        guard let url  = URL(string: "http://127.0.0.1:\(port)/v1/chat/completions"),
-              let data = try? JSONSerialization.data(withJSONObject: body) else {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/v1/chat/completions"),
+              let data = try? JSONSerialization.data(withJSONObject: body)
+        else {
             throw LocalLLMError.invalidRequest
         }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.httpBody   = data
+        req.httpBody = data
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 30
 
@@ -339,6 +345,7 @@ final class LocalLLM: @unchecked Sendable {
                 struct Message: Decodable { let content: String }
                 let message: Message
             }
+
             let choices: [Choice]
         }
 
@@ -365,8 +372,8 @@ enum LocalLLMError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidRequest:  return "LocalLLM invalid request"
-        case .invalidResponse: return "LocalLLM returned empty/malformed content (prompt-cache full hit can return zero tokens — try mutating the input slightly)"
+        case .invalidRequest: "LocalLLM invalid request"
+        case .invalidResponse: "LocalLLM returned empty/malformed content (prompt-cache full hit can return zero tokens — try mutating the input slightly)"
         }
     }
 }

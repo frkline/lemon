@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct PopoverView: View {
     @Environment(Orchestrator.self) private var orchestrator
@@ -26,31 +26,31 @@ struct PopoverView: View {
                     IdentityEditorPane(target: identityTarget)
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
+                            removal: .move(edge: .trailing).combined(with: .opacity),
                         ))
                 } else if let workspaceTarget = nav.editingWorkspace {
                     WorkspaceEditorPane(target: workspaceTarget)
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
+                            removal: .move(edge: .trailing).combined(with: .opacity),
                         ))
                 } else if nav.showingSettings {
                     SettingsView()
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
+                            removal: .move(edge: .trailing).combined(with: .opacity),
                         ))
                 } else if let session = nav.selectedSession {
                     detailPane(session)
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
+                            removal: .move(edge: .trailing).combined(with: .opacity),
                         ))
                 } else {
                     listPane
                         .transition(.asymmetric(
                             insertion: .move(edge: .leading).combined(with: .opacity),
-                            removal: .move(edge: .leading).combined(with: .opacity)
+                            removal: .move(edge: .leading).combined(with: .opacity),
                         ))
                 }
             }
@@ -83,7 +83,9 @@ struct PopoverView: View {
         }
     }
 
-    private var working: Bool { !orchestrator.sessions.active.isEmpty }
+    private var working: Bool {
+        !orchestrator.sessions.active.isEmpty
+    }
 
     // MARK: - Header
 
@@ -91,7 +93,8 @@ struct PopoverView: View {
         HStack(alignment: .center, spacing: 0) {
             // Back chevron — shown in detail / settings / editor panes
             if nav.showingSettings || nav.selectedSession != nil
-                || nav.editingIdentity != nil || nav.editingWorkspace != nil {
+                || nav.editingIdentity != nil || nav.editingWorkspace != nil
+            {
                 Button {
                     withAnimation(LD.slide) {
                         if nav.editingIdentity != nil || nav.editingWorkspace != nil {
@@ -385,8 +388,8 @@ struct PopoverView: View {
         }
     }
 
-    // Surface AI status only when it would help — hide for .ready (green path)
-    // and .notConfigured (user opted out / hasn't set up). Show starting + failed.
+    /// Surface AI status only when it would help — hide for .ready (green path)
+    /// and .notConfigured (user opted out / hasn't set up). Show starting + failed.
     @ViewBuilder
     private var aiStatusBadge: some View {
         switch orchestrator.aiState {
@@ -400,7 +403,7 @@ struct PopoverView: View {
                     .foregroundStyle(LD.lemon)
                     .help(Text(verbatim: "Loading Gemma into memory; can take 60-90 s on first launch."))
             }
-        case .failed(let msg):
+        case let .failed(msg):
             HStack(spacing: 6) {
                 Text("·").font(.system(size: 10)).foregroundStyle(.quaternary)
                 Text("AI: error")
@@ -438,7 +441,6 @@ struct PopoverView: View {
 
     // MARK: - Detail pane
 
-    @ViewBuilder
     private func detailPane(_ session: Session) -> some View {
         VStack(spacing: 0) {
             HStack {
@@ -501,7 +503,6 @@ struct PopoverView: View {
         }
     }
 
-    @ViewBuilder
     private func readyForReviewCard(session: Session, info: WorktreeCleanupInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -554,7 +555,7 @@ struct PopoverView: View {
             Rectangle()
                 .fill(LD.statusDone.opacity(0.4))
                 .frame(width: 2),
-            alignment: .leading
+            alignment: .leading,
         )
     }
 
@@ -646,19 +647,19 @@ struct PopoverView: View {
         // both osascript calls error out.
         let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
         if hasITerm, runOsascript("""
-            tell application "iTerm"
-                activate
-                create window with default profile command "tmux -CC attach -t \(name)"
-            end tell
-            """) {
+        tell application "iTerm"
+            activate
+            create window with default profile command "tmux -CC attach -t \(name)"
+        end tell
+        """) {
             return
         }
         if runOsascript("""
-            tell application "Terminal"
-                activate
-                do script "tmux attach -t \(name)"
-            end tell
-            """) {
+        tell application "Terminal"
+            activate
+            do script "tmux attach -t \(name)"
+        end tell
+        """) {
             return
         }
         // Last resort — copy the command for the user to paste themselves.

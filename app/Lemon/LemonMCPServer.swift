@@ -22,19 +22,20 @@ final class LemonMCPServer: @unchecked Sendable {
     private(set) var isRunning = false
     private let lock = NSLock()
 
-    // Tool registry — name → descriptor + async handler.
-    // Handler returns a pre-encoded JSON String (Sendable across actor hops),
-    // which the dispatcher wraps into MCP's text content body verbatim. This
-    // avoids the strict-concurrency trap of returning [String: Any] from a
-    // MainActor closure (Any isn't Sendable).
-    // @unchecked Sendable: inputSchema is an Any-typed JSON-Schema dict that
-    // we only ever read after registration; mutation is lock-guarded.
+    /// Tool registry — name → descriptor + async handler.
+    /// Handler returns a pre-encoded JSON String (Sendable across actor hops),
+    /// which the dispatcher wraps into MCP's text content body verbatim. This
+    /// avoids the strict-concurrency trap of returning [String: Any] from a
+    /// MainActor closure (Any isn't Sendable).
+    /// @unchecked Sendable: inputSchema is an Any-typed JSON-Schema dict that
+    /// we only ever read after registration; mutation is lock-guarded.
     struct Tool: @unchecked Sendable {
         let name: String
         let description: String
-        let inputSchema: [String: Any]  // JSON-Schema dict
+        let inputSchema: [String: Any] // JSON-Schema dict
         let handler: @Sendable (_ args: [String: Any]) async throws -> String
     }
+
     private var tools: [String: Tool] = [:]
 
     private init() {}
@@ -103,7 +104,7 @@ final class LemonMCPServer: @unchecked Sendable {
     }
 
     private func readRequest(_ conn: NWConnection, accumulated: Data, completion: @escaping @Sendable (HTTPRequest?) -> Void) {
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, error in
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             if let error {
                 Logger.orchestrator.error("MCP receive error: \(error.localizedDescription)")
                 completion(nil); return
@@ -145,7 +146,7 @@ final class LemonMCPServer: @unchecked Sendable {
         guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] else {
             return jsonRPCResponse(id: nil, error: (code: -32700, message: "parse error"))
         }
-        let id = body["id"]  // may be nil for notifications
+        let id = body["id"] // may be nil for notifications
         let method = body["method"] as? String ?? ""
         let params = body["params"] as? [String: Any] ?? [:]
 
@@ -173,10 +174,10 @@ final class LemonMCPServer: @unchecked Sendable {
             return [
                 "protocolVersion": "2024-11-05",
                 "capabilities": ["tools": [String: Any]()],
-                "serverInfo": ["name": "lemon", "version": "0.1.0"]
+                "serverInfo": ["name": "lemon", "version": "0.1.0"],
             ]
         case "initialized", "notifications/initialized":
-            return [String: Any]()  // no-op handshake completion
+            return [String: Any]() // no-op handshake completion
         case "ping":
             return [String: Any]()
         case "tools/list":
@@ -185,7 +186,7 @@ final class LemonMCPServer: @unchecked Sendable {
                     ["name": t.name,
                      "description": t.description,
                      "inputSchema": t.inputSchema]
-                }
+                },
             ]
         case "tools/call":
             guard let name = params["name"] as? String else {
@@ -201,7 +202,7 @@ final class LemonMCPServer: @unchecked Sendable {
             } catch {
                 return [
                     "content": [["type": "text", "text": "Error: \(error.localizedDescription)"]],
-                    "isError": true
+                    "isError": true,
                 ]
             }
         default:
@@ -209,13 +210,14 @@ final class LemonMCPServer: @unchecked Sendable {
         }
     }
 
-    // Convenience for tool handlers that build a JSON-serializable [String: Any]
-    // and need to hand back a pre-encoded String. Use from inside a MainActor.run
-    // closure when the dict references actor-isolated state.
+    /// Convenience for tool handlers that build a JSON-serializable [String: Any]
+    /// and need to hand back a pre-encoded String. Use from inside a MainActor.run
+    /// closure when the dict references actor-isolated state.
     static func encode(_ value: Any) -> String {
         guard JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
-              let s = String(data: data, encoding: .utf8) else {
+              let s = String(data: data, encoding: .utf8)
+        else {
             return "{}"
         }
         return s
@@ -225,7 +227,7 @@ final class LemonMCPServer: @unchecked Sendable {
         let body: [String: Any] = [
             "jsonrpc": "2.0",
             "id": id ?? NSNull(),
-            "result": result
+            "result": result,
         ]
         return jsonResponse(body)
     }
@@ -234,7 +236,7 @@ final class LemonMCPServer: @unchecked Sendable {
         let body: [String: Any] = [
             "jsonrpc": "2.0",
             "id": id ?? NSNull(),
-            "error": ["code": error.code, "message": error.message]
+            "error": ["code": error.code, "message": error.message],
         ]
         return jsonResponse(body)
     }
@@ -247,15 +249,17 @@ final class LemonMCPServer: @unchecked Sendable {
 
 // MARK: - MCP error
 
-// Conforms to LocalizedError so the dispatcher's `error.localizedDescription`
-// surfaces our actual message instead of the generic
-// "The operation couldn't be completed. (Lemon.MCPError error 1.)" Foundation
-// hands back for raw Error conformers.
+/// Conforms to LocalizedError so the dispatcher's `error.localizedDescription`
+/// surfaces our actual message instead of the generic
+/// "The operation couldn't be completed. (Lemon.MCPError error 1.)" Foundation
+/// hands back for raw Error conformers.
 struct MCPError: LocalizedError {
     let code: Int
     let message: String
 
-    var errorDescription: String? { message }
+    var errorDescription: String? {
+        message
+    }
 }
 
 // MARK: - Tiny HTTP/1.1 parser
@@ -266,10 +270,10 @@ struct HTTPRequest {
     let headers: [String: String]
     let body: Data
 
-    // Returns nil if we don't yet have a complete request (caller should keep reading).
+    /// Returns nil if we don't yet have a complete request (caller should keep reading).
     static func tryParse(_ data: Data) -> HTTPRequest? {
         guard let sep = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        guard let headerStr = String(data: data.subdata(in: data.startIndex..<sep.lowerBound), encoding: .utf8) else {
+        guard let headerStr = String(data: data.subdata(in: data.startIndex ..< sep.lowerBound), encoding: .utf8) else {
             return nil
         }
         let lines = headerStr.components(separatedBy: "\r\n")
@@ -290,9 +294,9 @@ struct HTTPRequest {
         let contentLength = Int(headers["content-length"] ?? "0") ?? 0
         let bodyStart = sep.upperBound
         let available = data.distance(from: bodyStart, to: data.endIndex)
-        if available < contentLength { return nil }  // body still streaming
+        if available < contentLength { return nil } // body still streaming
         let bodyEnd = data.index(bodyStart, offsetBy: contentLength)
-        let body = data.subdata(in: bodyStart..<bodyEnd)
+        let body = data.subdata(in: bodyStart ..< bodyEnd)
         return HTTPRequest(method: method, path: path, headers: headers, body: body)
     }
 }
@@ -303,13 +307,12 @@ struct HTTPResponse {
     var contentType: String = "text/plain"
 
     func serialize() -> Data {
-        let reason: String
-        switch status {
-        case 200: reason = "OK"
-        case 400: reason = "Bad Request"
-        case 404: reason = "Not Found"
-        case 500: reason = "Internal Server Error"
-        default:  reason = "OK"
+        let reason = switch status {
+        case 200: "OK"
+        case 400: "Bad Request"
+        case 404: "Not Found"
+        case 500: "Internal Server Error"
+        default: "OK"
         }
         var head = "HTTP/1.1 \(status) \(reason)\r\n"
         head += "Content-Type: \(contentType)\r\n"

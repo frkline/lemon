@@ -2,23 +2,23 @@ import Foundation
 import Security
 
 final class KeychainStore: @unchecked Sendable {
-    // In --mock, use in-memory storage so smoke runs / mock data don't
-    // touch real UserDefaults. Non-mock launches keep the production
-    // Keychain + UserDefaults backing.
+    /// In --mock, use in-memory storage so smoke runs / mock data don't
+    /// touch real UserDefaults. Non-mock launches keep the production
+    /// Keychain + UserDefaults backing.
     static let shared = KeychainStore(
-        inMemory: ProcessInfo.processInfo.arguments.contains("--mock")
+        inMemory: ProcessInfo.processInfo.arguments.contains("--mock"),
     )
 
-    // Pass --mock to enable fake-data UI mode (no Linear account needed).
+    /// Pass --mock to enable fake-data UI mode (no Linear account needed).
     static let isMockMode: Bool = ProcessInfo.processInfo.arguments.contains("--mock")
 
-    // Pass --smoke-test (alongside --mock) to auto-navigate and screenshot all UI states.
+    /// Pass --smoke-test (alongside --mock) to auto-navigate and screenshot all UI states.
     static let isSmokeTesting: Bool = ProcessInfo.processInfo.arguments.contains("--smoke-test")
 
-    // Detected automatically when launched by XCTest — suppresses Keychain dialogs.
+    /// Detected automatically when launched by XCTest — suppresses Keychain dialogs.
     static let isTestRun: Bool = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-    // non-nil = fully in-memory (tests or mock)
+    /// non-nil = fully in-memory (tests or mock)
     private var memory: [String: String]?
 
     private init(inMemory: Bool) {
@@ -44,19 +44,20 @@ final class KeychainStore: @unchecked Sendable {
         set { writeCredential(memoryKey: "githubToken", keychainService: "lemon-github-token", envPrefix: "LEMON_GITHUB_TOKEN", value: newValue) }
     }
 
-    // Returns the bypass value (from {prefix} or {prefix}_FILE) or nil if
-    // neither env var is set. Trims whitespace and expands ~ in paths.
-    //
-    // Used for unattended iteration loops and recursive Claude-Code-driving-Lemon
-    // sessions. Both forms skip Keychain entirely, which avoids the OS prompt
-    // on first launch and keeps tests/scripts headless. Direct value wins
-    // over file path.
-    //   {prefix}=lin_...       — value inline (less safe)
-    //   {prefix}_FILE=~/path   — read from disk (file perms = auth)
+    /// Returns the bypass value (from {prefix} or {prefix}_FILE) or nil if
+    /// neither env var is set. Trims whitespace and expands ~ in paths.
+    ///
+    /// Used for unattended iteration loops and recursive Claude-Code-driving-Lemon
+    /// sessions. Both forms skip Keychain entirely, which avoids the OS prompt
+    /// on first launch and keeps tests/scripts headless. Direct value wins
+    /// over file path.
+    ///   {prefix}=lin_...       — value inline (less safe)
+    ///   {prefix}_FILE=~/path   — read from disk (file perms = auth)
     static func envBypass(prefix: String) -> String? {
         let env = ProcessInfo.processInfo.environment
         if let direct = env[prefix]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !direct.isEmpty {
+           !direct.isEmpty
+        {
             return direct
         }
         if let raw = env["\(prefix)_FILE"], !raw.isEmpty {
@@ -69,11 +70,13 @@ final class KeychainStore: @unchecked Sendable {
         return nil
     }
 
-    // Back-compat shim for callers that haven't migrated to envBypass(prefix:).
-    static func envKeyBypass() -> String? { envBypass(prefix: "LEMON_LINEAR_KEY") }
+    /// Back-compat shim for callers that haven't migrated to envBypass(prefix:).
+    static func envKeyBypass() -> String? {
+        envBypass(prefix: "LEMON_LINEAR_KEY")
+    }
 
-    // Shared credential read/write so Linear + GitHub follow identical
-    // env-bypass + in-memory + Keychain semantics.
+    /// Shared credential read/write so Linear + GitHub follow identical
+    /// env-bypass + in-memory + Keychain semantics.
     private func credential(memoryKey: String, keychainService: String, envPrefix: String) -> String {
         if memory != nil { return memory?[memoryKey] ?? "" }
         if let bypass = Self.envBypass(prefix: envPrefix) { return bypass }
@@ -125,6 +128,7 @@ final class KeychainStore: @unchecked Sendable {
     }
 
     // MARK: - Workspace pairs (replacement for workspaceRepos)
+
     //
     // The pair list lives under "lemon-workspace-pairs". On first read after
     // the multi-source upgrade we migrate any legacy "lemon-workspace-config"
@@ -173,10 +177,10 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
-    // Idempotent. After the first successful migration the sentinel keeps it
-    // off; deleting "lemon-workspace-pairs" without clearing the sentinel
-    // does NOT cause a re-migration (the user has explicitly emptied their
-    // pair list).
+    /// Idempotent. After the first successful migration the sentinel keeps it
+    /// off; deleting "lemon-workspace-pairs" without clearing the sentinel
+    /// does NOT cause a re-migration (the user has explicitly emptied their
+    /// pair list).
     func migrateLegacyWorkspaceIfNeeded() {
         guard migrationSentinel.isEmpty else { return }
         let legacy = workspaceRepos
@@ -188,8 +192,8 @@ final class KeychainStore: @unchecked Sendable {
         let linearSource = SourceConfig(
             source: .linear,
             displayName: "Linear",
-            linearTeamKeys: legacy.map { $0.issuePrefix },
-            githubRepos: nil
+            linearTeamKeys: legacy.map(\.issuePrefix),
+            githubRepos: nil,
         )
         let migrated = legacy.map { repo in
             WorkspacePair(
@@ -198,38 +202,39 @@ final class KeychainStore: @unchecked Sendable {
                     matchKey: repo.issuePrefix,
                     path: repo.path,
                     allReposInFolder: repo.allReposInFolder,
-                    homeRepo: repo.homeRepo
-                )
+                    homeRepo: repo.homeRepo,
+                ),
             )
         }
         if let data = try? JSONEncoder().encode(migrated),
-           let json = String(data: data, encoding: .utf8) {
+           let json = String(data: data, encoding: .utf8)
+        {
             pairsJSON = json
             migrationSentinel = ISO8601DateFormatter().string(from: Date())
         }
     }
 
-    // Pair lookup keyed by IssueRef. Linear refs match by team key prefix
-    // (the matchKey); GitHub refs match by "owner/repo".
+    /// Pair lookup keyed by IssueRef. Linear refs match by team key prefix
+    /// (the matchKey); GitHub refs match by "owner/repo".
     func pair(for ref: IssueRef) -> WorkspacePair? {
         switch ref.scope {
         case .linearTeam:
             let needle = ref.identifierPrefix.lowercased()
             return pairs.first { pair in
                 pair.source.source == .linear &&
-                pair.workspace.matchKey.lowercased() == needle
+                    pair.workspace.matchKey.lowercased() == needle
             }
-        case .githubRepo(let owner, let repo, _):
+        case let .githubRepo(owner, repo, _):
             let needle = "\(owner)/\(repo)".lowercased()
             return pairs.first { pair in
                 pair.source.source == .github &&
-                pair.workspace.matchKey.lowercased() == needle
+                    pair.workspace.matchKey.lowercased() == needle
             }
         }
     }
 
-    // SourceAuth assembled per pair from the credentials in this store.
-    // Nil if the credential for the pair's source is missing.
+    /// SourceAuth assembled per pair from the credentials in this store.
+    /// Nil if the credential for the pair's source is missing.
     func authFor(pair: WorkspacePair) -> SourceAuth? {
         switch pair.source.source {
         case .linear:
@@ -241,13 +246,13 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
-    // Looser than `authFor` — used by `isConfigured` to gate UI without
-    // demanding a fully-resolved principal id. linearUserId / githubUser are
-    // hydrated at first verifyCredential and during onboarding.
+    /// Looser than `authFor` — used by `isConfigured` to gate UI without
+    /// demanding a fully-resolved principal id. linearUserId / githubUser are
+    /// hydrated at first verifyCredential and during onboarding.
     private func credentialPresent(for pair: WorkspacePair) -> Bool {
         switch pair.source.source {
-        case .linear: return !linearApiKey.isEmpty
-        case .github: return !githubToken.isEmpty
+        case .linear: !linearApiKey.isEmpty
+        case .github: !githubToken.isEmpty
         }
     }
 
@@ -255,7 +260,7 @@ final class KeychainStore: @unchecked Sendable {
         if Self.isMockMode { return true }
         // Real Keychain store in test mode: always false to prevent the Keychain dialog
         // when there's no user to click it. In-memory stores (makeForTesting) are unaffected.
-        if memory == nil && Self.isTestRun { return false }
+        if memory == nil, Self.isTestRun { return false }
         // Source of truth is the new (Identity, Workspace) model — the old
         // synthesized `pairs` view is no longer written by onboarding so
         // gating on it would force the wizard to re-launch on every
@@ -281,6 +286,7 @@ final class KeychainStore: @unchecked Sendable {
     }
 
     // MARK: - Identities + Workspaces (the richer model per the
+
     //         identity refactor discussion). Identities are credentials with
     //         their cached surfaces; Workspaces are local folders with a
     //         single routing into an identity+surface. The old `pairs` API
@@ -381,17 +387,18 @@ final class KeychainStore: @unchecked Sendable {
                         principalId: linearUserId,
                         host: nil,
                         knownSurfaces: surfaces,
-                        surfacesFetchedAt: surfaces.isEmpty ? nil : Date()
+                        surfacesFetchedAt: surfaces.isEmpty ? nil : Date(),
                     )
                     if !linearApiKey.isEmpty, let id = linearIdentity?.id {
                         setIdentitySecret(linearApiKey, for: id)
                     }
                 } else if let existing = linearIdentity, !pair.workspace.matchKey.isEmpty,
-                          !existing.knownSurfaces.contains(where: { $0.key == pair.workspace.matchKey }) {
+                          !existing.knownSurfaces.contains(where: { $0.key == pair.workspace.matchKey })
+                {
                     linearIdentity?.knownSurfaces.append(
                         Surface(id: pair.workspace.matchKey,
                                 key: pair.workspace.matchKey,
-                                displayName: pair.workspace.matchKey)
+                                displayName: pair.workspace.matchKey),
                     )
                 }
 
@@ -402,8 +409,8 @@ final class KeychainStore: @unchecked Sendable {
                         homeRepo: pair.workspace.homeRepo,
                         routing: Routing(
                             identityId: identityId,
-                            surfaceId: pair.workspace.matchKey
-                        )
+                            surfaceId: pair.workspace.matchKey,
+                        ),
                     ))
                 }
 
@@ -419,17 +426,18 @@ final class KeychainStore: @unchecked Sendable {
                         principalId: githubUser,
                         host: nil,
                         knownSurfaces: surfaces,
-                        surfacesFetchedAt: surfaces.isEmpty ? nil : Date()
+                        surfacesFetchedAt: surfaces.isEmpty ? nil : Date(),
                     )
                     if !githubToken.isEmpty, let id = githubIdentity?.id {
                         setIdentitySecret(githubToken, for: id)
                     }
                 } else if let existing = githubIdentity, !pair.workspace.matchKey.isEmpty,
-                          !existing.knownSurfaces.contains(where: { $0.key == pair.workspace.matchKey }) {
+                          !existing.knownSurfaces.contains(where: { $0.key == pair.workspace.matchKey })
+                {
                     githubIdentity?.knownSurfaces.append(
                         Surface(id: pair.workspace.matchKey,
                                 key: pair.workspace.matchKey,
-                                displayName: pair.workspace.matchKey)
+                                displayName: pair.workspace.matchKey),
                     )
                 }
 
@@ -440,8 +448,8 @@ final class KeychainStore: @unchecked Sendable {
                         homeRepo: pair.workspace.homeRepo,
                         routing: Routing(
                             identityId: identityId,
-                            surfaceId: pair.workspace.matchKey
-                        )
+                            surfaceId: pair.workspace.matchKey,
+                        ),
                     ))
                 }
             }
@@ -452,11 +460,13 @@ final class KeychainStore: @unchecked Sendable {
         if let g = githubIdentity { migrated.append(g) }
 
         if let data = try? JSONEncoder().encode(migrated),
-           let json = String(data: data, encoding: .utf8) {
+           let json = String(data: data, encoding: .utf8)
+        {
             identitiesJSON = json
         }
         if let data = try? JSONEncoder().encode(newWorkspaces),
-           let json = String(data: data, encoding: .utf8) {
+           let json = String(data: data, encoding: .utf8)
+        {
             workspacesJSON = json
         }
         identityMigrationSentinel = ISO8601DateFormatter().string(from: Date())
@@ -471,6 +481,7 @@ final class KeychainStore: @unchecked Sendable {
     }
 
     // MARK: - Per-identity secret (Keychain)
+
     //
     // Each Identity carries its credential in Keychain under
     // "lemon-identity-{uuid}-secret". Linear's credential is the API key;
@@ -478,7 +489,7 @@ final class KeychainStore: @unchecked Sendable {
 
     func identitySecret(for identityId: UUID) -> String {
         let memoryKey = "id-\(identityId.uuidString)-secret"
-        let service  = "lemon-identity-\(identityId.uuidString)-secret"
+        let service = "lemon-identity-\(identityId.uuidString)-secret"
         if memory != nil { return memory?[memoryKey] ?? "" }
         if Self.isTestRun || Self.isMockMode { return "" }
         return readKeychain(service) ?? ""
@@ -486,7 +497,7 @@ final class KeychainStore: @unchecked Sendable {
 
     func setIdentitySecret(_ value: String, for identityId: UUID) {
         let memoryKey = "id-\(identityId.uuidString)-secret"
-        let service  = "lemon-identity-\(identityId.uuidString)-secret"
+        let service = "lemon-identity-\(identityId.uuidString)-secret"
         if memory != nil { memory?[memoryKey] = value; return }
         if Self.isTestRun || Self.isMockMode { return }
         writeKeychain(service, value: value)
@@ -494,7 +505,7 @@ final class KeychainStore: @unchecked Sendable {
 
     func deleteIdentitySecret(for identityId: UUID) {
         let memoryKey = "id-\(identityId.uuidString)-secret"
-        let service  = "lemon-identity-\(identityId.uuidString)-secret"
+        let service = "lemon-identity-\(identityId.uuidString)-secret"
         if memory != nil { memory?.removeValue(forKey: memoryKey); return }
         SecItemDelete([kSecClass: kSecClassGenericPassword,
                        kSecAttrService: service] as CFDictionary)
@@ -530,6 +541,7 @@ final class KeychainStore: @unchecked Sendable {
     }
 
     // MARK: - Legacy workspace repos helpers
+
     //
     // Kept one release for any external callers (older onboarding paths,
     // tests that pre-date the pair model). Reads decode the legacy JSON
@@ -590,13 +602,13 @@ final class KeychainStore: @unchecked Sendable {
     @discardableResult
     func write(_ key: LegacyKey, value: String) -> Bool {
         switch key {
-        case .linearApiKey:    linearApiKey = value;    return true
-        case .linearUserId:    linearUserId = value;    return true
+        case .linearApiKey: linearApiKey = value; return true
+        case .linearUserId: linearUserId = value; return true
         case .workspaceConfig: workspaceConfig = value; return true
         }
     }
 
-    // Keys still referenced in OnboardingView.finish()
+    /// Keys still referenced in OnboardingView.finish()
     enum LegacyKey {
         case linearApiKey, linearUserId, workspaceConfig
     }
@@ -621,10 +633,10 @@ final class KeychainStore: @unchecked Sendable {
 
     private func readKeychain(_ service: String) -> String? {
         let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
+            kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
-            kSecReturnData:  true,
-            kSecMatchLimit:  kSecMatchLimitOne
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
         ]
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
@@ -635,8 +647,8 @@ final class KeychainStore: @unchecked Sendable {
     private func writeKeychain(_ service: String, value: String) {
         let data = Data(value.utf8)
         let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
         ]
         if SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary) == errSecItemNotFound {
             var add = query

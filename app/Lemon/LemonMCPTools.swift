@@ -28,17 +28,17 @@ enum LemonMCPTools {
             inputSchema: [
                 "type": "object",
                 "properties": [String: Any](),
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { _ in
                 await MainActor.run {
                     let payload: [String: Any] = [
                         "active": orchestrator.sessions.active.map(sessionSummary),
-                        "recent": orchestrator.sessions.recent.map(sessionSummary)
+                        "recent": orchestrator.sessions.recent.map(sessionSummary),
                     ]
                     return LemonMCPServer.encode(payload)
                 }
-            }
+            },
         ))
 
         // ── get_session ────────────────────────────────────────────────────
@@ -50,16 +50,16 @@ enum LemonMCPTools {
                 "properties": [
                     "id": [
                         "type": "string",
-                        "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"
+                        "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')",
                     ],
                     "log_lines": [
                         "type": "integer",
                         "description": "How many lines of pane log to return from the tail (default 60, max 500)",
-                        "default": 60
-                    ]
+                        "default": 60,
+                    ],
                 ],
                 "required": ["id"],
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { args in
                 guard let idArg = args["id"] as? String, !idArg.isEmpty else {
@@ -77,7 +77,7 @@ enum LemonMCPTools {
                     if let pr = session.prUrl { detail["pr_url"] = pr }
                     return LemonMCPServer.encode(detail)
                 }
-            }
+            },
         ))
 
         // ── get_pane_log ───────────────────────────────────────────────────
@@ -88,10 +88,10 @@ enum LemonMCPTools {
                 "type": "object",
                 "properties": [
                     "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
-                    "lines": ["type": "integer", "description": "Lines from the tail (default 100, max 2000)", "default": 100]
+                    "lines": ["type": "integer", "description": "Lines from the tail (default 100, max 2000)", "default": 100],
                 ],
                 "required": ["id"],
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { args in
                 guard let idArg = args["id"] as? String, !idArg.isEmpty else {
@@ -105,11 +105,11 @@ enum LemonMCPTools {
                     let payload: [String: Any] = [
                         "identifier": session.issue.identifier,
                         "log_path": "/tmp/lemon-log-\(session.issue.pathSlug).txt",
-                        "tail": readPaneLogTail(slug: session.issue.pathSlug, lines: lines)
+                        "tail": readPaneLogTail(slug: session.issue.pathSlug, lines: lines),
                     ]
                     return LemonMCPServer.encode(payload)
                 }
-            }
+            },
         ))
 
         // ── get_swiftlm_log ────────────────────────────────────────────────
@@ -120,9 +120,9 @@ enum LemonMCPTools {
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "lines": ["type": "integer", "description": "Lines from the tail (default 80, max 1000)", "default": 80]
+                    "lines": ["type": "integer", "description": "Lines from the tail (default 80, max 1000)", "default": 80],
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { args in
                 let lines = min(max((args["lines"] as? Int) ?? 80, 1), 1000)
@@ -134,10 +134,10 @@ enum LemonMCPTools {
                     "path": "/tmp/lemon-swiftlm.log",
                     "lines": tailLines,
                     "lines_returned": tailLines.count,
-                    "ai_state": aiStateText
+                    "ai_state": aiStateText,
                 ]
                 return LemonMCPServer.encode(payload)
-            }
+            },
         ))
     }
 
@@ -158,11 +158,11 @@ enum LemonMCPTools {
                     "log_lines": [
                         "type": "integer",
                         "description": "How many tail lines to feed Gemma (default 80, max 400). Mirrors what the silence detector normally sends.",
-                        "default": 80
-                    ]
+                        "default": 80,
+                    ],
                 ],
                 "required": ["id"],
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { args in
                 guard let idArg = args["id"] as? String, !idArg.isEmpty else {
@@ -203,10 +203,10 @@ enum LemonMCPTools {
                     "summary": verdict.summary,
                     "action": actionDict.isEmpty ? NSNull() : actionDict,
                     "input_log_lines": tail,
-                    "elapsed_ms": elapsedMs
+                    "elapsed_ms": elapsedMs,
                 ]
                 return LemonMCPServer.encode(payload)
-            }
+            },
         ))
 
         // ── send_keys ──────────────────────────────────────────────────────
@@ -225,11 +225,11 @@ enum LemonMCPTools {
                     "append_enter": [
                         "type": "boolean",
                         "description": "Append Enter after the keys (default true; ignored for tmux special-key names)",
-                        "default": true
-                    ]
+                        "default": true,
+                    ],
                 ],
                 "required": ["id", "keys"],
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { args in
                 guard let idArg = args["id"] as? String, !idArg.isEmpty else {
@@ -254,7 +254,7 @@ enum LemonMCPTools {
                 guard runShell("tmux has-session -t '\(sessionName)' 2>/dev/null") == 0 else {
                     throw MCPError(code: -32005, message: "tmux session '\(sessionName)' not alive")
                 }
-                let specialKeys: Set<String> = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
+                let specialKeys: Set = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
                 let cmd: String
                 if specialKeys.contains(keys) {
                     cmd = "tmux send-keys -t '\(sessionName)' \(keys)"
@@ -271,10 +271,10 @@ enum LemonMCPTools {
                     "keys": keys,
                     "appended_enter": !specialKeys.contains(keys) && appendEnter,
                     "exit_code": rc,
-                    "ok": rc == 0
+                    "ok": rc == 0,
                 ]
                 return LemonMCPServer.encode(payload)
-            }
+            },
         ))
 
         // ── stop_session ───────────────────────────────────────────────────
@@ -284,10 +284,10 @@ enum LemonMCPTools {
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"]
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
                 ],
                 "required": ["id"],
-                "additionalProperties": false
+                "additionalProperties": false,
             ],
             handler: { args in
                 guard let idArg = args["id"] as? String, !idArg.isEmpty else {
@@ -295,13 +295,14 @@ enum LemonMCPTools {
                 }
                 let json: String? = await MainActor.run { () -> String? in
                     guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg),
-                          orchestrator.sessions.active.contains(where: { $0.id == session.id }) else {
+                          orchestrator.sessions.active.contains(where: { $0.id == session.id })
+                    else {
                         return nil
                     }
                     let payload: [String: Any] = [
                         "identifier": session.issue.identifier,
                         "uuid": session.id.uuidString,
-                        "stopped": true
+                        "stopped": true,
                     ]
                     orchestrator.stopSession(session)
                     return LemonMCPServer.encode(payload)
@@ -310,7 +311,7 @@ enum LemonMCPTools {
                     throw MCPError(code: -32004, message: "no active session matching '\(idArg)'")
                 }
                 return json
-            }
+            },
         ))
     }
 
@@ -327,7 +328,7 @@ enum LemonMCPTools {
             "status": s.status.displayLabel,
             "labels": s.issue.labelNames,
             "started_at": ISO8601DateFormatter().string(from: s.startedAt),
-            "log_line_count": s.logLines.count
+            "log_line_count": s.logLines.count,
         ]
         if let end = s.endedAt { d["ended_at"] = ISO8601DateFormatter().string(from: end) }
         if let wt = s.worktreePath { d["worktree_path"] = wt }
@@ -338,7 +339,8 @@ enum LemonMCPTools {
     private static func findSession(orchestrator: Orchestrator, idOrIdentifier: String) -> Session? {
         let all = orchestrator.sessions.active + orchestrator.sessions.recent
         if let uuid = UUID(uuidString: idOrIdentifier),
-           let s = all.first(where: { $0.id == uuid }) {
+           let s = all.first(where: { $0.id == uuid })
+        {
             return s
         }
         let needle = idOrIdentifier.lowercased()
@@ -354,18 +356,18 @@ enum LemonMCPTools {
 
     private static func stringify(aiState: LocalLLM.AIState) -> String {
         switch aiState {
-        case .notConfigured: return "not_configured"
-        case .starting:      return "starting"
-        case .ready:         return "ready"
-        case .failed(let m): return "failed: \(m)"
+        case .notConfigured: "not_configured"
+        case .starting: "starting"
+        case .ready: "ready"
+        case let .failed(m): "failed: \(m)"
         }
     }
 
-    // Synchronous shell helper for tmux send-keys / tmux has-session. Same
-    // login-shell pattern WorktreeRunner uses so Homebrew tmux is on PATH.
-    // nonisolated so handlers can call it without an actor hop — Process is
-    // thread-safe and doesn't touch any MainActor state.
-    nonisolated private static func runShell(_ command: String) -> Int32 {
+    /// Synchronous shell helper for tmux send-keys / tmux has-session. Same
+    /// login-shell pattern WorktreeRunner uses so Homebrew tmux is on PATH.
+    /// nonisolated so handlers can call it without an actor hop — Process is
+    /// thread-safe and doesn't touch any MainActor state.
+    private nonisolated static func runShell(_ command: String) -> Int32 {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-l", "-c", command]

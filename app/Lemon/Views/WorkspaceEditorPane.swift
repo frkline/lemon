@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// Slide-in pane for adding or editing a single Workspace.
 /// Pushed via `AppNavigation.editWorkspace(_:)` / `addWorkspace()`.
@@ -31,20 +31,24 @@ struct WorkspaceEditorPane: View {
         let identityId: UUID
         let surfaceKey: String
         let label: String
-        let detail: String   // e.g. "GitHub · frkline/lemon — detected from .git/config"
+        let detail: String // e.g. "GitHub · frkline/lemon — detected from .git/config"
     }
 
-    private var identities: [Identity] { KeychainStore.shared.identities }
+    private var identities: [Identity] {
+        KeychainStore.shared.identities
+    }
 
     private var selectedIdentity: Identity? {
         guard let id = identityId else { return nil }
         return identities.first { $0.id == id }
     }
 
-    private var surfaces: [Surface] { selectedIdentity?.knownSurfaces ?? [] }
+    private var surfaces: [Surface] {
+        selectedIdentity?.knownSurfaces ?? []
+    }
 
     private var isNew: Bool {
-        if case .new = target { return true } else { return false }
+        if case .new = target { true } else { false }
     }
 
     private var canSave: Bool {
@@ -117,7 +121,7 @@ struct WorkspaceEditorPane: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
             )
             .onChange(of: path) { _, newValue in
                 analyzePath(newValue)
@@ -168,11 +172,11 @@ struct WorkspaceEditorPane: View {
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(LD.lemon.opacity(0.06))
+                    .fill(LD.lemon.opacity(0.06)),
             )
             .overlay(
                 RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(LD.lemon.opacity(0.28), lineWidth: 0.5)
+                    .strokeBorder(LD.lemon.opacity(0.28), lineWidth: 0.5),
             )
         }
         .buttonStyle(.plain)
@@ -207,7 +211,7 @@ struct WorkspaceEditorPane: View {
                     .background(
                         RoundedRectangle(cornerRadius: LD.r10)
                             .strokeBorder(LD.lemon.opacity(0.30),
-                                          style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                          style: StrokeStyle(lineWidth: 1, dash: [4, 3])),
                     )
                 }
                 .buttonStyle(.plain)
@@ -255,12 +259,12 @@ struct WorkspaceEditorPane: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(isSelected ? LD.lemon.opacity(0.07) : Color.primary.opacity(0.04))
+                    .fill(isSelected ? LD.lemon.opacity(0.07) : Color.primary.opacity(0.04)),
             )
             .overlay(
                 RoundedRectangle(cornerRadius: LD.r10)
                     .strokeBorder(isSelected ? LD.lemon.opacity(0.30) : Color.primary.opacity(0.08),
-                                  lineWidth: 0.5)
+                                  lineWidth: 0.5),
             )
         }
         .buttonStyle(.plain)
@@ -328,11 +332,11 @@ struct WorkspaceEditorPane: View {
                         .padding(.vertical, 10)
                         .background(
                             RoundedRectangle(cornerRadius: LD.r10)
-                                .fill(.primary.opacity(0.04))
+                                .fill(.primary.opacity(0.04)),
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: LD.r10)
-                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
                         )
                     }
                     .menuStyle(.borderlessButton)
@@ -347,8 +351,6 @@ struct WorkspaceEditorPane: View {
                 }
                 reseedRow
             }
-        } else {
-            EmptyView()
         }
     }
 
@@ -389,7 +391,7 @@ struct WorkspaceEditorPane: View {
     @ViewBuilder
     private var reseedStatusChip: some View {
         switch reseedState {
-        case .success(let n):
+        case let .success(n):
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 10))
@@ -398,7 +400,7 @@ struct WorkspaceEditorPane: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(LD.statusDone)
             }
-        case .failed(let msg):
+        case let .failed(msg):
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
@@ -431,7 +433,7 @@ struct WorkspaceEditorPane: View {
     private var surfaceFreeText: some View {
         TextField(
             selectedIdentity?.kind == .github ? "owner/repo" : "Team key (e.g. HRP)",
-            text: $surfaceId
+            text: $surfaceId,
         )
         .textFieldStyle(.plain)
         .font(.system(size: 11, design: .monospaced))
@@ -439,7 +441,7 @@ struct WorkspaceEditorPane: View {
         .padding(.horizontal, 9)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
         )
     }
 
@@ -462,6 +464,7 @@ struct WorkspaceEditorPane: View {
     }
 
     // MARK: - Folder options
+
     //
     // The multi-repo toggle + the home-subdir field belong together — they
     // describe the same thing (how the workspace's filesystem is laid out
@@ -482,8 +485,8 @@ struct WorkspaceEditorPane: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.primary)
                         Text(allReposInFolder
-                             ? "Lemon discovers every git repo inside and worktrees them as siblings."
-                             : "Treat the path as a single repo.")
+                            ? "Lemon discovers every git repo inside and worktrees them as siblings."
+                            : "Treat the path as a single repo.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -510,7 +513,7 @@ struct WorkspaceEditorPane: View {
                             .padding(.horizontal, 9)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
                             )
                         Text("Where Claude launches inside the folder. Put a LEMON.md there with team-specific guidance.")
                             .font(.system(size: 10))
@@ -616,7 +619,7 @@ struct WorkspaceEditorPane: View {
             if let firstIdentity = identities.first {
                 identityId = firstIdentity.id
             }
-        case .existing(let id):
+        case let .existing(id):
             if let ws = KeychainStore.shared.workspaces.first(where: { $0.id == id }) {
                 existing = ws
                 path = ws.path
@@ -652,7 +655,7 @@ struct WorkspaceEditorPane: View {
         }
         suggestion = WorkspaceAnalyzer.suggest(
             for: trimmed,
-            identities: identities
+            identities: identities,
         )
     }
 
@@ -661,13 +664,12 @@ struct WorkspaceEditorPane: View {
         guard let identityId else { return }
         let trimmedSurface = surfaceId.trimmingCharacters(in: .whitespaces)
 
-        var working: Workspace
-        if let existing {
-            working = existing
+        var working: Workspace = if let existing {
+            existing
         } else {
-            working = Workspace(
+            Workspace(
                 path: "", allReposInFolder: false, homeRepo: "",
-                routing: Routing(identityId: identityId, surfaceId: trimmedSurface)
+                routing: Routing(identityId: identityId, surfaceId: trimmedSurface),
             )
         }
         working.path = path.trimmingCharacters(in: .whitespaces)

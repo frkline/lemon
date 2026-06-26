@@ -1,5 +1,5 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class GitHubClientTests: XCTestCase {
     private var session: URLSession!
@@ -12,9 +12,13 @@ final class GitHubClientTests: XCTestCase {
         GitHubStubURLProtocol.reset()
     }
 
-    private func client() -> GitHubClient { GitHubClient(session: session) }
+    private func client() -> GitHubClient {
+        GitHubClient(session: session)
+    }
 
-    private func auth() -> SourceAuth { .github(pat: "test-pat", login: "frkline") }
+    private func auth() -> SourceAuth {
+        .github(pat: "test-pat", login: "frkline")
+    }
 
     private func githubRef(owner: String = "acme", repo: String = "widgets", number: Int = 7) -> IssueRef {
         IssueRef(
@@ -23,7 +27,7 @@ final class GitHubClientTests: XCTestCase {
             title: "Sample",
             description: nil,
             labelNames: [],
-            scope: .githubRepo(owner: owner, repo: repo, number: number)
+            scope: .githubRepo(owner: owner, repo: repo, number: number),
         )
     }
 
@@ -125,6 +129,7 @@ final class GitHubClientTests: XCTestCase {
     }
 
     // MARK: - Label color sanity
+
     //
     // The single biggest regression risk: GH expects bare hex without '#'.
     // We can't observe the encoded body through a simple stub without
@@ -139,6 +144,7 @@ final class GitHubClientTests: XCTestCase {
     }
 
     // MARK: - bootstrapLabels
+
     //
     // Regression: the trigger label was getting silently dropped because
     // GitHub rejects pure-emoji label names ("Name must contain more
@@ -157,9 +163,9 @@ final class GitHubClientTests: XCTestCase {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { return }
             posted.append((
-                name:        (json["name"] as? String) ?? "",
-                color:       (json["color"] as? String) ?? "",
-                description: (json["description"] as? String) ?? ""
+                name: (json["name"] as? String) ?? "",
+                color: (json["color"] as? String) ?? "",
+                description: (json["description"] as? String) ?? "",
             ))
         }
         GitHubStubURLProtocol.respond(json: "{}", statusCode: 201)
@@ -270,9 +276,9 @@ final class GitHubClientTests: XCTestCase {
 // MARK: - URLProtocol stub (parallel to StubURLProtocol used by LinearClientTests).
 
 final class GitHubStubURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) private static var _data = Data()
-    nonisolated(unsafe) private static var _statusCode = 200
-    nonisolated(unsafe) static var onRequest: ((URLRequest) -> Void)? = nil
+    private nonisolated(unsafe) static var _data = Data()
+    private nonisolated(unsafe) static var _statusCode = 200
+    nonisolated(unsafe) static var onRequest: ((URLRequest) -> Void)?
 
     static func reset() {
         _data = Data()
@@ -285,8 +291,13 @@ final class GitHubStubURLProtocol: URLProtocol, @unchecked Sendable {
         _statusCode = statusCode
     }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
         if let hook = Self.onRequest {
@@ -309,7 +320,7 @@ final class GitHubStubURLProtocol: URLProtocol, @unchecked Sendable {
             url: request.url!,
             statusCode: Self._statusCode,
             httpVersion: nil,
-            headerFields: ["Content-Type": "application/json"]
+            headerFields: ["Content-Type": "application/json"],
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Self._data)
