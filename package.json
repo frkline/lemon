@@ -1,10 +1,9 @@
 {
   "name": "lemon",
   "version": "0.1.0",
-  "description": "Mac-native AI developer agent — assign a Linear issue, get a PR",
+  "description": "Mac-native AI developer agent — tag a Linear or GitHub issue, get a PR",
   "private": true,
   "scripts": {
-    "build": "echo 'Docker image: container build -t lemon-worker:latest .'",
     "test:scripts": "node scripts/get-field.js config.example.yaml model"
   },
   "dependencies": {

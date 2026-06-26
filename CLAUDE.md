@@ -281,20 +281,19 @@ This keeps the design feedback loop fully in the conversation — no Finder, no 
 
 ## Secrets and config
 
-Only the Linear API key is sensitive — it lives in Keychain. Everything else is UserDefaults.
+API credentials (Linear API key, GitHub PAT) are sensitive and live in Keychain; everything else is UserDefaults.
 
 | Value | Storage | Key |
 |-------|---------|-----|
 | Linear API key | Keychain | `lemon-linear-key` |
+| GitHub PAT | Keychain | `lemon-github-token` |
 | Linear user ID | UserDefaults | `lemon-linear-user-id` |
-| Workspace config (JSON) | UserDefaults | `lemon-workspace-config` |
+| GitHub login | UserDefaults | `lemon-github-user` |
+| Workspace pairs (JSON) | UserDefaults | `lemon-workspace-pairs` |
 
-`KeychainStore.swift` handles all reads and writes. **Never** read secrets from files or environment variables on the host.
+`KeychainStore.swift` handles all reads and writes. **Never** store secrets anywhere except Keychain — the `LEMON_*` env-var bypass under "Running Lemon unattended" is the one opt-in exception, for headless dev runs.
 
-Workspace config is a JSON array of `WorkspaceRepo` objects:
-```json
-[{"path": "/Users/frank/Projects/myapp", "issuePrefix": "LEM", "homeRepo": "", "allReposInFolder": false}]
-```
+Workspace config is a JSON array of `WorkspacePair` objects — each a `SourceConfig` (Linear or GitHub) plus a `WorkspaceMapping` (match key → local repo/folder). Capped at 10, stored under `lemon-workspace-pairs`. The legacy `lemon-workspace-config` (a `WorkspaceRepo` array) migrates to one Linear pair per repo on first read, gated by the `lemon-workspace-config-migrated-at` sentinel. See `Models.swift` for the exact Codable shapes.
 
 ## Rules
 

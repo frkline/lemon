@@ -10,3 +10,4 @@ app/Lemon.xcodeproj/project.xcworkspace/xcuserdata/
 app/Lemon/LemonWorker/
 *.profraw
 .claude/*.lock
+.claude/settings.local.json
