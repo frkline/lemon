@@ -264,7 +264,7 @@ extension OnboardingView {
         self._linearApiKey = State(initialValue: "lin_api_smoke_key")
         self._linearUserId = State(initialValue: "u_smoke")
         self._linearUserName = State(initialValue: "")
-        self._repos = State(initialValue: [WorkspaceRepo(issuePrefix: "LEM", path: "/Users/frank/Projects/lemon")])
+        self._repos = State(initialValue: [WorkspaceRepo(issuePrefix: "LEM", path: "/Users/you/Projects/lemon")])
     }
 }
 #endif

@@ -10,7 +10,7 @@ import Foundation
 //   <!-- lemon
 //   branch: lemon/HRP-42
 //   pr: 101
-//   repo: /Users/frank/Projects/myapp
+//   repo: /Users/you/Projects/myapp
 //   source: github       <-- optional, missing = .linear (pre-upgrade comments)
 //   comment: <optional explicit id, falls back to host comment>
 //   -->
