@@ -645,7 +645,7 @@ final class Orchestrator {
                                  linearTeamKeys: ["DEMO"], githubRepos: nil),
             workspace: WorkspaceMapping(
                 matchKey: "DEMO",
-                path: "/Users/frank/Projects/HarpyRocks",
+                path: "/Users/you/Projects/demo-app",
                 allReposInFolder: true,
                 homeRepo: "memory"
             )
@@ -655,7 +655,7 @@ final class Orchestrator {
                                  linearTeamKeys: nil, githubRepos: ["acme/widgets"]),
             workspace: WorkspaceMapping(
                 matchKey: "acme/widgets",
-                path: "/Users/frank/Projects/widgets",
+                path: "/Users/you/Projects/widgets",
                 allReposInFolder: false,
                 homeRepo: ""
             )
