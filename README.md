@@ -219,13 +219,13 @@ None of this is from scratch.
 
 <br/>
 
-**Lemon-the-binary** only ever talks to **Linear's GraphQL** for label and comment operations. That's the only network call the orchestrator itself makes.
+**Lemon-the-binary** only talks to your configured issue tracker — **Linear's GraphQL** or **GitHub's REST API** — for label and comment operations. Those are the only network calls the orchestrator itself makes.
 
 Everything else flows through tools you launched and authenticated:
 
 | What | Where it goes |
 |---|---|
-| Issues, labels, comments | Linear API |
+| Issues, labels, comments | Linear API or GitHub API |
 | Claude API traffic | Your `claude` CLI → Anthropic (Lemon never sees the bytes) |
 | `gh pr create`, `git push` | GitHub, from inside the worktree |
 | Gemma 4 inference | **On your Mac's GPU.** Never leaves the machine. |
