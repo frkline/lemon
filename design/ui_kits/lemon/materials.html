@@ -1,0 +1,73 @@
+<!-- @dsCard group="Foundations" name="Materials" subtitle="Glass tiers & elevation" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>materials.html</title><style>
+:root{
+  --lemon:#F7C842;
+  --console:#17110A;--consoleText:#E8E0CC;
+  --primary:#ECE6D8;--secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50);--quaternary:rgba(236,230,216,.30);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  background:radial-gradient(120% 90% at 18% 0%,#3a2f4a 0%,#241d30 40%,#14101c 100%) fixed,#14101c;
+  color:var(--primary);-webkit-font-smoothing:antialiased;padding:32px;}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace}
+.doc{width:820px;max-width:100%;border-radius:18px;background:rgba(33,27,17,.62);
+  backdrop-filter:blur(36px) saturate(1.3);-webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 22px 56px rgba(0,0,0,.5);
+  padding:36px 38px 34px;}
+.eyebrow{display:flex;align-items:center;gap:8px;color:var(--tertiary);font-size:10px;
+  font-weight:700;letter-spacing:1.7px;text-transform:uppercase;margin-bottom:16px}
+.eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--lemon)}
+h1{font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1.08;margin-bottom:12px}
+.lead{color:var(--secondary);font-size:13.5px;line-height:1.6;max-width:64ch}
+.hr{height:.5px;background:rgba(236,230,216,.13);margin:26px 0}
+/* swatch board sits over a faux desktop so the blur is real */
+.board{border-radius:14px;overflow:hidden;
+  background:
+    radial-gradient(80% 120% at 80% 10%,#4a3a5e 0%,rgba(74,58,94,0) 55%),
+    linear-gradient(125deg,#2b2238 0%,#191322 60%,#241a18 100%);
+  padding:22px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.tier{border-radius:var(--r,12px);padding:15px 16px;min-height:104px;
+  display:flex;flex-direction:column;justify-content:space-between}
+.thin{background:rgba(34,28,18,.46);backdrop-filter:blur(20px) saturate(1.15);
+  -webkit-backdrop-filter:blur(20px) saturate(1.15);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.07)}
+.regular{background:rgba(46,38,24,.72);backdrop-filter:blur(30px) saturate(1.3);
+  -webkit-backdrop-filter:blur(30px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12)}
+.thick{background:rgba(33,27,17,.64);backdrop-filter:blur(36px) saturate(1.3);
+  -webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 16px 40px rgba(0,0,0,.5)}
+.opaque{background:var(--console);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.05)}
+.tn{font-size:12.5px;font-weight:600;letter-spacing:-.1px}
+.tu{color:var(--tertiary);font-size:10px;margin-top:2px}
+.trec{color:var(--secondary);font-size:9.5px;line-height:1.5}
+.opaque .trec,.opaque .tu{color:rgba(232,224,204,.55)}
+.opaque .tn{color:var(--consoleText)}
+/* notes */
+.notes{display:grid;grid-template-columns:1fr 1fr;gap:14px 30px;margin-top:24px}
+.nt{display:grid;grid-template-columns:auto 1fr;gap:11px}
+.nt .b{width:7px;height:7px;border-radius:2px;background:var(--lemon);margin-top:4px;opacity:.85}
+.nt .t{font-size:12px;font-weight:600;margin-bottom:3px}
+.nt .d{color:var(--secondary);font-size:11px;line-height:1.5}
+</style></head>
+<body><div class="doc">
+  <div class="eyebrow"><i></i>Foundations &middot; Materials</div>
+  <h1>Materials &amp; elevation</h1>
+  <p class="lead">Lemon is built from one material at four thicknesses. Hierarchy is the blur and the fill opacity &mdash; a surface comes forward by thickening, not by gaining a border or a drop shadow. Only the popover itself casts a shadow; everything inside floats on material alone.</p>
+  <div class="hr"></div>
+  <div class="board">
+    <div class="tier thin"><div><div class="tn">Thin</div><div class="tu">resting rows, inline chips</div></div><div class="trec mono">blur 20 &middot; bg .46 &middot; ring .07</div></div>
+    <div class="tier regular"><div><div class="tn">Regular</div><div class="tu">hover, focus, selected</div></div><div class="trec mono">blur 30 &middot; bg .72 &middot; ring .12</div></div>
+    <div class="tier thick"><div><div class="tn">Thick</div><div class="tu">popover root, panels</div></div><div class="trec mono">blur 36 &middot; bg .64 &middot; ring .10 &middot; shadow</div></div>
+    <div class="tier opaque"><div><div class="tn">Opaque</div><div class="tu">console / terminal</div></div><div class="trec mono">#17110A &middot; no blur</div></div>
+  </div>
+  <div class="notes">
+    <div class="nt"><span class="b"></span><div><div class="t">Thicken to advance</div><div class="d">Hover and selection swap thin&nbsp;&rarr;&nbsp;regular: more blur, a denser fill, a slightly brighter hairline. The element reads as nearer without moving or growing.</div></div></div>
+    <div class="nt"><span class="b"></span><div><div class="t">Half-pixel hairlines</div><div class="d">Edges are <span class="mono">inset 0 0 0 .5px rgba(255,255,255,.07&ndash;.12)</span> &mdash; a catch of light along the top, never a 1&thinsp;px border. Dividers are the same idea at .08&ndash;.12 alpha.</div></div></div>
+    <div class="nt"><span class="b"></span><div><div class="t">Shadow is for the window, not the parts</div><div class="d">The popover drops <span class="mono">0 22px 56px rgba(0,0,0,.5)</span>. Inner surfaces never stack their own shadows &mdash; depth there is purely material.</div></div></div>
+    <div class="nt"><span class="b"></span><div><div class="t">The machine surface is solid</div><div class="d">Console and terminal are opaque warm-black. Glass is for chrome the user touches; verbatim machine output sits on something that doesn&rsquo;t shift with the desktop behind it.</div></div></div>
+  </div>
+</div></body></html>

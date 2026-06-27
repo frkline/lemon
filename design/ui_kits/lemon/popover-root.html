@@ -1,0 +1,175 @@
+<!-- @dsCard group="Chrome" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>popover-root.html</title><style>
+:root {
+  --lemon:#F7C842; --lemondrop:#FEF4CC; --coral:#FF6B46; --citrus:#2D4A1E;
+  --linearMark:#9DA4F5; --githubMark:#F2EFE9;
+  --statusExecuting:#F7C842; --statusWaiting:#FF6B46; --statusDone:#45C27A;
+  --console:#17110A; --consoleText:#E8E0CC;
+  --primary:#ECE6D8; --secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50); --quaternary:rgba(236,230,216,.30);
+  --r6:6px; --r10:10px; --r14:14px;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  background:
+    radial-gradient(120% 90% at 18% 0%, #3a2f4a 0%, #241d30 40%, #14101c 100%),
+    #14101c;
+  color:var(--primary); -webkit-font-smoothing:antialiased;
+  padding:28px; display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start;
+}
+.label { color:var(--secondary); font-size:10px; font-weight:700;
+  letter-spacing:1.4px; text-transform:uppercase; margin:2px 0 9px; }
+.mono { font-family:"SF Mono",ui-monospace,Menlo,monospace; }
+.frame { width:344px; }
+
+/* ---- Menubar shell + notch ---- */
+.shell { position:relative; padding-top:7px; }
+.notch { position:absolute; top:0; right:46px; width:15px; height:15px;
+  background:rgba(41,34,22,.72); border-radius:3px; transform:rotate(45deg);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10); }
+
+.pop { position:relative; border-radius:var(--r14); overflow:hidden;
+  background:rgba(33,27,17,.66);
+  backdrop-filter:blur(36px) saturate(1.3);
+  -webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10), 0 22px 56px rgba(0,0,0,.55); }
+
+/* ---- Header ---- */
+.head { display:flex; align-items:center; gap:8px; padding:13px 14px 11px; }
+.logo { font-size:15px; line-height:1; }
+.name { font-size:13px; font-weight:700; letter-spacing:-.1px; }
+.count { margin-left:auto; display:inline-flex; align-items:center; height:19px;
+  padding:0 9px; border-radius:999px; font-size:10px; font-weight:600;
+  color:var(--secondary); background:rgba(236,230,216,.07);
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.13); }
+.count i { width:5px; height:5px; border-radius:50%; background:var(--statusDone);
+  margin-right:5px; }
+
+.seclabel { color:var(--tertiary); font-size:9px; font-weight:700;
+  letter-spacing:1.3px; text-transform:uppercase; padding:4px 14px 7px; }
+.hr { height:.5px; background:rgba(236,230,216,.12); }
+
+/* ---- Session rows ---- */
+.srow { position:relative; display:flex; align-items:stretch;
+  background:rgba(34,28,18,.30); }
+.srow + .srow { box-shadow:inset 0 .5px 0 rgba(236,230,216,.08); }
+.srow.sel { background:rgba(236,230,216,.05); }
+
+.rbody  { flex:1; min-width:0; padding:11px 14px 12px; }
+
+.meta { display:flex; align-items:center; gap:8px; }
+.status { display:inline-flex; align-items:center; gap:6px; line-height:1;
+  font-size:11px; font-weight:600; color:var(--secondary); white-space:nowrap; }
+.status .d { width:6px; height:6px; border-radius:50%; background:var(--c); flex:none;
+  box-shadow:0 0 0 2.5px color-mix(in srgb, var(--c) 18%, transparent); }
+.src { display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; border-radius:5px; flex:none; }
+.src svg { width:11px; height:11px; display:block; }
+.src.linear { background:rgba(94,106,210,.22); box-shadow:inset 0 0 0 .5px rgba(124,134,232,.48); }
+.src.github { background:rgba(150,152,168,.22); box-shadow:inset 0 0 0 .5px rgba(214,216,228,.30); }
+.id { font-size:10px; font-weight:600; color:var(--tertiary); }
+.chev { margin-left:auto; color:var(--quaternary); font-size:14px; font-weight:600;
+  transition:transform .2s; }
+.chev.open { transform:rotate(90deg); color:var(--secondary); }
+.title { color:var(--primary); font-size:12.5px; font-weight:500;
+  line-height:1.35; letter-spacing:-.1px; margin-top:6px; }
+
+/* ---- Expanded focus: live terminal + actions ---- */
+.term { display:flex; align-items:center; gap:8px; margin-top:9px;
+  background:var(--console); border-radius:var(--r6); padding:8px 10px;
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.05); }
+.ld { width:6px; height:6px; border-radius:50%; flex:none; background:var(--statusDone);
+  box-shadow:0 0 0 2.5px rgba(69,194,122,.22); }
+.cmd { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:10.5px; color:rgba(232,224,204,.82); }
+.acts { display:flex; align-items:center; gap:7px; margin-top:9px; }
+.btn { display:inline-flex; align-items:center; height:30px; padding:0 13px;
+  border-radius:var(--r6); font-size:12px; font-weight:600; }
+.btn.primary { background:var(--lemon); color:var(--citrus); }
+.btn.stop { color:var(--coral); background:rgba(236,230,216,.05);
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.11); }
+.elapsed { margin-left:auto; color:var(--tertiary); font-size:10.5px; }
+
+/* ---- New-session footer ---- */
+.newrow { display:flex; align-items:center; gap:7px; padding:11px 14px;
+  color:var(--secondary); font-size:12px; font-weight:500;
+  background:rgba(44,36,23,.42);
+  box-shadow:inset 0 .5px 0 rgba(255,255,255,.10); }
+.newrow .plus { display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; border-radius:5px; color:var(--secondary);
+  background:rgba(236,230,216,.09); font-size:13px; font-weight:600; line-height:1; }
+.kbd { margin-left:auto; color:var(--quaternary); font-size:10px; }
+
+.note { color:var(--tertiary); font-size:10px; margin-top:14px; line-height:1.55; }
+
+/* ---- Entrance ---- */
+.rise { opacity:1; }
+@media (prefers-reduced-motion: no-preference) {
+  .rise { opacity:0; animation:rise .52s cubic-bezier(.2,.75,.2,1) both; }
+  .d1{animation-delay:.04s}.d2{animation-delay:.10s}.d3{animation-delay:.16s}
+  .d4{animation-delay:.22s}.d5{animation-delay:.28s}
+}
+@keyframes rise { from{opacity:0;transform:translateY(7px)} to{opacity:1;transform:none} }
+</style></head>
+<body><div class="frame">
+  <div class="label">PopoverView · root chrome</div>
+  <div class="shell">
+    <div class="notch"></div>
+    <div class="pop">
+
+      <div class="head rise d1">
+        <span class="logo">&#127819;</span>
+        <span class="name">Lemon</span>
+        <span class="count"><i></i>2 running</span>
+      </div>
+      <div class="hr"></div>
+      <div class="seclabel rise d1">Sessions</div>
+
+      <!-- Focused / expanded session -->
+      <div class="srow sel rise d2">
+        <div class="rbody">
+          <div class="meta">
+            <span class="status" style="--c:var(--statusExecuting)"><span class="d"></span>Executing</span>
+            <span class="src linear"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span>
+            <span class="id mono">LEM-42</span>
+            <span class="chev open">&rsaquo;</span>
+          </div>
+          <div class="title">Wire up the Liquid Glass token set</div>
+          <div class="term">
+            <span class="ld"></span>
+            <span class="cmd mono">claude --permission-mode auto &hellip;</span>
+          </div>
+          <div class="acts">
+            <span class="btn primary">Open terminal</span>
+            <span class="btn stop">Stop agent</span>
+            <span class="elapsed mono">running 4m</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Collapsed session -->
+      <div class="srow rise d3">
+        <div class="rbody">
+          <div class="meta">
+            <span class="status" style="--c:var(--statusWaiting)"><span class="d"></span>Waiting</span>
+            <span class="src github"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span>
+            <span class="id mono">acme/web#7</span>
+            <span class="chev">&rsaquo;</span>
+          </div>
+          <div class="title">Re-trigger fires on shipped revisions</div>
+        </div>
+      </div>
+
+      <div class="newrow rise d4">
+        <span class="plus">+</span>
+        <span>New session&hellip;</span>
+        <span class="kbd mono">&#8984;N</span>
+      </div>
+
+    </div>
+  </div>
+  <p class="note">Status reads from a single colored dot + neutral label — no left bars, no filled pills — so yellow and red stay scarce. The one yellow moment is the primary CTA; the focused session expands in place with its live terminal and Open / Stop actions, and source favicons (Linear light-purple, GitHub white-on-grey) identify the work.</p>
+</div></body></html>

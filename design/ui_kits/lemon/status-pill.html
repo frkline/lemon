@@ -1,0 +1,46 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>status-pill.html</title><style>
+:root {
+  --lemon:#F7C842; --lemondrop:#FEF4CC; --coral:#FF6B46; --citrus:#2D4A1E;
+  --statusPlanning:#6197FA; --statusExecuting:#F7C842; --statusWaiting:#FF6B46;
+  --statusReviewing:#66C78F; --statusDone:#45C27A; --statusFailed:#F24545;
+  --primary:#ECE6D8; --secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50); --quaternary:rgba(236,230,216,.30);
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  background:
+    radial-gradient(120% 90% at 18% 0%, #3a2f4a 0%, #241d30 40%, #14101c 100%),
+    #14101c;
+  color:var(--primary); -webkit-font-smoothing:antialiased;
+  padding:28px; display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start;
+}
+.label { color:var(--secondary); font-size:10px; font-weight:700;
+  letter-spacing:1.4px; text-transform:uppercase; margin:2px 0 12px; }
+.frame { width:360px; }
+
+.pills { display:flex; flex-wrap:wrap; gap:8px; }
+.pill { display:inline-flex; align-items:center; justify-content:center;
+  height:21px; padding:0 11px; border-radius:999px;
+  font-size:11px; font-weight:600; letter-spacing:-.1px; line-height:1;
+  color:var(--c);
+  background:color-mix(in srgb, var(--c) 15%, transparent);
+  box-shadow:inset 0 0 0 .5px color-mix(in srgb, var(--c) 36%, transparent); }
+
+.note { color:var(--tertiary); font-size:10px; margin-top:16px; line-height:1.55; }
+</style></head>
+<body><div class="frame">
+  <div class="label">StatusPill · six states</div>
+  <div class="pills">
+    <span class="pill" style="--c:var(--statusPlanning)">Planning</span>
+    <span class="pill" style="--c:var(--statusExecuting)">Executing</span>
+    <span class="pill" style="--c:var(--statusWaiting)">Waiting</span>
+    <span class="pill" style="--c:var(--statusReviewing)">Reviewing</span>
+    <span class="pill" style="--c:var(--statusDone)">Done</span>
+    <span class="pill" style="--c:var(--statusFailed)">Failed</span>
+  </div>
+  <p class="note">Each state is a single tinted capsule: color-matched label over a 15% fill with a 36% hairline. No status dot — the hue alone reads at a glance, and in a row the colored left strip carries the loud signal, so the pill stays quiet.</p>
+</div></body></html>

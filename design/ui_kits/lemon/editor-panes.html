@@ -1,0 +1,71 @@
+<!-- @dsCard group="Editors" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>editor-panes.html</title><style>
+:root {
+  /* Brand */
+  --lemon:#F7C842; --lemondrop:#FEF4CC; --coral:#FF6B46; --citrus:#2D4A1E;
+  /* Source marks */
+  --linearMark:#9DA4F5; --githubMark:#F2EFE9;
+  /* Status */
+  --statusPlanning:#6197FA; --statusExecuting:#F7C842; --statusWaiting:#FF6B46;
+  --statusReviewing:#66C78F; --statusDone:#45C27A; --statusFailed:#F24545;
+  /* Console */
+  --console:#17110A; --consoleText:#E8E0CC;
+  /* Chrome text on warm-dark glass */
+  --primary:#ECE6D8; --secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50); --quaternary:rgba(236,230,216,.30);
+  /* Radii */
+  --r3:3px; --r6:6px; --r10:10px; --r14:14px;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  /* Representative desktop behind a translucent menubar popover — the real
+     compositing context for Liquid Glass, per the PR's own unchecked box. */
+  background:
+    radial-gradient(120% 90% at 18% 0%, #3a2f4a 0%, #241d30 40%, #14101c 100%),
+    #14101c;
+  color:var(--primary);
+  -webkit-font-smoothing:antialiased;
+  padding:28px; display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start;
+}
+.label { color:var(--secondary); font-size:10px; font-weight:700;
+  letter-spacing:1.4px; text-transform:uppercase; margin:2px 0 9px; }
+.mono { font-family:"SF Mono",ui-monospace,Menlo,monospace; }
+
+/* ---- Glass surfaces ---- */
+.glass { position:relative; border-radius:var(--r10); overflow:hidden;
+  background:rgba(34,28,18,.52); backdrop-filter:blur(20px) saturate(1.2);
+  -webkit-backdrop-filter:blur(20px) saturate(1.2);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.07); }
+.glass.hover { background:rgba(40,33,21,.72); backdrop-filter:blur(30px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); }
+.glass.tint-lemon::after,.glass .tintfill { }
+.glass.tint-lemon { background-image:linear-gradient(rgba(247,200,66,.04),rgba(247,200,66,.04)); }
+.glass.tint-linear { background-image:linear-gradient(rgba(124,134,232,.04),rgba(124,134,232,.04)); }
+.glass.tint-github { background-image:linear-gradient(rgba(214,216,228,.03),rgba(214,216,228,.03)); }
+.glass.tint-coral  { background-image:linear-gradient(rgba(255,107,70,.04),rgba(255,107,70,.04)); }
+.glass.selected { background:rgba(40,33,21,.72); }
+.glass.selected.tint-linear { box-shadow:inset 0 0 0 .5px rgba(124,134,232,.40); }
+.glass.selected.tint-github { box-shadow:inset 0 0 0 .5px rgba(214,216,228,.30); }
+.glass.selected.tint-coral  { box-shadow:inset 0 0 0 .5px rgba(255,107,70,.35); }
+
+/* floating (ultraThin + tint + brighter top edge) — pills, action rows */
+.cap { display:inline-flex; align-items:center; gap:4px; border-radius:999px;
+  background:rgba(60,52,36,.40); backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); padding:3px 7px; }
+
+/* card chrome for the design pane */
+.card { border-radius:14px; padding:20px; }
+.stack { display:flex; flex-direction:column; gap:14px; }
+.row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+.fav { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:5px; flex:none; }
+.fav svg { width:11px; height:11px; display:block; }
+.fav.linear { background:rgba(94,106,210,.22); box-shadow:inset 0 0 0 .5px rgba(124,134,232,.48); }
+.fav.github { background:rgba(150,152,168,.22); box-shadow:inset 0 0 0 .5px rgba(214,216,228,.30); }
+
+.frame { width:380px; }</style></head>
+<body><div class="frame"><div class="label">IdentityEditorPane · "second room"</div><div style="border-radius:var(--r14);padding:16px;background:rgba(247,200,66,.02);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.05)"><div class="label" style="font-size:9px;margin:0 0 6px">Identity</div><div class="glass selected tint-github" style="padding:10px 12px;margin-bottom:10px"><div class="row" style="gap:10px"><span class="row" style="gap:4px"><span class="fav github"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span></span><span style="font-size:12px;font-weight:600">GitHub · @frkline</span><span style="margin-left:auto;color:var(--statusDone);font-size:13px">✓</span></div></div><div style="margin-bottom:12px"><div class="label" style="margin:0 0 6px;font-size:9px">SURFACES</div><div class="glass" style="padding:12px"><div class="row" style="gap:8px;padding:5px 0"><span class="row" style="gap:4px"><span class="fav github"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span></span><span class="mono" style="font-size:11px;color:var(--secondary)">acme/web</span><span style="margin-left:auto;color:var(--tertiary);font-size:10px">42 open</span></div><div class="row" style="gap:8px;padding:5px 0"><span class="row" style="gap:4px"><span class="fav github"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span></span><span class="mono" style="font-size:11px;color:var(--secondary)">acme/api</span><span style="margin-left:auto;color:var(--tertiary);font-size:10px">9 open</span></div></div></div><div style="margin-bottom:12px"><div class="label" style="margin:0 0 6px;font-size:9px">ROUTED BY</div><div class="glass" style="padding:12px"><div class="row" style="gap:8px;padding:5px 0"><span style="color:var(--secondary);font-size:11px">~/Projects/web</span><span style="margin-left:auto" class="row" style="gap:3px"><span class="row" style="gap:3px"><svg width="5" height="5" viewBox="0 0 5 5"><circle cx="2.5" cy="2.5" r="2.5" fill="var(--statusDone)"/></svg><span style="color:var(--statusDone);font-size:9px;font-weight:600">live</span></span></span></div></div></div></div><p style="color:var(--tertiary);font-size:10px;margin-top:14px;line-height:1.5">Editor panes read as a second room: a faint lemon glaze over the inherited window glass. Interior panels are resting glass. The selected identity uses a faint source-tinted glass + a green connected check — keeping lemon-yellow exclusive to Save.</p></div></body></html>

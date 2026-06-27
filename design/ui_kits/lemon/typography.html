@@ -1,0 +1,62 @@
+<!-- @dsCard group="Foundations" name="Typography" subtitle="SF Pro for humans, SF Mono for machines" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>typography.html</title><style>
+:root{
+  --lemon:#F7C842;--linearMark:#9DA4F5;
+  --primary:#ECE6D8;--secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50);--quaternary:rgba(236,230,216,.30);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  background:radial-gradient(120% 90% at 18% 0%,#3a2f4a 0%,#241d30 40%,#14101c 100%) fixed,#14101c;
+  color:var(--primary);-webkit-font-smoothing:antialiased;padding:32px;}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace}
+.doc{width:820px;max-width:100%;border-radius:18px;background:rgba(33,27,17,.62);
+  backdrop-filter:blur(36px) saturate(1.3);-webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 22px 56px rgba(0,0,0,.5);
+  padding:36px 38px 34px;}
+.eyebrow{display:flex;align-items:center;gap:8px;color:var(--tertiary);font-size:10px;
+  font-weight:700;letter-spacing:1.7px;text-transform:uppercase;margin-bottom:16px}
+.eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--lemon)}
+h1{font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1.08;margin-bottom:12px}
+.lead{color:var(--secondary);font-size:13.5px;line-height:1.6;max-width:64ch}
+.hr{height:.5px;background:rgba(236,230,216,.13);margin:26px 0}
+.fams{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:6px}
+.fam{border-radius:12px;padding:16px 18px;background:rgba(236,230,216,.035);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.06)}
+.fam .big{font-size:30px;font-weight:600;letter-spacing:-.5px;margin-bottom:8px}
+.fam .nm{font-size:12px;font-weight:600}
+.fam .role{color:var(--tertiary);font-size:10.5px;margin-top:2px;line-height:1.45}
+h2{font-size:10px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;
+  color:var(--tertiary);margin:24px 0 8px}
+.scale{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:170px 1fr;gap:20px;align-items:baseline;
+  padding:13px 0}
+.row + .row{box-shadow:inset 0 .5px 0 rgba(236,230,216,.08)}
+.spec{color:var(--tertiary);font-size:10px;line-height:1.5}
+.spec b{color:var(--secondary);font-weight:600}
+.lblcap{color:var(--secondary);font-size:10px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase}
+.note{margin-top:22px;color:var(--tertiary);font-size:11px;line-height:1.55;max-width:68ch}
+.note b{color:var(--secondary);font-weight:600}
+</style></head>
+<body><div class="doc">
+  <div class="eyebrow"><i></i>Foundations &middot; Typography</div>
+  <h1>Typography</h1>
+  <p class="lead">Two families, one job each. SF Pro Text carries everything a person writes or reads; SF Mono carries everything a machine reports &mdash; issue keys, repo paths, tokens, and console output. The split is the system: if it&rsquo;s monospaced, it came back verbatim from Linear, GitHub, or the agent.</p>
+  <div class="hr"></div>
+  <div class="fams">
+    <div class="fam"><div class="big">Aa</div><div class="nm">SF&nbsp;Pro&nbsp;Text</div><div class="role">Titles, body, labels &mdash; the human voice. Weights 500 / 600 / 700.</div></div>
+    <div class="fam"><div class="big mono">A0</div><div class="nm mono">SF&nbsp;Mono</div><div class="role">IDs, paths, secrets, terminal &mdash; the machine truth. Weights 600.</div></div>
+  </div>
+  <h2>Scale</h2>
+  <div class="scale">
+    <div class="row"><div class="spec"><b>Title</b><br>13&thinsp;px &middot; 600 &middot; -0.1</div><div style="font-size:13px;font-weight:600;letter-spacing:-.1px">Wire up the Liquid Glass token set</div></div>
+    <div class="row"><div class="spec"><b>Body</b><br>12&thinsp;px &middot; 500</div><div style="font-size:12px;font-weight:500;color:var(--secondary)">Start Lemon automatically when you log in.</div></div>
+    <div class="row"><div class="spec"><b>Meta</b><br>11&thinsp;px &middot; 600</div><div style="font-size:11px;font-weight:600;color:var(--secondary)">Executing &middot; running 4m</div></div>
+    <div class="row"><div class="spec"><b>Label</b><br>10&thinsp;px &middot; 700 &middot; 1.4 tracked &middot; UPPER</div><div class="lblcap">Sessions</div></div>
+    <div class="row"><div class="spec"><b>Mono &middot; ID</b><br>10&thinsp;px &middot; 600</div><div class="mono" style="font-size:10px;font-weight:600;color:var(--tertiary)">LEM-42 &nbsp; acme/web#7 &nbsp; @frkline</div></div>
+    <div class="row"><div class="spec"><b>Mono &middot; Console</b><br>11&thinsp;px</div><div class="mono" style="font-size:11px;color:var(--secondary)">&rsaquo; claude --permission-mode auto</div></div>
+  </div>
+  <p class="note"><b>Set tight.</b> Display sizes carry &minus;0.1 to &minus;0.5 letter-spacing; the all-caps Label is the one exception, opened to <b>+1.4</b> so it reads as a quiet section marker, not a shout. Minimum sizes: 10&thinsp;px for labels and machine IDs, 11&ndash;13&thinsp;px for anything a person actually reads. Nothing smaller ships.</p>
+</div></body></html>
