@@ -46,7 +46,10 @@ struct SettingsView: View {
             Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
             settingsFooter
         }
-        .frame(minHeight: 780)
+        // Fill the popover's capped height (set in PopoverView) so the ScrollView
+        // gets a bounded frame and scrolls its content instead of forcing the
+        // window taller than the screen. (Was minHeight: 780, which overflowed.)
+        .frame(maxHeight: .infinity)
         .onAppear { load() }
     }
 

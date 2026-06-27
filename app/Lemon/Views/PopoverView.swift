@@ -50,7 +50,10 @@ struct PopoverView: View {
             // taller than the floor get to grow. No alignment override
             // — the inner pane (listPane → emptyState) handles its
             // own vertical centering via Spacers.
-            .frame(maxWidth: .infinity, minHeight: 380)
+            // minHeight keeps a floor; maxHeight caps the popover so it never
+            // grows past the screen and clips under the menu bar. Panes taller
+            // than the cap scroll internally (Settings + both editor panes).
+            .frame(maxWidth: .infinity, minHeight: 380, maxHeight: 620)
             .animation(LD.slide, value: nav.showingSettings)
             .animation(LD.slide, value: nav.selectedSession?.id)
             .animation(LD.slide, value: nav.editingIdentity)
@@ -79,6 +82,12 @@ struct PopoverView: View {
         // makes them adopt light-on-dark. Onboarding is a separate tree and is
         // intentionally untouched this round.
         .environment(\.colorScheme, .dark)
+        // The MenuBarExtra(.window) panel ships opaque, so our translucent glass
+        // composites over its white backing instead of the desktop — that kills
+        // the Liquid-Glass bleed AND shows a hard white ring at the rounded
+        // corners. Clearing the window backing lets the .regularMaterial sample
+        // the real desktop (bleed returns) and the corners fall to transparent.
+        .background(WindowAccessor())
     }
 
     private var working: Bool {
@@ -111,12 +120,16 @@ struct PopoverView: View {
                     }
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(LD.textTertiary)
+                        // ≥28pt hit target, clear of the r14 corner — the bare
+                        // 11pt glyph was unhittable jammed against the rounded edge.
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
                 .accessibilityIdentifier("back-button")
-                Spacer().frame(width: 8)
+                Spacer().frame(width: 2)
             }
 
             if nav.editingIdentity != nil {
@@ -458,5 +471,29 @@ struct PopoverView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(LD.textTertiary)
         }
+    }
+}
+
+/// Reaches the AppKit window backing the MenuBarExtra(.window) panel and clears
+/// its opaque backing so the SwiftUI glass can sample the real desktop. Without
+/// this the panel paints an opaque (white) background behind our translucent
+/// `.lemonGlass`, which both blocks the Liquid-Glass bleed and leaks a white
+/// ring at the rounded corners. Idempotent — safe to run on every layout pass.
+private struct WindowAccessor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { [weak view] in configure(view?.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { [weak nsView] in configure(nsView?.window) }
+    }
+
+    private func configure(_ window: NSWindow?) {
+        guard let window else { return }
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
     }
 }

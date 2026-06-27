@@ -59,23 +59,28 @@ struct WorkspaceEditorPane: View {
     }
 
     var body: some View {
-        // Intrinsic-height layout — pane grows to its content and stops.
-        VStack(alignment: .leading, spacing: 22) {
-            eyebrowHeader
-            if identities.isEmpty {
-                noIdentitiesCard
-            } else {
-                pathSection
-                identitySection
-                surfaceSection
-                folderOptions
+        // ScrollView so content scrolls within the popover's capped height
+        // instead of overflowing and clipping top/bottom. The glaze "room"
+        // stays fixed; only the content scrolls.
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
+                eyebrowHeader
+                if identities.isEmpty {
+                    noIdentitiesCard
+                } else {
+                    pathSection
+                    identitySection
+                    surfaceSection
+                    folderOptions
+                }
+                actionsRow
             }
-            actionsRow
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The "second room": a faint lemon glaze over the inherited window
         // glass, r14. Interior surfaces are resting thin glass.
         .lemonGlass(.thick, tint: LD.tintLemon, cornerRadius: LD.r14)

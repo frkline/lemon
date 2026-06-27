@@ -65,7 +65,10 @@ enum LD {
     // a surface advances. Dividers are a warm near-white at low alpha.
     static let hairlineThin = Color.white.opacity(0.07)
     static let hairlineRegular = Color.white.opacity(0.12)
-    static let hairlineThick = Color.white.opacity(0.10)
+    // Warm + dim on the thick tier: the popover root is the one edge that meets
+    // the bright desktop, so a stark white ring reads as a hard 1px border. A
+    // warm near-white at low alpha keeps it a whisper-thin light catch, on-ethos.
+    static let hairlineThick = Color(r: 236 / 255, g: 230 / 255, b: 216 / 255, a: 0.06)
     static let hairlineOpaque = Color.white.opacity(0.05)
     static let hairlineDivider = Color(r: 236 / 255, g: 230 / 255, b: 216 / 255, a: 0.12)
     static let hairlineWidth: CGFloat = 0.5

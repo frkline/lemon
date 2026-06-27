@@ -59,24 +59,26 @@ struct IdentityEditorPane: View {
     }
 
     var body: some View {
-        // VStack (not ScrollView) so the pane sizes to its content. The
-        // popover frame's width is fixed in PopoverView; height is intrinsic.
-        // For very long surface lists (>8 entries), `surfacesSummary` already
-        // collapses to a "+ N more" tail.
-        VStack(alignment: .leading, spacing: 22) {
-            eyebrowHeader
-            labelField
-            credentialCard
-            if isGitHub { hostField }
-            verifyRow
-            if verified { surfacesSummary }
-            if !isNew { routedBySummary }
-            actionsRow
+        // ScrollView so the pane's content scrolls within the popover's capped
+        // height instead of overflowing and clipping top/bottom. The glaze "room"
+        // (below) stays fixed; only the content scrolls.
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
+                eyebrowHeader
+                labelField
+                credentialCard
+                if isGitHub { hostField }
+                verifyRow
+                if verified { surfacesSummary }
+                if !isNew { routedBySummary }
+                actionsRow
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The "second room": a faint lemon glaze over the inherited window
         // glass, r14. Interior surfaces are resting thin glass.
         .lemonGlass(.thick, tint: LD.tintLemon, cornerRadius: LD.r14)
