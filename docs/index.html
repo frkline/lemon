@@ -497,6 +497,49 @@ em{font-style:italic;color:var(--ink)}
 
 /* reduced motion */
 @media (prefers-reduced-motion: reduce){ .status.live .d{animation:none} }
+
+/* ============================================================
+   Responsive — the layout is a desktop grid by default. Collapse
+   to a single column, shrink the 84px gutters, and scale the
+   fixed-px product mocks so the page reads on phones. Nothing
+   below depends on JS to become visible.
+   ============================================================ */
+@media (max-width: 860px){
+  .nav{padding:20px 24px 0}
+  .navlinks{display:none}              /* brand · theme · GitHub stay */
+  .wrap{padding:0 24px}
+  .band{padding:60px 24px}
+  .band.tight{padding:48px 24px}
+  .pullquote{padding:60px 24px}
+
+  /* stack every multi-column grid */
+  .hero{grid-template-columns:1fr; gap:26px; padding:32px 24px 52px}
+  .pitch{grid-template-columns:1fr; gap:26px}
+  .split{grid-template-columns:1fr; gap:34px}
+  .split.flip .copycol{order:0}        /* copy leads when stacked */
+  .steps{grid-template-columns:1fr 1fr; column-gap:24px; row-gap:32px}
+  .steps li,.steps li+li{padding:0; box-shadow:none}
+  .twocol,.recgrid,.builton{grid-template-columns:1fr}
+
+  /* type down a step */
+  h1,.hero h1{font-size:40px; letter-spacing:-1.3px}
+  h2{font-size:29px}
+  .pitch-q h2{font-size:38px; letter-spacing:-1px}
+  .herokick{font-size:20px}
+  .hero .lead{max-width:none; margin:18px 0 28px}
+
+  /* fixed-px mocks: fit the viewport */
+  .hero-visual{justify-self:stretch; margin-right:0; display:flex; justify-content:center; overflow:hidden}
+  .macscene{zoom:.5}
+  .split .pop{width:100%}
+}
+@media (max-width: 480px){
+  .steps{grid-template-columns:1fr}
+  h1,.hero h1{font-size:34px; letter-spacing:-1px}
+  .pitch-q h2{font-size:30px}
+  .macscene{zoom:.42}
+  .nav{gap:10px}
+}
 </style>
 </head>
 <body>
