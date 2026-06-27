@@ -6,7 +6,9 @@
 
 Report privately through GitHub's
 [private vulnerability reporting](https://github.com/frkline/lemon/security/advisories/new)
-(Security tab → "Report a vulnerability"), or email **frank.kline@gmail.com**.
+(Security tab → "Report a vulnerability"). The report and our discussion stay
+private until a fix is ready, and it reaches the maintainer directly — no public
+email needed.
 
 Please include:
 
