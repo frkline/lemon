@@ -71,23 +71,16 @@ struct PopoverView: View {
         // implicit animation on the container's geometry directly.
         .animation(nil, value: orchestrator.sessions.active.count)
         .animation(nil, value: orchestrator.sessions.recent.count)
-        // Popover root = thick warm glass at r14 (the only surface that casts
-        // the window shadow). The .window MenuBarExtra chrome draws the notch
-        // and backdrop blur; this supplies the warm fill + hairline ring.
-        .lemonGlass(.thick, cornerRadius: LD.r14)
+        // Popover root = window-level Lemon glass: a behind-window vibrancy
+        // backdrop (the only thing that bleeds the desktop on macOS 26) under a
+        // low warm tint + hairline + the one shadow. Replaces the opaque
+        // material+fill stack that read near-solid.
+        .lemonWindowGlass(cornerRadius: LD.r14)
         // Force dark appearance for the whole ported surface tree (detail,
-        // settings, both editor panes all descend from here). Native controls
-        // — TextField/SecureField text, caret, selection — otherwise render
-        // light-appearance near-black against the warm-dark glass. Dark scheme
-        // makes them adopt light-on-dark. Onboarding is a separate tree and is
-        // intentionally untouched this round.
+        // settings, both editor panes all descend from here) so native controls
+        // — TextField/SecureField text, caret, selection — render light-on-dark.
+        // Safe with the transparent backdrop: no opaque background is introduced.
         .environment(\.colorScheme, .dark)
-        // The MenuBarExtra(.window) panel ships opaque, so our translucent glass
-        // composites over its white backing instead of the desktop — that kills
-        // the Liquid-Glass bleed AND shows a hard white ring at the rounded
-        // corners. Clearing the window backing lets the .regularMaterial sample
-        // the real desktop (bleed returns) and the corners fall to transparent.
-        .background(WindowAccessor())
     }
 
     private var working: Bool {
@@ -158,6 +151,7 @@ struct PopoverView: View {
                 // Logo emoji + wordmark, then the count badge (margin-left auto).
                 Text(verbatim: "🍋")
                     .font(.system(size: 15))
+                    .padding(.trailing, 6) // breathing room before the wordmark (HStack spacing is 0)
                 Text("Lemon")
                     .font(.system(size: 13, weight: .bold))
                     .tracking(-0.1)
@@ -474,26 +468,79 @@ struct PopoverView: View {
     }
 }
 
-/// Reaches the AppKit window backing the MenuBarExtra(.window) panel and clears
-/// its opaque backing so the SwiftUI glass can sample the real desktop. Without
-/// this the panel paints an opaque (white) background behind our translucent
-/// `.lemonGlass`, which both blocks the Liquid-Glass bleed and leaks a white
-/// ring at the rounded corners. Idempotent — safe to run on every layout pass.
-private struct WindowAccessor: NSViewRepresentable {
-    func makeNSView(context _: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { [weak view] in configure(view?.window) }
+/// Behind-window vibrancy backdrop — the only thing that bleeds the desktop
+/// through a macOS-26 `MenuBarExtra(.window)` popover. An `NSVisualEffectView`
+/// in `.behindWindow` mode samples the desktop/windows behind the panel;
+/// `state = .active` keeps it live when the popover isn't key. It also
+/// re-asserts the panel's transparency on every relayout — MenuBarExtra ships an
+/// opaque panel and repaints its backing, so a one-shot clear doesn't stick.
+struct VibrantBackdrop: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .hudWindow
+    var cornerRadius: CGFloat = LD.r14
+
+    func makeNSView(context _: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = material
+        view.state = .active
+        // Round via maskImage, NOT a SwiftUI .clipShape. System vibrancy
+        // materials paint their own bright edge-highlight ("rim"); a SwiftUI clip
+        // just moves that rim to the rounded edge (the white line). An alpha
+        // maskImage shapes the material before it highlights, so the rim is
+        // anti-aliased away. (Research: NSVisualEffectView reverse-engineering +
+        // Apple's maskImage docs.)
+        view.maskImage = Self.roundedMask(radius: cornerRadius)
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context _: Context) {
-        DispatchQueue.main.async { [weak nsView] in configure(nsView?.window) }
+    func updateNSView(_ view: NSVisualEffectView, context _: Context) {
+        view.material = material
+        view.maskImage = Self.roundedMask(radius: cornerRadius)
+        DispatchQueue.main.async { [weak view] in
+            guard let window = view?.window else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            // Kill any CALayer border the system panel's content view carries —
+            // a second source of the edge line independent of the material rim.
+            window.contentView?.wantsLayer = true
+            window.contentView?.layer?.borderWidth = 0
+        }
     }
 
-    private func configure(_ window: NSWindow?) {
-        guard let window else { return }
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
+    /// Resizable rounded-rect alpha mask for the vibrancy view, with cap insets
+    /// so it stretches cleanly to any popover size.
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let d = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: d, height: d), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
+    }
+}
+
+extension View {
+    /// Window-level Lemon glass for the popover/onboarding root: a behind-window
+    /// vibrancy backdrop (desktop bleed) under a low warm tint, a 0.5pt hairline,
+    /// and the one drop shadow — clipped to a continuous rounded rect. Inner
+    /// cards keep `.lemonGlass(...)`; this is only for the surface that fills the
+    /// panel and meets the desktop.
+    func lemonWindowGlass(cornerRadius: CGFloat = LD.r14,
+                          material: NSVisualEffectView.Material = .menu) -> some View
+    {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // The vibrancy backdrop rounds ITSELF at the layer (cornerRadius/mask) so
+        // its material rim is alpha-clipped — no SwiftUI .clipShape on the material,
+        // which would re-introduce a bright edge line. The warm tint is a plain
+        // rounded fill (no material → no rim). Drop shadow defines the soft edge.
+        return background {
+            VibrantBackdrop(material: material, cornerRadius: cornerRadius)
+                .overlay(shape.fill(LD.glassWindowTint))
+        }
+        .shadow(color: LD.popoverShadowColor, radius: LD.popoverShadowRadius, x: 0, y: LD.popoverShadowY)
     }
 }

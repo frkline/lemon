@@ -58,6 +58,10 @@ enum LD {
     static let glassThinFill = Color(r: 34 / 255, g: 28 / 255, b: 18 / 255, a: 0.50) // resting rows, chips
     static let glassRegularFill = Color(r: 46 / 255, g: 38 / 255, b: 24 / 255, a: 0.72) // hover, focus, selected
     static let glassThickFill = Color(r: 33 / 255, g: 27 / 255, b: 17 / 255, a: 0.50) // popover root, panels — lower alpha = more desktop bleed
+    // Warm tint laid OVER the behind-window vibrancy backdrop (lemonWindowGlass).
+    // Keep it low-alpha — past ~0.3 it occludes the desktop bleed and the popover
+    // reads as a flat panel again. Tune against a real wallpaper.
+    static let glassWindowTint = Color(r: 33 / 255, g: 27 / 255, b: 17 / 255, a: 0.08) // faint warm cast over the vibrancy — brand warmth without killing bleed
     static let glassOpaqueFill = consoleBackground // console / terminal — solid, no blur
     /// Warm tinted floor for a footer/action bar — the onboarding footer's
     /// `.foot` fill. A touch lighter + warmer than the thick root so the action

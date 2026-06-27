@@ -98,15 +98,13 @@ struct OnboardingView: View {
         // collapses to just the header + footer (the smoke harness forces a fixed
         // window, so it couldn't surface this).
         .frame(width: 340, height: 600)
-        // Popover root = thick warm glass at r14, mirroring PopoverView.
-        .lemonGlass(.thick, cornerRadius: LD.r14)
-        // Force dark appearance so native fields (SecureField/TextField text,
-        // caret, selection) render light-on-dark against the warm glass.
+        // Popover root = window-level Lemon glass (behind-window vibrancy that
+        // bleeds the desktop + low warm tint + hairline + shadow). Mirrors
+        // PopoverView so onboarding and the daily popover read identically.
+        .lemonWindowGlass(cornerRadius: LD.r14)
+        // Dark appearance so native fields render light-on-dark; safe with the
+        // transparent backdrop (no opaque background introduced).
         .environment(\.colorScheme, .dark)
-        // Clear the MenuBarExtra(.window) panel's opaque backing so the glass
-        // composites over the real desktop (Liquid-Glass bleed + transparent
-        // corners). Same pattern PopoverView uses.
-        .background(OnboardingWindowAccessor())
     }
 
     /// Persistent wordmark + step rail header.
@@ -121,9 +119,9 @@ struct OnboardingView: View {
             Spacer()
             StepRail(total: OnboardingStep.allCases.count, current: step.rawValue)
         }
-        .padding(.leading, 16)
+        .padding(.leading, 14)
         .padding(.trailing, 14)
-        .padding(.top, 16)
+        .padding(.top, 13)
         .padding(.bottom, 11)
         .rise(0)
     }
@@ -304,31 +302,6 @@ struct OnboardingView: View {
         }
     }
 #endif
-
-// MARK: - Window backing
-
-/// Clears the MenuBarExtra(.window) panel's opaque backing so the warm glass
-/// composites over the real desktop. Mirrors PopoverView's `WindowAccessor`;
-/// duplicated here so onboarding (a separate view tree, shown before
-/// PopoverView ever mounts) gets the same treatment. Idempotent.
-private struct OnboardingWindowAccessor: NSViewRepresentable {
-    func makeNSView(context _: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { [weak view] in configure(view?.window) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context _: Context) {
-        DispatchQueue.main.async { [weak nsView] in configure(nsView?.window) }
-    }
-
-    private func configure(_ window: NSWindow?) {
-        guard let window else { return }
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
-    }
-}
 
 // MARK: - Shared shell
 
