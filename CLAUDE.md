@@ -2,6 +2,22 @@
 
 A personal workflow orchestration menu-bar app for Claude Code + your issue tracker (Linear or GitHub), leveraging Gemma 4 on device. Made for the Mac mini sitting on your desk. Tag an issue with 🍋 and Lemon spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a small local Gemma 4 classifier — Lemon itself is glue.
 
+## Memory surfaces
+
+Three places hold project knowledge — keep them distinct:
+
+- **`memory/`** — the shared, version-controlled **knowledge graph** of agentic
+  *decisions and rationale* (one node per file, `[[wikilink]]` edges, indexed in
+  `memory/README.md`). **Read it before making an architectural or process decision;
+  add/update a node after making one.** This is where evolving "why we chose X" lives.
+- **`CLAUDE.md` Rules** (below) — hard, static invariants. They don't change often and
+  don't belong in the graph.
+- **`LEMON.md`** — team instructions Lemon *injects into the worktrees it spawns* (read
+  by the Claude sessions Lemon launches, not about developing Lemon itself).
+
+(Separately, the Claude Code agent editing this repo keeps its own private cross-session
+memory outside the repo — not shared, not version-controlled.)
+
 ## Repo layout
 
 ```
