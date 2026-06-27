@@ -4,22 +4,13 @@ import SwiftUI
 struct PopoverView: View {
     @Environment(Orchestrator.self) private var orchestrator
     @Environment(AppNavigation.self) private var nav
-    @State private var pulse = false
-    @State private var joinCopied = false
-    @State private var stopConfirmingId: UUID? = nil
-    @State private var stopConfirmTask: Task<Void, Never>? = nil
 
     var body: some View {
         VStack(spacing: 0) {
-            // 2px lemon bar at the top edge signals active work — no emoji needed
-            Rectangle()
-                .fill(LD.lemon)
-                .frame(height: 2)
-                .opacity(working ? 1 : 0)
-                .animation(LD.smooth, value: working)
-
+            // Active work is signalled by the header count badge's done-green
+            // dot, not a lemon bar — yellow stays reserved for the one CTA.
             header
-            Divider().opacity(0.4)
+            hairline
 
             ZStack {
                 if let identityTarget = nav.editingIdentity {
@@ -41,7 +32,7 @@ struct PopoverView: View {
                             removal: .move(edge: .trailing).combined(with: .opacity),
                         ))
                 } else if let session = nav.selectedSession {
-                    detailPane(session)
+                    SessionDetailView(session: session)
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
                             removal: .move(edge: .trailing).combined(with: .opacity),
@@ -59,14 +50,19 @@ struct PopoverView: View {
             // taller than the floor get to grow. No alignment override
             // — the inner pane (listPane → emptyState) handles its
             // own vertical centering via Spacers.
-            .frame(maxWidth: .infinity, minHeight: 380)
+            // minHeight keeps a floor; maxHeight caps the popover so it never
+            // grows past the screen and clips under the menu bar. Panes taller
+            // than the cap scroll internally (Settings + both editor panes).
+            .frame(maxWidth: .infinity, minHeight: 380, maxHeight: 620)
             .animation(LD.slide, value: nav.showingSettings)
             .animation(LD.slide, value: nav.selectedSession?.id)
             .animation(LD.slide, value: nav.editingIdentity)
             .animation(LD.slide, value: nav.editingWorkspace)
             .clipped()
         }
-        .frame(width: 480)
+        // Width narrows to the design's single-column popover (was 480).
+        // Everything below re-fits to this 340pt column.
+        .frame(width: 340)
         // Resize snaps instead of animating — popover height changes
         // were running through SwiftUI's implicit layout animation and
         // pulsed the window noticeably as content swapped. Wrapping the
@@ -75,16 +71,28 @@ struct PopoverView: View {
         // implicit animation on the container's geometry directly.
         .animation(nil, value: orchestrator.sessions.active.count)
         .animation(nil, value: orchestrator.sessions.recent.count)
-        .background(.regularMaterial)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
+        // Popover root = window-level Lemon glass: a behind-window vibrancy
+        // backdrop (the only thing that bleeds the desktop on macOS 26) under a
+        // low warm tint + hairline + the one shadow. Replaces the opaque
+        // material+fill stack that read near-solid.
+        .lemonWindowGlass(cornerRadius: LD.r14)
+        // Force dark appearance for the whole ported surface tree (detail,
+        // settings, both editor panes all descend from here) so native controls
+        // — TextField/SecureField text, caret, selection — render light-on-dark.
+        // Safe with the transparent backdrop: no opaque background is introduced.
+        .environment(\.colorScheme, .dark)
     }
 
     private var working: Bool {
         !orchestrator.sessions.active.isEmpty
+    }
+
+    /// Half-pixel warm divider — the design's `.hr`. Replaces `Divider()`,
+    /// which renders a 1pt cool system line.
+    private var hairline: some View {
+        Rectangle()
+            .fill(LD.hairlineDivider)
+            .frame(height: LD.hairlineWidth)
     }
 
     // MARK: - Header
@@ -105,33 +113,34 @@ struct PopoverView: View {
                     }
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(LD.textTertiary)
+                        // ≥28pt hit target, clear of the r14 corner — the bare
+                        // 11pt glyph was unhittable jammed against the rounded edge.
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
                 .accessibilityIdentifier("back-button")
-                Spacer().frame(width: 10)
+                Spacer().frame(width: 2)
             }
 
             if nav.editingIdentity != nil {
-                Text("Identity")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                titleLabel("Identity")
                 Spacer()
             } else if nav.editingWorkspace != nil {
-                Text("Workspace")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                titleLabel("Workspace")
                 Spacer()
             } else if nav.showingSettings {
-                Text("Settings")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                titleLabel("Settings")
                 Spacer()
             } else if let session = nav.selectedSession {
-                HStack(spacing: 6) {
-                    SourceGlyph(source: session.issue.source)
+                HStack(spacing: LD.spaceInlineTight) {
+                    SourceFavicon(source: session.issue.source, size: 16)
                         .help(session.issue.sourceTitle)
                     Text(session.issue.identifier)
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(LD.textTertiary)
                         .truncationMode(.middle)
                         .lineLimit(1)
                         .accessibilityIdentifier("detail-identifier")
@@ -139,44 +148,33 @@ struct PopoverView: View {
                 Spacer()
                 StatusPill(status: session.status)
             } else {
-                // Wordmark + live dot when active
-                HStack(spacing: 6) {
-                    Text("Lemon")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                    if working {
-                        Circle()
-                            .fill(LD.lemon)
-                            .frame(width: 5, height: 5)
-                            .shadow(color: LD.lemon.opacity(pulse ? 0.9 : 0.1), radius: pulse ? 5 : 1)
-                            .transition(.scale(scale: 0.4).combined(with: .opacity))
-                    }
-                }
-                .animation(LD.smooth, value: working)
+                // Logo emoji + wordmark, then the count badge (margin-left auto).
+                Text(verbatim: "🍋")
+                    .font(.system(size: 15))
+                    .padding(.trailing, 6) // breathing room before the wordmark (HStack spacing is 0)
+                Text("Lemon")
+                    .font(.system(size: 13, weight: .bold))
+                    .tracking(-0.1)
+                    .foregroundStyle(LD.textPrimary)
 
                 Spacer()
 
-                // Compact status indicator — no verbose text when healthy
+                // Compact status indicator — quiet count badge when healthy.
                 if orchestrator.isPolling {
                     ProgressView()
                         .scaleEffect(0.5)
                         .frame(width: 12, height: 12)
-                        .padding(.trailing, 2)
                 } else if let err = orchestrator.lastPollError {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 12))
                         .foregroundStyle(LD.coral)
                         .help(err)
                 } else if working {
-                    Text("\(orchestrator.sessions.active.count) active")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(LD.citrus)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(LD.lemon, in: Capsule())
+                    countBadge
                 }
             }
 
-            Spacer().frame(width: 10)
+            Spacer().frame(width: 8)
             Button {
                 withAnimation(LD.slide) {
                     if nav.showingSettings { nav.showList() } else { nav.showSettings() }
@@ -184,13 +182,41 @@ struct PopoverView: View {
             } label: {
                 Image(systemName: nav.showingSettings ? "gearshape.fill" : "gearshape")
                     .font(.system(size: 11))
-                    .foregroundStyle(nav.showingSettings ? LD.lemon : .secondary)
+                    .foregroundStyle(nav.showingSettings ? LD.lemon : LD.textTertiary)
             }
             .buttonStyle(.borderless)
             .accessibilityIdentifier("settings-button")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
+        .padding(.top, 13)
+        .padding(.bottom, 11)
+        .rise(0)
+    }
+
+    private func titleLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .bold))
+            .tracking(-0.1)
+            .foregroundStyle(LD.textPrimary)
+    }
+
+    /// Quiet count badge — warm near-white fill + hairline ring + a done-green
+    /// dot. Carries the "N running" signal without spending the yellow.
+    private var countBadge: some View {
+        let n = orchestrator.sessions.active.count
+        return HStack(spacing: 5) {
+            Circle()
+                .fill(LD.statusDone)
+                .frame(width: 5, height: 5)
+            Text("\(n) running")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(LD.textSecondary)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 19)
+        .background(LD.textPrimary.opacity(0.07), in: Capsule())
+        .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.13), lineWidth: LD.hairlineWidth))
     }
 
     // MARK: - List pane
@@ -210,29 +236,31 @@ struct PopoverView: View {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 0) {
                         sectionLabel("Active")
-                        ForEach(orchestrator.sessions.active) { session in
+                        ForEach(Array(orchestrator.sessions.active.enumerated()), id: \.element.id) { idx, session in
                             SessionRowView(session: session)
                                 .accessibilityIdentifier("session-\(session.issue.identifier)")
                                 .onTapGesture {
                                     withAnimation(LD.slide) { nav.showDetail(session) }
                                 }
+                                .rise(idx + 1)
                         }
                         if !orchestrator.sessions.recent.isEmpty {
                             sectionLabel("Recent")
-                            ForEach(orchestrator.sessions.recent.prefix(8)) { session in
+                            ForEach(Array(orchestrator.sessions.recent.prefix(8).enumerated()), id: \.element.id) { idx, session in
                                 SessionRowView(session: session)
                                     .accessibilityIdentifier("session-\(session.issue.identifier)")
                                     .onTapGesture {
                                         withAnimation(LD.slide) { nav.showDetail(session) }
                                     }
+                                    .rise(orchestrator.sessions.active.count + idx + 1)
                             }
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, LD.spaceHairline)
                 }
                 .frame(maxHeight: 340)
             }
-            Divider().opacity(0.4)
+            hairline
             listFooter
         }
     }
@@ -240,12 +268,12 @@ struct PopoverView: View {
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
             .font(.system(size: 9, weight: .bold))
-            .kerning(1.0)
-            .foregroundStyle(.secondary)
+            .kerning(1.3)
+            .foregroundStyle(LD.textTertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 3)
+            .padding(.top, LD.spaceHairline)
+            .padding(.bottom, 7)
     }
 
     private var emptyState: some View {
@@ -281,13 +309,13 @@ struct PopoverView: View {
         VStack(spacing: 10) {
             Image(systemName: "tray")
                 .font(.system(size: 22))
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(LD.textQuaternary)
             Text("Nothing connected yet")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
             Text("Connect a tracker — Linear or GitHub — and point Lemon at a folder of work.")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 280)
                 .fixedSize(horizontal: false, vertical: true)
@@ -310,10 +338,10 @@ struct PopoverView: View {
         VStack(spacing: 12) {
             Text("Waiting for a 🍋")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
             Text("Label an issue in any of these and Lemon picks it up next poll.")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
                 .fixedSize(horizontal: false, vertical: true)
@@ -325,7 +353,7 @@ struct PopoverView: View {
                 if workspaces.count > 4 {
                     Text("+ \(workspaces.count - 4) more")
                         .font(.system(size: 9))
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(LD.textQuaternary)
                 }
             }
             .padding(.top, 4)
@@ -349,19 +377,19 @@ struct PopoverView: View {
             HStack(spacing: 4) {
                 Text(folder.isEmpty ? "Unnamed" : folder)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(LD.textPrimary)
                 Text("·")
                     .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
+                    .foregroundStyle(LD.textQuaternary)
                 Text(surface?.key ?? workspace.routing.surfaceId)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-        .frame(maxWidth: 340)
+        .lemonGlass(.thin, cornerRadius: LD.r6)
+        .frame(maxWidth: 300)
     }
 
     private var nextPollIn: Int? {
@@ -381,10 +409,10 @@ struct PopoverView: View {
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.borderless)
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
         }
     }
 
@@ -397,15 +425,15 @@ struct PopoverView: View {
             EmptyView()
         case .starting:
             HStack(spacing: 6) {
-                Text("·").font(.system(size: 10)).foregroundStyle(.quaternary)
+                Text("·").font(.system(size: 10)).foregroundStyle(LD.textQuaternary)
                 Text("AI: loading…")
                     .font(.system(size: 10))
-                    .foregroundStyle(LD.lemon)
+                    .foregroundStyle(LD.textSecondary)
                     .help(Text(verbatim: "Loading Gemma into memory; can take 60-90 s on first launch."))
             }
         case let .failed(msg):
             HStack(spacing: 6) {
-                Text("·").font(.system(size: 10)).foregroundStyle(.quaternary)
+                Text("·").font(.system(size: 10)).foregroundStyle(LD.textQuaternary)
                 Text("AI: error")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(LD.coral)
@@ -416,9 +444,9 @@ struct PopoverView: View {
 
     private var pollDot: some View {
         Circle()
-            .fill(orchestrator.isPolling ? LD.lemon : Color.secondary)
+            .fill(orchestrator.isPolling ? LD.statusDone : LD.textTertiary)
             .frame(width: 5, height: 5)
-            .opacity(orchestrator.isPolling ? 1 : 0.5)
+            .opacity(orchestrator.isPolling ? 1 : 0.6)
             .animation(LD.smooth, value: orchestrator.isPolling)
     }
 
@@ -427,295 +455,92 @@ struct PopoverView: View {
         if orchestrator.isPolling {
             Text("polling…")
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
         } else if let next = nextPollIn {
             Text("next poll in \(next)s")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
         } else {
             Text(orchestrator.lastPolledAt == nil ? "connecting…" : "polling soon")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
         }
-    }
-
-    // MARK: - Detail pane
-
-    private func detailPane(_ session: Session) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(session.issue.title)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .lineLimit(2)
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.primary.opacity(0.025))
-
-            // Ready-for-review card — shown when handleComplete has
-            // landed a Lemon Report and stashed cleanupInfo but the
-            // user hasn't fired the cleanup yet. Sits above the console
-            // so it's the first thing you see when you click in.
-            if session.status == .reviewing, let info = session.cleanupInfo {
-                readyForReviewCard(session: session, info: info)
-            }
-
-            // Gemma summary — shown when the local model has classified the session.
-            if let summary = session.aiSummary {
-                HStack(spacing: 5) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 9))
-                        .foregroundStyle(LD.consoleGemma)
-                    Text(summary)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
-                .background(.primary.opacity(0.015))
-            }
-
-            // Pending Gemma action — shown for 5 s before keys are sent.
-            if let pending = session.pendingAction {
-                HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 10))
-                    Text(pending)
-                        .font(.system(size: 10, weight: .medium))
-                    Spacer()
-                    Button("Cancel") { orchestrator.cancelPendingAction(for: session) }
-                        .font(.system(size: 10))
-                        .buttonStyle(.borderless)
-                }
-                .foregroundStyle(LD.lemon)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(LD.lemon.opacity(0.08))
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .animation(LD.smooth, value: session.pendingAction)
-            }
-
-            inlineConsole(session)
-            detailFooter(session)
-        }
-    }
-
-    private func readyForReviewCard(session: Session, info: WorktreeCleanupInfo) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(LD.statusDone)
-                    .frame(width: 6, height: 6)
-                Text("READY FOR REVIEW")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(LD.statusDone)
-                Spacer()
-            }
-            // Worktree path — monospace, selectable so the user can
-            // copy it into a terminal and `cd` over.
-            HStack(spacing: 6) {
-                Image(systemName: "folder")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                Text(info.sessionPath)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            HStack(spacing: 8) {
-                if let pr = session.prUrl, let url = URL(string: pr) {
-                    Link(destination: url) {
-                        Label("Open PR", systemImage: "arrow.up.right.square")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(LD.lemon)
-                }
-                Spacer()
-                Button {
-                    orchestrator.cleanupSession(session)
-                    withAnimation(LD.slide) { nav.showList() }
-                } label: {
-                    Label("Cleanup worktree", systemImage: "trash")
-                        .font(.system(size: 10, weight: .medium))
-                }
-                .buttonStyle(GhostButtonStyle())
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(LD.statusDone.opacity(0.06))
-        .overlay(
-            Rectangle()
-                .fill(LD.statusDone.opacity(0.4))
-                .frame(width: 2),
-            alignment: .leading,
-        )
-    }
-
-    private func inlineConsole(_ session: Session) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if session.logLines.isEmpty {
-                        Text("Starting…")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(LD.consoleText.opacity(0.3))
-                            .padding(12)
-                    } else {
-                        ForEach(Array(session.logLines.enumerated()), id: \.offset) { index, line in
-                            ConsoleLineView(line: line).id(index)
-                        }
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(height: 230)
-            .background(LD.consoleBackground)
-            .onChange(of: session.logLines.count) { _, count in
-                withAnimation(LD.smooth) { proxy.scrollTo(count - 1, anchor: .bottom) }
-            }
-        }
-    }
-
-    private func detailFooter(_ session: Session) -> some View {
-        HStack(spacing: 10) {
-            Group {
-                if let t = session.endedAt {
-                    Text("ended \(t, style: .relative) ago")
-                } else {
-                    Text("\(session.startedAt, style: .relative) running")
-                }
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-
-            if let pr = session.prUrl, let url = URL(string: pr) {
-                Link(destination: url) {
-                    Label("PR", systemImage: "arrow.triangle.pull")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LD.lemon)
-                }
-            }
-
-            Spacer()
-
-            if !session.status.isTerminal {
-                Button(joinCopied ? "Copied!" : "Join") {
-                    joinSession(session)
-                }
-                .buttonStyle(GhostButtonStyle())
-
-                Button(stopConfirmingId == session.id ? "Confirm Stop" : "Stop") {
-                    if stopConfirmingId == session.id {
-                        stopConfirmTask?.cancel()
-                        stopConfirmingId = nil
-                        orchestrator.stopSession(session)
-                        withAnimation(LD.slide) { nav.showList() }
-                    } else {
-                        withAnimation(LD.snappy) { stopConfirmingId = session.id }
-                        stopConfirmTask?.cancel()
-                        let sessionId = session.id
-                        stopConfirmTask = Task { @MainActor in
-                            try? await Task.sleep(for: .seconds(3))
-                            guard !Task.isCancelled,
-                                  stopConfirmingId == sessionId else { return }
-                            withAnimation(LD.smooth) { stopConfirmingId = nil }
-                        }
-                    }
-                }
-                .buttonStyle(LemonButtonStyle(isDestructive: true))
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-    }
-
-    private func joinSession(_ session: Session) {
-        let name = "lemon-\(session.issue.pathSlug)"
-        // The user explicitly clicked Join — they want the window to appear AND
-        // come to the front. Try iTerm2 first (tmux -CC native tabs), then
-        // Terminal.app (always present), and only fall back to clipboard if
-        // both osascript calls error out.
-        let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
-        if hasITerm, runOsascript("""
-        tell application "iTerm"
-            activate
-            create window with default profile command "tmux -CC attach -t \(name)"
-        end tell
-        """) {
-            return
-        }
-        if runOsascript("""
-        tell application "Terminal"
-            activate
-            do script "tmux attach -t \(name)"
-        end tell
-        """) {
-            return
-        }
-        // Last resort — copy the command for the user to paste themselves.
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("tmux attach -t \(name)", forType: .string)
-        joinCopied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { joinCopied = false }
-    }
-
-    @discardableResult
-    private func runOsascript(_ script: String) -> Bool {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", script]
-        p.standardOutput = Pipe()
-        p.standardError = Pipe()
-        do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 }
-        catch { return false }
     }
 }
 
-// MARK: - Console line
+/// Behind-window vibrancy backdrop — the only thing that bleeds the desktop
+/// through a macOS-26 `MenuBarExtra(.window)` popover. An `NSVisualEffectView`
+/// in `.behindWindow` mode samples the desktop/windows behind the panel;
+/// `state = .active` keeps it live when the popover isn't key. It also
+/// re-asserts the panel's transparency on every relayout — MenuBarExtra ships an
+/// opaque panel and repaints its backing, so a one-shot clear doesn't stick.
+struct VibrantBackdrop: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .hudWindow
+    var cornerRadius: CGFloat = LD.r14
 
-struct ConsoleLineView: View {
-    let line: String
-
-    var body: some View {
-        Text(attributedLine)
-            .font(.system(size: 11, design: .monospaced))
-            .textSelection(.enabled)
-            .padding(.vertical, 1)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    func makeNSView(context _: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = material
+        view.state = .active
+        // Round via maskImage, NOT a SwiftUI .clipShape. System vibrancy
+        // materials paint their own bright edge-highlight ("rim"); a SwiftUI clip
+        // just moves that rim to the rounded edge (the white line). An alpha
+        // maskImage shapes the material before it highlights, so the rim is
+        // anti-aliased away. (Research: NSVisualEffectView reverse-engineering +
+        // Apple's maskImage docs.)
+        view.maskImage = Self.roundedMask(radius: cornerRadius)
+        return view
     }
 
-    private var attributedLine: AttributedString {
-        var str = AttributedString(line)
-        str.foregroundColor = LD.consoleText
+    func updateNSView(_ view: NSVisualEffectView, context _: Context) {
+        view.material = material
+        view.maskImage = Self.roundedMask(radius: cornerRadius)
+        DispatchQueue.main.async { [weak view] in
+            guard let window = view?.window else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            // Kill any CALayer border the system panel's content view carries —
+            // a second source of the edge line independent of the material rim.
+            window.contentView?.wantsLayer = true
+            window.contentView?.layer?.borderWidth = 0
+        }
+    }
 
-        if line.hasPrefix("[lemon]") {
-            if let r = str.range(of: "[lemon]") {
-                str[r].foregroundColor = LD.consoleLemon
-                str[r].font = .system(size: 11, weight: .semibold, design: .monospaced)
-            }
+    /// Resizable rounded-rect alpha mask for the vibrancy view, with cap insets
+    /// so it stretches cleanly to any popover size.
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let d = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: d, height: d), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
         }
-        if line.hasPrefix("[gemma]") {
-            if let r = str.range(of: "[gemma]") {
-                str[r].foregroundColor = LD.consoleGemma
-                str[r].font = .system(size: 11, weight: .semibold, design: .monospaced)
-            }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
+    }
+}
+
+extension View {
+    /// Window-level Lemon glass for the popover/onboarding root: a behind-window
+    /// vibrancy backdrop (desktop bleed) under a low warm tint, a 0.5pt hairline,
+    /// and the one drop shadow — clipped to a continuous rounded rect. Inner
+    /// cards keep `.lemonGlass(...)`; this is only for the surface that fills the
+    /// panel and meets the desktop.
+    func lemonWindowGlass(cornerRadius: CGFloat = LD.r14,
+                          material: NSVisualEffectView.Material = .menu) -> some View
+    {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // The vibrancy backdrop rounds ITSELF at the layer (cornerRadius/mask) so
+        // its material rim is alpha-clipped — no SwiftUI .clipShape on the material,
+        // which would re-introduce a bright edge line. The warm tint is a plain
+        // rounded fill (no material → no rim). Drop shadow defines the soft edge.
+        return background {
+            VibrantBackdrop(material: material, cornerRadius: cornerRadius)
+                .overlay(shape.fill(LD.glassWindowTint))
         }
-        if line.lowercased().contains("[error]") || line.lowercased().contains("error:") {
-            str.foregroundColor = LD.coral
-        }
-        if line.contains("✓") || line.lowercased().contains("successfully") {
-            str.foregroundColor = LD.consoleSage
-        }
-        return str
+        .shadow(color: LD.popoverShadowColor, radius: LD.popoverShadowRadius, x: 0, y: LD.popoverShadowY)
     }
 }

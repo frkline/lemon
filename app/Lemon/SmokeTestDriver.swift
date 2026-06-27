@@ -129,19 +129,21 @@
             // NSWindow's isReleasedWhenClosed (default true) frees the window while
             // SwiftUI's hosting machinery still holds references into the view tree.
             let win = NSWindow(
-                contentRect: CGRect(x: 200, y: 200, width: 520, height: 580),
+                contentRect: CGRect(x: 200, y: 200, width: 340, height: 640),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false,
             )
             win.isReleasedWhenClosed = false
 
+            // The wizard is now 4 steps (Connect+Workspace merged). forcedStep
+            // maps 0→Connect, 2→LEMON.md, 3→Local AI, 4→Ready (1 also lands on
+            // Connect, so it's skipped to avoid a duplicate shot).
             let steps: [(Int, String)] = [
-                (0, "06-onboarding-linear"),
-                (1, "07-onboarding-workspace"),
-                (2, "08-onboarding-lemonmd"),
-                (3, "09-onboarding-localai"),
-                (4, "10-onboarding-ready"),
+                (0, "06-onboarding-connect"),
+                (2, "07-onboarding-lemonmd"),
+                (3, "08-onboarding-localai"),
+                (4, "09-onboarding-ready"),
             ]
 
             for (stepIndex, name) in steps {
@@ -149,7 +151,7 @@
                 let binding = Binding(get: { dummy }, set: { dummy = $0 })
                 let view = OnboardingView(isComplete: binding, forcedStep: stepIndex)
                 let hosting = NSHostingView(rootView: view)
-                hosting.frame = CGRect(x: 0, y: 0, width: 520, height: 580)
+                hosting.frame = CGRect(x: 0, y: 0, width: 340, height: 640)
                 win.contentView = hosting
                 win.makeKeyAndOrderFront(nil)
 

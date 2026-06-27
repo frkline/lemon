@@ -59,24 +59,31 @@ struct WorkspaceEditorPane: View {
     }
 
     var body: some View {
-        // Intrinsic-height layout — pane grows to its content and stops.
-        VStack(alignment: .leading, spacing: 22) {
-            eyebrowHeader
-            if identities.isEmpty {
-                noIdentitiesCard
-            } else {
-                pathSection
-                identitySection
-                surfaceSection
-                folderOptions
+        // ScrollView so content scrolls within the popover's capped height
+        // instead of overflowing and clipping top/bottom. The glaze "room"
+        // stays fixed; only the content scrolls.
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
+                eyebrowHeader
+                if identities.isEmpty {
+                    noIdentitiesCard
+                } else {
+                    pathSection
+                    identitySection
+                    surfaceSection
+                    folderOptions
+                }
+                actionsRow
             }
-            actionsRow
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 18)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LD.consoleBackground.opacity(0.02))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The "second room": a faint lemon glaze over the inherited window
+        // glass, r14. Interior surfaces are resting thin glass.
+        .lemonGlass(.thick, tint: LD.tintLemon, cornerRadius: LD.r14)
         .onAppear { hydrate() }
     }
 
@@ -87,13 +94,13 @@ struct WorkspaceEditorPane: View {
             Text(isNew ? "NEW WORKSPACE" : "WORKSPACE")
                 .font(.system(size: 9, weight: .bold))
                 .kerning(1.6)
-                .foregroundStyle(LD.lemon)
+                .foregroundStyle(LD.textSecondary)
             Text(isNew ? "Map a folder to a tracker" : (existing.map { URL(fileURLWithPath: $0.path).lastPathComponent } ?? "Edit"))
-                .font(.system(size: 24, weight: .bold, design: .serif))
-                .foregroundStyle(.primary)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(LD.textPrimary)
             Text("Pick where the work happens on disk, then route its issues through one of your connected identities.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -106,10 +113,10 @@ struct WorkspaceEditorPane: View {
                 Text("LOCAL PATH")
                     .font(.system(size: 8, weight: .bold))
                     .kerning(1.4)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Text("drop a folder or paste a path")
                     .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
+                    .foregroundStyle(LD.textQuaternary)
                 Spacer()
             }
             HStack(spacing: 0) {
@@ -120,8 +127,8 @@ struct WorkspaceEditorPane: View {
                     .padding(.horizontal, 9)
             }
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
+                RoundedRectangle(cornerRadius: LD.r6)
+                    .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
             )
             .onChange(of: path) { _, newValue in
                 analyzePath(newValue)
@@ -154,30 +161,23 @@ struct WorkspaceEditorPane: View {
             HStack(spacing: 8) {
                 Image(systemName: "sparkle")
                     .font(.system(size: 10))
-                    .foregroundStyle(LD.lemon)
+                    .foregroundStyle(LD.textSecondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(s.label)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(LD.textPrimary)
                     Text(s.detail)
                         .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(LD.textTertiary)
                 }
                 Spacer(minLength: 0)
                 Text("Use")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(LD.lemon)
+                    .foregroundStyle(LD.textSecondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(LD.lemon.opacity(0.06)),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(LD.lemon.opacity(0.28), lineWidth: 0.5),
-            )
+            .lemonGlass(.thin, cornerRadius: LD.r10)
         }
         .buttonStyle(.plain)
     }
@@ -189,7 +189,7 @@ struct WorkspaceEditorPane: View {
             Text("ROUTE THROUGH")
                 .font(.system(size: 8, weight: .bold))
                 .kerning(1.4)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
 
             VStack(spacing: 6) {
                 ForEach(identities) { ident in
@@ -204,13 +204,13 @@ struct WorkspaceEditorPane: View {
                         Text("Connect another identity")
                             .font(.system(size: 11, weight: .medium))
                     }
-                    .foregroundStyle(LD.lemon)
+                    .foregroundStyle(LD.textSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: LD.r10)
-                            .strokeBorder(LD.lemon.opacity(0.30),
+                        RoundedRectangle(cornerRadius: LD.r10, style: .continuous)
+                            .strokeBorder(LD.hairlineRegular,
                                           style: StrokeStyle(lineWidth: 1, dash: [4, 3])),
                     )
                 }
@@ -221,6 +221,7 @@ struct WorkspaceEditorPane: View {
 
     private func identityChoiceRow(_ ident: Identity) -> some View {
         let isSelected = identityId == ident.id
+        let isGH = ident.kind == .github
         return Button {
             withAnimation(LD.snappy) {
                 identityId = ident.id
@@ -231,11 +232,11 @@ struct WorkspaceEditorPane: View {
             }
         } label: {
             HStack(spacing: 10) {
-                SourceGlyph(source: ident.kind.issueSource, size: 9)
+                SourceFavicon(source: ident.kind.issueSource, size: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(ident.label)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(LD.textPrimary)
                     HStack(spacing: 4) {
                         if !ident.handle.isEmpty {
                             Text("@\(ident.handle)")
@@ -248,23 +249,22 @@ struct WorkspaceEditorPane: View {
                         Text("· \(ident.knownSurfaces.count) surface\(ident.knownSurfaces.count == 1 ? "" : "s")")
                             .font(.system(size: 10))
                     }
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                // Selected → green connected ✓; otherwise an empty marker.
+                // Source-tint carries the selection on the glass, not yellow.
+                Image(systemName: isSelected ? "checkmark.seal.fill" : "circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.quaternary))
+                    .foregroundStyle(isSelected ? LD.statusDone : LD.textQuaternary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(isSelected ? LD.lemon.opacity(0.07) : Color.primary.opacity(0.04)),
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(isSelected ? LD.lemon.opacity(0.30) : Color.primary.opacity(0.08),
-                                  lineWidth: 0.5),
+            .lemonGlass(
+                isSelected ? .regular : .thin,
+                tint: isSelected ? (isGH ? LD.tintGithub : LD.tintLinear) : nil,
+                cornerRadius: LD.r10,
+                ring: isSelected ? (isGH ? LD.tintGithubRing : LD.tintLinearRing) : nil,
             )
         }
         .buttonStyle(.plain)
@@ -280,7 +280,7 @@ struct WorkspaceEditorPane: View {
                     Text(ident.kind == .linear ? "TEAM" : "REPO")
                         .font(.system(size: 8, weight: .bold))
                         .kerning(1.4)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(LD.textTertiary)
                     Spacer()
                     Button {
                         Task { await orchestrator.refreshSurfaces(identityId: ident.id) }
@@ -291,7 +291,7 @@ struct WorkspaceEditorPane: View {
                             Text("Refresh")
                                 .font(.system(size: 10, weight: .medium))
                         }
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .help("Re-fetch surfaces from \(ident.kind.displayName)")
@@ -300,7 +300,7 @@ struct WorkspaceEditorPane: View {
                     surfaceFreeText
                     Text("No surfaces cached yet. Re-verify the identity to fetch them, or type a key here.")
                         .font(.system(size: 10))
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(LD.textQuaternary)
                 } else if typingCustomKey {
                     surfaceFreeText
                     Button {
@@ -308,7 +308,7 @@ struct WorkspaceEditorPane: View {
                     } label: {
                         Text("← Pick from \(ident.knownSurfaces.count) known surface\(ident.knownSurfaces.count == 1 ? "" : "s")")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(LD.lemon)
+                            .foregroundStyle(LD.textSecondary)
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -322,22 +322,15 @@ struct WorkspaceEditorPane: View {
                         HStack(spacing: 8) {
                             Text(surfaceLabelText(for: ident))
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(LD.textPrimary)
                             Spacer()
                             Image(systemName: "chevron.up.chevron.down")
                                 .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(LD.textTertiary)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: LD.r10)
-                                .fill(.primary.opacity(0.04)),
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: LD.r10)
-                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
-                        )
+                        .lemonGlass(.thin, cornerRadius: LD.r10)
                     }
                     .menuStyle(.borderlessButton)
                     Button {
@@ -345,7 +338,7 @@ struct WorkspaceEditorPane: View {
                     } label: {
                         Text("Type a custom key →")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(LD.textTertiary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -376,7 +369,7 @@ struct WorkspaceEditorPane: View {
                     Text(reseedState == .working ? "Re-seeding…" : "Re-seed 🍋 labels")
                         .font(.system(size: 10, weight: .medium))
                 }
-                .foregroundStyle(canReseed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+                .foregroundStyle(canReseed ? LD.textSecondary : LD.textQuaternary)
             }
             .buttonStyle(.plain)
             .disabled(!canReseed)
@@ -440,8 +433,8 @@ struct WorkspaceEditorPane: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 9)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
+            RoundedRectangle(cornerRadius: LD.r6)
+                .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
         )
     }
 
@@ -476,19 +469,19 @@ struct WorkspaceEditorPane: View {
             Text("FOLDER LAYOUT")
                 .font(.system(size: 8, weight: .bold))
                 .kerning(1.4)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
 
             VStack(alignment: .leading, spacing: 12) {
                 Toggle(isOn: $allReposInFolder) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("All repos in this folder")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(LD.textPrimary)
                         Text(allReposInFolder
                             ? "Lemon discovers every git repo inside and worktrees them as siblings."
                             : "Treat the path as a single repo.")
                             .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(LD.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -500,10 +493,10 @@ struct WorkspaceEditorPane: View {
                             Text("HOME SUBDIR")
                                 .font(.system(size: 8, weight: .bold))
                                 .kerning(1.4)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(LD.textTertiary)
                             Text("optional")
                                 .font(.system(size: 9))
-                                .foregroundStyle(.quaternary)
+                                .foregroundStyle(LD.textQuaternary)
                             Spacer()
                         }
                         TextField("e.g. memory", text: $homeRepo)
@@ -512,12 +505,12 @@ struct WorkspaceEditorPane: View {
                             .padding(.vertical, 6)
                             .padding(.horizontal, 9)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
+                                RoundedRectangle(cornerRadius: LD.r6)
+                                    .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
                             )
                         Text("Where Claude launches inside the folder. Put a LEMON.md there with team-specific guidance.")
                             .font(.system(size: 10))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(LD.textQuaternary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, 22)
@@ -525,7 +518,8 @@ struct WorkspaceEditorPane: View {
                 }
             }
             .padding(14)
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lemonGlass(.thin, cornerRadius: LD.r10)
         }
         .animation(LD.smooth, value: allReposInFolder)
     }
@@ -537,13 +531,14 @@ struct WorkspaceEditorPane: View {
             HStack(spacing: 6) {
                 Image(systemName: "person.badge.shield.exclamationmark")
                     .font(.system(size: 12))
-                    .foregroundStyle(LD.lemon)
+                    .foregroundStyle(LD.textSecondary)
                 Text("No identities connected yet.")
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LD.textPrimary)
             }
             Text("Connect a tracker first — Lemon needs to know where this workspace's issues live before it can route them.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Button {
@@ -555,8 +550,9 @@ struct WorkspaceEditorPane: View {
                             .font(.system(size: 11, weight: .semibold))
                     }
                     .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(LD.lemon, in: Capsule())
-                    .foregroundStyle(LD.citrus)
+                    .background(LD.linearMark.opacity(0.18), in: Capsule())
+                    .overlay(Capsule().strokeBorder(LD.linearMark.opacity(0.40), lineWidth: LD.hairlineWidth))
+                    .foregroundStyle(LD.linearMark)
                 }
                 .buttonStyle(.plain)
                 Button {
@@ -569,14 +565,15 @@ struct WorkspaceEditorPane: View {
                     }
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(LD.statusDone.opacity(0.18), in: Capsule())
-                    .overlay(Capsule().strokeBorder(LD.statusDone.opacity(0.40), lineWidth: 0.5))
+                    .overlay(Capsule().strokeBorder(LD.statusDone.opacity(0.40), lineWidth: LD.hairlineWidth))
                     .foregroundStyle(LD.statusDone)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(14)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .lemonGlass(.thin, cornerRadius: LD.r10)
     }
 
     // MARK: - Actions

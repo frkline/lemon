@@ -45,26 +45,51 @@ struct IdentityEditorPane: View {
         return existingIdentity != nil
     }
 
+    // Source-discipline: GitHub → tintGithub, Linear → tintLinear. Never cross.
+    private var sourceTint: Color {
+        isGitHub ? LD.tintGithub : LD.tintLinear
+    }
+
+    private var sourceRing: Color {
+        isGitHub ? LD.tintGithubRing : LD.tintLinearRing
+    }
+
+    private var kindName: String {
+        isGitHub ? "GitHub" : "Linear"
+    }
+
+    /// The verified handle, whether it came from a fresh verify or the stored
+    /// identity. Drives the "GitHub · @handle" title on the selected glass.
+    private var verifiedHandle: String? {
+        if case let .ok(handle, _) = verifyState { return handle }
+        if let h = existingIdentity?.handle, !h.isEmpty { return h }
+        return nil
+    }
+
     var body: some View {
-        // VStack (not ScrollView) so the pane sizes to its content. The
-        // popover frame's width is fixed in PopoverView; height is intrinsic.
-        // For very long surface lists (>8 entries), `surfacesSummary` already
-        // collapses to a "+ N more" tail.
-        VStack(alignment: .leading, spacing: 22) {
-            eyebrowHeader
-            labelField
-            credentialCard
-            if isGitHub { hostField }
-            verifyRow
-            if verified { surfacesSummary }
-            if !isNew { routedBySummary }
-            actionsRow
+        // ScrollView so the pane's content scrolls within the popover's capped
+        // height instead of overflowing and clipping top/bottom. The glaze "room"
+        // (below) stays fixed; only the content scrolls.
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
+                eyebrowHeader
+                labelField
+                credentialCard
+                if isGitHub { hostField }
+                verifyRow
+                if verified { surfacesSummary }
+                if !isNew { routedBySummary }
+                actionsRow
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 18)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LD.consoleBackground.opacity(0.02))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The "second room": a faint lemon glaze over the inherited window
+        // glass, r14. Interior surfaces are resting thin glass.
+        .lemonGlass(.thick, tint: LD.tintLemon, cornerRadius: LD.r14)
         .onAppear { hydrate() }
     }
 
@@ -76,15 +101,15 @@ struct IdentityEditorPane: View {
                 Text(isNew ? "NEW IDENTITY" : "IDENTITY")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.6)
-                    .foregroundStyle(LD.lemon)
+                    .foregroundStyle(LD.textSecondary)
                 SourceGlyph(source: kind.issueSource, size: 9)
             }
             Text(headerTitle)
-                .font(.system(size: 24, weight: .bold, design: .serif))
-                .foregroundStyle(.primary)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(LD.textPrimary)
             Text(headerSubtitle)
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -121,42 +146,63 @@ struct IdentityEditorPane: View {
         }
     }
 
+    /// The selected-identity glass: a source-tinted resting-glass card that
+    /// houses the masked credential field and, once verified, the connected ✓.
     private var credentialCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Text(isGitHub ? "PERSONAL ACCESS TOKEN" : "API KEY")
-                    .font(.system(size: 8, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
-                Link(destination: providerURL) {
-                    HStack(spacing: 2) {
-                        Text("create one")
-                            .font(.system(size: 8, weight: .medium))
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 6, weight: .bold))
-                    }
-                    .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                SourceFavicon(source: kind.issueSource, size: 16)
+                Text(verifiedHandle.map { "\(kindName) · @\($0)" } ?? kindName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LD.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                if verified {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(LD.statusDone)
                 }
-                Spacer()
             }
-            SecureField(
-                isGitHub ? "ghp_…" : "lin_api_…",
-                text: $token,
-            )
-            .textFieldStyle(.plain)
-            .font(.system(size: 12, design: .monospaced))
-            .padding(.vertical, 7)
-            .padding(.horizontal, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
-            )
-            .onChange(of: token) { _, _ in verifyState = .idle }
-            Text(providerHint)
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(isGitHub ? "PERSONAL ACCESS TOKEN" : "API KEY")
+                        .font(.system(size: 8, weight: .bold))
+                        .kerning(1.4)
+                        .foregroundStyle(LD.textTertiary)
+                    Link(destination: providerURL) {
+                        HStack(spacing: 2) {
+                            Text("create one")
+                                .font(.system(size: 8, weight: .medium))
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 6, weight: .bold))
+                        }
+                        .foregroundStyle(LD.textTertiary)
+                    }
+                    Spacer()
+                }
+                SecureField(
+                    isGitHub ? "ghp_…" : "lin_api_…",
+                    text: $token,
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(.vertical, 7)
+                .padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: LD.r6)
+                        .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+                )
+                .onChange(of: token) { _, _ in verifyState = .idle }
+                Text(providerHint)
+                    .font(.system(size: 9))
+                    .foregroundStyle(LD.textQuaternary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .lemonGlass(.regular, tint: sourceTint, cornerRadius: LD.r10, ring: sourceRing)
     }
 
     private var providerURL: URL {
@@ -205,21 +251,15 @@ struct IdentityEditorPane: View {
                     Text(verifyButtonLabel)
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(canVerify ? AnyShapeStyle(LD.citrus) : AnyShapeStyle(.tertiary))
+                // Yellow is reserved for Save — verify is a warm neutral.
+                .foregroundStyle(canVerify ? LD.textPrimary : LD.textQuaternary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(
-                    canVerify
-                        ? AnyShapeStyle(LD.lemon)
-                        : AnyShapeStyle(Color.primary.opacity(0.06)),
-                    in: Capsule(),
-                )
+                .background(LD.glassRegularFill, in: Capsule())
                 .overlay(
                     Capsule().strokeBorder(
-                        canVerify
-                            ? Color.clear
-                            : Color.primary.opacity(0.10),
-                        lineWidth: 0.5,
+                        canVerify ? LD.hairlineRegular : LD.hairlineThin,
+                        lineWidth: LD.hairlineWidth,
                     ),
                 )
             }
@@ -278,19 +318,19 @@ struct IdentityEditorPane: View {
                 Text(label)
                     .font(.system(size: 8, weight: .bold))
                     .kerning(1.4)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Text("\(surfaces.count) \(unit)\(surfaces.count == 1 ? "" : "s") visible")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Spacer(minLength: 0)
             }
             if surfaces.isEmpty {
                 Text(emptySurfacesText)
                     .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                    .lemonGlass(.thin, cornerRadius: LD.r10)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(surfaces.prefix(8), id: \.id) { surface in
@@ -299,11 +339,12 @@ struct IdentityEditorPane: View {
                     if surfaces.count > 8 {
                         Text("+ \(surfaces.count - 8) more")
                             .font(.system(size: 10))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(LD.textQuaternary)
                     }
                 }
                 .padding(12)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lemonGlass(.thin, cornerRadius: LD.r10)
             }
         }
     }
@@ -316,20 +357,21 @@ struct IdentityEditorPane: View {
         // into a single editorial mark.
         let dupe = surface.key.caseInsensitiveCompare(surface.displayName) == .orderedSame
         HStack(spacing: 8) {
+            SourceFavicon(source: kind.issueSource, size: 16)
             if dupe {
                 Text(surface.displayName)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(LD.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             } else {
                 Text(surface.key)
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 50, alignment: .leading)
+                    .foregroundStyle(LD.textTertiary)
+                    .frame(minWidth: 46, alignment: .leading)
                 Text(surface.displayName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(LD.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -349,19 +391,19 @@ struct IdentityEditorPane: View {
                 Text("ROUTED BY")
                     .font(.system(size: 8, weight: .bold))
                     .kerning(1.4)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Text("\(routed.count) workspace\(routed.count == 1 ? "" : "s")")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Spacer(minLength: 0)
             }
             if routed.isEmpty {
                 Text("Not routed by any workspace yet. Delete is safe.")
                     .font(.system(size: 10))
-                    .foregroundStyle(.quaternary)
+                    .foregroundStyle(LD.textQuaternary)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                    .lemonGlass(.thin, cornerRadius: LD.r10)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(routed.prefix(6), id: \.id) { ws in
@@ -373,17 +415,22 @@ struct IdentityEditorPane: View {
                                     ? "Unnamed"
                                     : URL(fileURLWithPath: ws.path).lastPathComponent)
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                Text("·")
-                                    .foregroundStyle(.quaternary)
+                                    .foregroundStyle(LD.textPrimary)
                                 Text(ws.routing.surfaceId)
                                     .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(LD.textTertiary)
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
+                                // Live indicator: green dot + label, per spec.
+                                Circle()
+                                    .fill(LD.statusDone)
+                                    .frame(width: 5, height: 5)
+                                Text("live")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(LD.statusDone)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(.quaternary)
+                                    .foregroundStyle(LD.textQuaternary)
                             }
                         }
                         .buttonStyle(.plain)
@@ -391,7 +438,7 @@ struct IdentityEditorPane: View {
                     if routed.count > 6 {
                         Text("+ \(routed.count - 6) more")
                             .font(.system(size: 10))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(LD.textQuaternary)
                     }
                     if deleteArmed {
                         HStack(spacing: 6) {
@@ -407,7 +454,8 @@ struct IdentityEditorPane: View {
                     }
                 }
                 .padding(12)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lemonGlass(.thin, cornerRadius: LD.r10)
             }
         }
     }
@@ -584,20 +632,20 @@ struct IdentityEditorPane: View {
             Text(eyebrow)
                 .font(.system(size: 8, weight: .bold))
                 .kerning(1.4)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: monospaced ? .monospaced : .default))
                 .padding(.vertical, 7)
                 .padding(.horizontal, 9)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
+                    RoundedRectangle(cornerRadius: LD.r6)
+                        .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
                 )
             if let helper {
                 Text(helper)
                     .font(.system(size: 10))
-                    .foregroundStyle(.quaternary)
+                    .foregroundStyle(LD.textQuaternary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

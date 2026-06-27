@@ -106,7 +106,7 @@ struct LemonApp: App {
                 LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
             }
         } label: {
-            Image(orchestrator.sessions.active.isEmpty ? "MenuBarIconIdle" : "MenuBarIcon")
+            Image(nsImage: orchestrator.sessions.active.isEmpty ? LemonGlyph.idle : LemonGlyph.active)
                 .renderingMode(.template)
                 .accessibilityLabel("Lemon")
         }
@@ -118,33 +118,157 @@ struct LemonApp: App {
     /// launch when the user isn't configured yet — keeps the wizard in the
     /// same surface they'll meet day-to-day, no separate window. Also
     /// re-used by `.lemonRerunSetup` from Settings.
+    /// Clicks the MenuBarExtra's status button to open its popover. Returns
+    /// `true` once it found a status button to click, `false` if none exists
+    /// yet (SwiftUI installs the `NSStatusItem` a beat after launch, so the
+    /// caller should retry until this returns true). Activates the app first so
+    /// the popover can become key.
     @MainActor
-    static func openMenuBarPopover() {
-        // NSStatusBar doesn't expose its items publicly, so we walk
-        // NSApp.windows for the AppKit-side window backing the MenuBarExtra
-        // popover. The window has no title, no identifier, and is owned by
-        // the system status bar. Its rootView's host view is what gets
-        // toggled by clicking the menu bar icon.
-        //
-        // Strategy: find the NSStatusItem via NSApp.windows → first key
-        // window whose level matches statusBar, OR walk the menu-bar
-        // status item buttons by hit-testing the system status bar.
-        // SwiftUI's MenuBarExtra installs exactly one NSStatusItem in the
-        // shared NSStatusBar; we iterate the bar to find it.
-        let statusBar = NSStatusBar.system
-        // NSStatusBar.system has a private `_statusItems` collection;
-        // public API doesn't expose it. Fall back to walking NSApp.windows
-        // to find the popover's host window and toggling its visibility.
-        if let items = statusBar.value(forKey: "_statusItems") as? [NSStatusItem] {
-            for item in items {
-                if let button = item.button {
-                    button.performClick(nil)
-                    return
-                }
+    @discardableResult
+    static func openMenuBarPopover() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        // NSStatusBar.system exposes its items only via the private
+        // `_statusItems` KVC collection; SwiftUI's MenuBarExtra installs exactly
+        // one. performClick on its button toggles the popover open.
+        let items = NSStatusBar.system.value(forKey: "_statusItems") as? [NSStatusItem]
+        guard let items else { return false }
+        for item in items {
+            if let button = item.button {
+                button.performClick(nil)
+                return true
             }
         }
-        // Fallback: activate the app so the menu bar icon is at least
-        // visually pulsed; the user can click it themselves.
-        NSApp.activate(ignoringOtherApps: true)
+        return false
+    }
+}
+
+/// The menu-bar lemon, drawn as a vector path and baked into a *template*
+/// `NSImage` so it stays razor-crisp at any backing scale and auto-tints to the
+/// menu bar's foreground (light glyph in dark bars, dark in light). Replaces the
+/// old low-res raster imagesets — see `Image(nsImage:)` in the `MenuBarExtra`
+/// label above.
+///
+/// Two variants mirror the previous PNGs' distinction:
+/// - `active` — a **filled** lemon (sessions running)
+/// - `idle`   — the same lemon as an **outline** (nothing running)
+///
+/// The shape is a stylized lemon: a plump oval body with gently pointed tips
+/// (two cubic arcs meeting at corners), tilted so the upper tip lifts to the
+/// left, with a small leaf sprouting from the top.
+private enum LemonGlyph {
+    /// Filled lemon — shown while sessions are active.
+    static let active: NSImage = render(filled: true)
+    /// Outlined lemon — shown while idle.
+    static let idle: NSImage = render(filled: false)
+
+    /// Point size of the rendered image. The drawing handler is resolution
+    /// independent (AppKit re-invokes it per backing scale), so this is just the
+    /// logical size the menu bar lays out against — the pixels are always vector.
+    private static let pointSize: CGFloat = 18
+
+    /// Design-space side length. All path coordinates are authored in a
+    /// 100×100 box centered on the origin, then scaled to fit the image.
+    private static let designBox: CGFloat = 100
+
+    private static func render(filled: Bool) -> NSImage {
+        let image = NSImage(size: NSSize(width: pointSize, height: pointSize),
+                            flipped: false)
+        { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            draw(filled: filled, in: ctx, rect: rect)
+            return true
+        }
+        // Template => AppKit uses only the alpha mask and tints with the menu
+        // bar's vibrancy. Colors painted below are therefore irrelevant.
+        image.isTemplate = true
+        return image
+    }
+
+    private static func draw(filled: Bool, in ctx: CGContext, rect: CGRect) {
+        ctx.saveGState()
+        // Map the centered design box into the image, leaving a little margin
+        // (the leaf and stroke overshoot the body), and nudge the content down
+        // so the leaf-heavy silhouette sits optically centered.
+        let scale = (rect.width / designBox) * 0.9
+        ctx.translateBy(x: rect.midX, y: rect.midY)
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.translateBy(x: 0, y: -6)
+
+        let body = bodyPath()
+        let leaf = leafPath()
+
+        ctx.setFillColor(NSColor.black.cgColor)
+        ctx.setStrokeColor(NSColor.black.cgColor)
+
+        if filled {
+            // Two separate fills => their union, with no winding-rule holes
+            // where the leaf overlaps the body.
+            ctx.addPath(body)
+            ctx.fillPath()
+            ctx.addPath(leaf)
+            ctx.fillPath()
+        } else {
+            ctx.setLineWidth(6) // design units -> ~1pt at menu-bar size
+            ctx.setLineJoin(.round)
+            ctx.setLineCap(.round)
+            ctx.addPath(body)
+            ctx.strokePath()
+            ctx.addPath(leaf)
+            ctx.strokePath()
+        }
+        ctx.restoreGState()
+    }
+
+    /// Plump lemon body: a horizontal oval clearly wider than tall, drawn as two
+    /// cubic arcs (top + bottom) that meet at the left/right tips. The near-tip
+    /// control points sit well inboard (`tipRun`) so the curve flattens as it
+    /// reaches each tip, forming the small but visible pointed nubs that read as
+    /// a lemon rather than a pebble. Tilted a touch (`tilt`) so the left tip
+    /// lifts and the right dips. Tunables: `a`/`b` set the oval (wider = more
+    /// lemon), larger `tipRun` = sharper points, `tilt` = lean.
+    private static func bodyPath() -> CGPath {
+        let a: CGFloat = 46 // half-length (horizontal / major axis)
+        let b: CGFloat = 30 // half-width  (vertical / minor axis)
+        let tipRun: CGFloat = 27 // inboard offset of near-tip controls (↑ = sharper tips)
+        let tipRise: CGFloat = b * 4 / 3 // control bulge ≈ b / 0.75 to reach full height
+        let tilt: CGFloat = -8 // degrees of lean
+        let body = CGMutablePath()
+        body.move(to: CGPoint(x: -a, y: 0))
+        body.addCurve(to: CGPoint(x: a, y: 0),
+                      control1: CGPoint(x: -a + tipRun, y: tipRise),
+                      control2: CGPoint(x: a - tipRun, y: tipRise))
+        body.addCurve(to: CGPoint(x: -a, y: 0),
+                      control1: CGPoint(x: a - tipRun, y: -tipRise),
+                      control2: CGPoint(x: -a + tipRun, y: -tipRise))
+        body.closeSubpath()
+        var transform = CGAffineTransform(rotationAngle: tilt * .pi / 180)
+        return body.copy(using: &transform) ?? body
+    }
+
+    /// Curved almond leaf sprouting from the body's top-left shoulder: pointed at
+    /// both ends with a full belly and a gentle midrib bend, so it reads as a
+    /// real leaf and not a thin stem. Tunables: `len`/`w` set leaf size,
+    /// `angle` its lean (≈124° points up-left), `tx`/`ty` nestle it against the
+    /// body's shoulder.
+    private static func leafPath() -> CGPath {
+        let len: CGFloat = 15 // half-length
+        let w: CGFloat = 11 // half-width
+        let angle: CGFloat = 124 // degrees (up-left lean)
+        let tx: CGFloat = -24
+        let ty: CGFloat = 27
+        let leaf = CGMutablePath()
+        leaf.move(to: CGPoint(x: -len, y: 0))
+        // Outer (convex) edge — full belly sweeping to the far tip.
+        leaf.addCurve(to: CGPoint(x: len, y: 0),
+                      control1: CGPoint(x: -len * 0.45, y: w * 1.5),
+                      control2: CGPoint(x: len * 0.55, y: w * 1.2))
+        // Inner edge back to base — a touch shallower for a gentle leaf bend.
+        leaf.addCurve(to: CGPoint(x: -len, y: 0),
+                      control1: CGPoint(x: len * 0.55, y: -w * 0.9),
+                      control2: CGPoint(x: -len * 0.45, y: -w * 1.2))
+        leaf.closeSubpath()
+        var transform = CGAffineTransform(rotationAngle: angle * .pi / 180)
+            .concatenating(CGAffineTransform(translationX: tx, y: ty))
+        return leaf.copy(using: &transform) ?? leaf
     }
 }

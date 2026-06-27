@@ -73,30 +73,64 @@ struct OnboardingView: View {
     }()
 
     var body: some View {
-        ZStack(alignment: .top) {
-            GeometryReader { geo in
-                LD.lemon
-                    .frame(width: geo.size.width * progress)
-                    .frame(height: 2)
-                    .animation(LD.slide, value: step)
-            }
-            .frame(height: 2)
-            .zIndex(10)
+        VStack(spacing: 0) {
+            // Persistent header — identical anatomy to the daily popover:
+            // 🍋 wordmark on the left, the step rail in the slot the live
+            // "N running" count pill occupies once configured. Held fixed
+            // outside the content transition so only the body slides.
+            header
+            hairline
 
-            stepView
-                .transition(slideTransition)
-                .id(step.rawValue)
-                .animation(LD.slide, value: step)
+            // Only the step content animates between steps; the shell stays put.
+            ZStack {
+                stepView
+                    .transition(slideTransition)
+                    .id(step.rawValue)
+            }
+            .animation(LD.slide, value: step)
         }
-        .frame(width: 520)
-        .frame(minHeight: 580)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: LD.r14))
+        // 340pt single-column popover — inherits the warm-glass shell instead
+        // of the old 520pt light panel, so nothing resizes or recolors when
+        // OnboardingView is swapped for PopoverView on finish. A fixed height is
+        // required: OnboardingView is shown directly by LemonApp (it does NOT
+        // route through PopoverView's min/max-height ZStack), and StepShell's
+        // ScrollView is greedy — without a height floor the real menu-bar popover
+        // collapses to just the header + footer (the smoke harness forces a fixed
+        // window, so it couldn't surface this).
+        .frame(width: 340, height: 600)
+        // Popover root = window-level Lemon glass (behind-window vibrancy that
+        // bleeds the desktop + low warm tint + hairline + shadow). Mirrors
+        // PopoverView so onboarding and the daily popover read identically.
+        .lemonWindowGlass(cornerRadius: LD.r14)
+        // Dark appearance so native fields render light-on-dark; safe with the
+        // transparent backdrop (no opaque background introduced).
+        .environment(\.colorScheme, .dark)
     }
 
-    private var progress: Double {
-        let total = Double(OnboardingStep.allCases.count - 1)
-        return Double(step.rawValue) / total
+    /// Persistent wordmark + step rail header.
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(verbatim: "🍋")
+                .font(.system(size: 15))
+            Text("Lemon")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(-0.1)
+                .foregroundStyle(LD.textPrimary)
+            Spacer()
+            StepRail(total: OnboardingStep.allCases.count, current: step.rawValue)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
+        .padding(.top, 13)
+        .padding(.bottom, 11)
+        .rise(0)
+    }
+
+    /// Half-pixel warm divider — the design's `.hr`.
+    private var hairline: some View {
+        Rectangle()
+            .fill(LD.hairlineDivider)
+            .frame(height: LD.hairlineWidth)
     }
 
     @ViewBuilder
@@ -271,67 +305,87 @@ struct OnboardingView: View {
 
 // MARK: - Shared shell
 
+//
+// The per-step body, rendered inside the persistent OnboardingView header.
+// Eyebrow ("SET UP · N OF 4") + SF Pro title + warm-ramp subtitle, then the
+// step's controls in a scroll view (panes are scrollable now), then a footer
+// shelf with the ghost Back/Quit row and the one lemon CTA.
+
 private struct StepShell<Content: View>: View {
-    let emoji: String
+    let stepNumber: Int // 1-based, for the eyebrow
     let title: String
     let subtitle: String
     var backAction: (() -> Void)?
     var nextLabel: String = "Continue"
     var nextEnabled: Bool = true
+    // When true the primary CTA renders in ghost style — used when the step's
+    // real lemon already lives in the body (e.g. LEMON.md's "Draft with Claude"),
+    // so the page never shows two yellows.
+    var nextGhost: Bool = false
     var nextAction: () -> Void
-    // Optional secondary "Add another" action — renders adjacent to the
-    // primary CTA in the footer in ghost style. Used by TrackersStep so
-    // the action lives in the same row as Continue.
+    // Optional secondary action — renders adjacent to the primary CTA in the
+    // footer in ghost style. Used by TrackersStep ("Add another") + LemonMdStep
+    // ("Skip for now") so the action lives in the same row as Continue.
     var addAnotherLabel: String?
     var addAnotherEnabled: Bool = false
     var addAnotherAction: (() -> Void)?
     @ViewBuilder let content: Content
 
+    private var totalSteps: Int {
+        OnboardingStep.allCases.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: 36)
-
-            VStack(spacing: 12) {
-                Text(emoji)
-                    .font(.system(size: 38))
-                    .shadow(color: LD.lemon.opacity(0.35), radius: 14, y: 4)
-                // Editorial serif headline — same family the in-app editor
-                // uses for "HarpyRocks" / "Linear · @user". Onboarding speaks
-                // the same dialect the user will meet later.
-                Text(title)
-                    .font(.system(size: 24, weight: .bold, design: .serif))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer().frame(height: 22)
-
-            // Scrollable content region — the wizard lives inside the
-            // menu-bar popover whose total height is bounded by the
-            // screen. Without ScrollView, tall steps (Ready) push the
-            // footer past the popover's bottom edge and the primary
-            // action clips. ScrollView keeps the footer pinned and lets
-            // dense content (label rows, automation banners) scroll.
+            // Scroll the body — tall steps (Ready, Local AI) exceed the
+            // popover height; the footer stays pinned below.
             ScrollView(.vertical, showsIndicators: false) {
-                content
-                    .padding(.horizontal, 28)
-                    // 24pt editorial pause between the form body and the
-                    // action row when content is shorter than the
-                    // scroll viewport.
-                    .padding(.bottom, 24)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Set up · \(stepNumber) of \(totalSteps)".uppercased())
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.3)
+                        .foregroundStyle(LD.textTertiary)
+                        .padding(.bottom, 7)
+                        .rise(1)
+                    Text(title)
+                        .font(.system(size: 16, weight: .bold))
+                        .tracking(-0.3)
+                        .foregroundStyle(LD.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .rise(1)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(LD.textSecondary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 5)
+                        .rise(1)
+
+                    content
+                        .padding(.top, 14)
+                        .rise(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 14)
             }
 
-            HStack(spacing: 10) {
-                Button("Quit") { NSApp.terminate(nil) }
-                    .buttonStyle(GhostButtonStyle())
+            footer
+        }
+    }
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(LD.hairlineRegular)
+                .frame(height: LD.hairlineWidth)
+            HStack(spacing: 9) {
                 if let back = backAction {
                     Button("Back", action: back)
+                        .buttonStyle(GhostButtonStyle())
+                } else {
+                    Button("Quit") { NSApp.terminate(nil) }
                         .buttonStyle(GhostButtonStyle())
                 }
                 Spacer()
@@ -340,18 +394,33 @@ private struct StepShell<Content: View>: View {
                         .buttonStyle(GhostButtonStyle())
                         .disabled(!addAnotherEnabled)
                 }
-                Button(nextLabel, action: nextAction)
-                    .buttonStyle(LemonButtonStyle())
-                    .disabled(!nextEnabled)
-                    .keyboardShortcut(.return, modifiers: .command)
+                // The single lemon CTA. When disabled it reads as a neutral
+                // glass pill (the design's `.btn.disabled`) rather than a faded
+                // yellow — so the page's one yellow is only ever spent on a
+                // live action.
+                if nextGhost {
+                    Button(nextLabel, action: nextAction)
+                        .buttonStyle(GhostButtonStyle())
+                        .disabled(!nextEnabled)
+                        .keyboardShortcut(.return, modifiers: .command)
+                } else if nextEnabled {
+                    Button(nextLabel, action: nextAction)
+                        .buttonStyle(LemonButtonStyle())
+                        .keyboardShortcut(.return, modifiers: .command)
+                } else {
+                    Text(nextLabel)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LD.textTertiary)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .lemonGlass(.thin, cornerRadius: LD.r6)
+                }
             }
-            .padding(.horizontal, 28)
-            // 48pt bottom inset so the buttons clear the window's rounded
-            // corner with real breathing room. 34 was getting visually
-            // clipped by the corner radius; 48 sits the actions in a
-            // proper gallery margin.
-            .padding(.bottom, 48)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(LD.footerFill)
         }
+        .rise(3)
     }
 }
 
@@ -380,6 +449,9 @@ private struct TrackersStep: View {
     /// rather than a saved row with a half-filled form below it.
     /// `editorOpen` reflects whether the editor is currently expanded.
     @State private var editorOpen: Bool = true
+    @FocusState private var focus: Field?
+
+    enum Field: Hashable { case token, host, path, homeRepo }
 
     enum VerifyState: Equatable {
         case idle, verifying, ok, failed(String)
@@ -407,9 +479,9 @@ private struct TrackersStep: View {
 
     var body: some View {
         StepShell(
-            emoji: "🍋",
-            title: "Connect",
-            subtitle: "Link where your issues live to your local git repository.",
+            stepNumber: 1,
+            title: "Connect your workspace",
+            subtitle: "Link where your issues live, then point that identity at the repo it routes on this Mac.",
             nextLabel: continueLabel,
             nextEnabled: canContinue,
             nextAction: { commitDraftIfReadyAndContinue() },
@@ -483,7 +555,7 @@ private struct TrackersStep: View {
                     .foregroundStyle(LD.lemon)
                 Text("Add another tracker + workspace")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(LD.textPrimary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12).padding(.vertical, 12)
@@ -504,10 +576,10 @@ private struct TrackersStep: View {
                 Text("ADDED")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.4)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Text("\(savedPairs.count)")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Spacer()
             }
             VStack(spacing: 6) {
@@ -527,14 +599,14 @@ private struct TrackersStep: View {
                     Text(identity?.label ?? pair.sourceKind.displayName)
                         .font(.system(size: 11, weight: .semibold))
                     Text("·")
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(LD.textQuaternary)
                     Text(pair.surfaceId)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                 }
                 Text(pair.path)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                     .lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 0)
@@ -550,7 +622,7 @@ private struct TrackersStep: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .lemonGlass(.thin, cornerRadius: 8)
     }
 
     private func identityFor(_ pair: DraftPair) -> DraftPair.VerifiedSnapshot? {
@@ -631,16 +703,16 @@ private struct TrackersStep: View {
                 SourceMark(source: kind, size: 12)
                 Text("@\(snap.handle)")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(selected ? .primary : .secondary)
+                    .foregroundStyle(selected ? LD.textPrimary : LD.textSecondary)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
-                selected ? AnyShapeStyle(kind.accent.opacity(0.14)) : AnyShapeStyle(.primary.opacity(0.04)),
+                selected ? AnyShapeStyle(kind.accent.opacity(0.14)) : AnyShapeStyle(LD.glassThinFill),
                 in: Capsule(),
             )
             .overlay(
                 Capsule().strokeBorder(
-                    selected ? kind.accent.opacity(0.40) : Color.primary.opacity(0.08),
+                    selected ? kind.accent.opacity(0.40) : LD.hairlineThin,
                     lineWidth: 0.5,
                 ),
             )
@@ -662,7 +734,7 @@ private struct TrackersStep: View {
                 Text("Connect new")
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(.secondary))
+            .foregroundStyle(selected ? AnyShapeStyle(LD.lemon) : AnyShapeStyle(LD.textSecondary))
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
                 selected ? AnyShapeStyle(LD.lemon.opacity(0.10)) : AnyShapeStyle(Color.clear),
@@ -692,10 +764,10 @@ private struct TrackersStep: View {
                 HStack(spacing: 6) {
                     Image(systemName: "tray.full")
                         .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(LD.textTertiary)
                     Text("\(count) issue\(count == 1 ? "" : "s") assigned to this credential")
                         .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(LD.textTertiary)
                 }
             }
         }
@@ -718,7 +790,7 @@ private struct TrackersStep: View {
                 eyebrow("WORKSPACE PATH")
                 Text("drop a folder or paste a path")
                     .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
+                    .foregroundStyle(LD.textQuaternary)
                 Spacer()
             }
             pathField
@@ -731,67 +803,32 @@ private struct TrackersStep: View {
     private func eyebrow(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 9, weight: .bold))
-            .kerning(1.4)
-            .foregroundStyle(.tertiary)
+            .kerning(1.3)
+            .foregroundStyle(LD.textTertiary)
     }
 
-    /// Custom segmented control — replaces SwiftUI's `.pickerStyle(.segmented)`
-    /// which uses the system accent (default blue) and clashes with the lemon
-    /// brand. Each pill is hairline-bordered; the active one fills with the
-    /// source's editorial accent.
+    /// Source picker on the segmented control — a thin-glass track whose
+    /// selected segment thickens to the regular tier, with the width-stable
+    /// `SourceFavicon` tile per option. Picking a source resets the in-flight
+    /// credential.
     private var sourceSegmented: some View {
-        HStack(spacing: 0) {
-            sourcePill(.linear, label: "Linear")
-            sourcePill(.github, label: "GitHub")
-        }
-        .background(.primary.opacity(0.04), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5))
-    }
-
-    private func sourcePill(_ kind: IssueSource, label: String) -> some View {
-        let selected = draft.sourceKind == kind
-        return Button {
-            withAnimation(LD.snappy) {
+        LemonSegmented(values: [.linear, .github], selection: Binding(
+            get: { draft.sourceKind },
+            set: { kind in
                 draft.sourceKind = kind
                 draft.newIdentityToken = ""
                 draft.newIdentityHost = ""
                 draft.newIdentityVerified = nil
                 verifyState = .idle
-            }
-        } label: {
-            HStack(spacing: 8) {
-                // Real brand mark on the segmented picker — this is the
-                // decisive choice on the page, so it earns the full logo
-                // instead of the typographic SourceGlyph.
-                SourceMark(source: kind, size: 16)
-                    .opacity(selected ? 1 : 0.55)
-                Text(label)
+            },
+        )) { (kind: IssueSource, selected: Bool) in
+            HStack(spacing: 6) {
+                SourceFavicon(source: kind, size: 16)
+                Text(kind.displayName)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? .primary : .secondary)
+                    .foregroundStyle(selected ? LD.textPrimary : LD.textSecondary)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            // contentShape forces the entire pill (including the
-            // background fill / negative space around the icon + label)
-            // into the hit-test region. Without this, only the actual
-            // text + mark are clickable and the empty padding reads as
-            // dead space.
-            .contentShape(Capsule())
-            .background(
-                selected
-                    ? AnyShapeStyle(kind.accent.opacity(0.14))
-                    : AnyShapeStyle(Color.clear),
-                in: Capsule(),
-            )
-            .overlay(
-                Capsule().strokeBorder(
-                    selected ? kind.accent.opacity(0.40) : Color.clear,
-                    lineWidth: 0.5,
-                ),
-            )
-            .padding(2)
         }
-        .buttonStyle(.plain)
     }
 
     private var tokenField: some View {
@@ -800,34 +837,23 @@ private struct TrackersStep: View {
         // `ghp_…`) tells you which credential format belongs here, and
         // the "create one ↗" link is right-aligned next to the field
         // for low-friction handoff to the provider.
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 SecureField(draft.sourceKind == .linear ? "lin_api_…" : "ghp_…",
                             text: $draft.newIdentityToken)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, design: .monospaced))
-                    .padding(.vertical, 7).padding(.horizontal, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
-                    )
+                    .focused($focus, equals: .token)
+                    .lemonField(focused: focus == .token)
                     .onChange(of: draft.newIdentityToken) { _, _ in
                         draft.newIdentityVerified = nil
                         verifyState = .idle
                     }
-                Link(destination: tokenProviderURL) {
-                    HStack(spacing: 3) {
-                        Text("create one")
-                            .font(.system(size: 10, weight: .medium))
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                    .foregroundStyle(.tertiary)
-                }
+                InlineLink(title: "create one", url: tokenProviderURL)
             }
             Text(tokenProviderHint)
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
+                .font(.system(size: 10))
+                .foregroundStyle(LD.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -863,11 +889,8 @@ private struct TrackersStep: View {
         TextField("github.com", text: $draft.newIdentityHost)
             .textFieldStyle(.plain)
             .font(.system(size: 12, design: .monospaced))
-            .padding(.vertical, 7).padding(.horizontal, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
-            )
+            .focused($focus, equals: .host)
+            .lemonField(focused: focus == .host)
     }
 
     private var verifyRow: some View {
@@ -886,20 +909,12 @@ private struct TrackersStep: View {
                     Text(verifyState == .verifying ? "Verifying…" : "Verify & sync")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundStyle(canVerify ? AnyShapeStyle(LD.citrus) : AnyShapeStyle(.tertiary))
+                // Neutral glass affordance — yellow is reserved for the footer
+                // CTA, so Verify reads as a quiet inline action that brightens
+                // its text when armed.
+                .foregroundStyle(canVerify ? LD.textPrimary : LD.textTertiary)
                 .padding(.horizontal, 14).padding(.vertical, 7)
-                .background(
-                    canVerify
-                        ? AnyShapeStyle(LD.lemon)
-                        : AnyShapeStyle(Color.primary.opacity(0.06)),
-                    in: Capsule(),
-                )
-                .overlay(
-                    Capsule().strokeBorder(
-                        canVerify ? Color.clear : Color.primary.opacity(0.10),
-                        lineWidth: 0.5,
-                    ),
-                )
+                .lemonGlass(canVerify ? .regular : .thin, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .disabled(!canVerify)
@@ -979,20 +994,17 @@ private struct TrackersStep: View {
                 SourceGlyph(source: draft.sourceKind, size: 10)
                 Text(draft.surfaceId.isEmpty ? placeholder : draft.surfaceId)
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(draft.surfaceId.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .foregroundStyle(draft.surfaceId.isEmpty ? LD.textSecondary : LD.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .contentShape(RoundedRectangle(cornerRadius: 8))
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5),
-            )
-            .opacity(enabled ? 1 : 0.55)
+            .lemonField(focused: false)
+            .contentShape(RoundedRectangle(cornerRadius: LD.r6))
+            // Disabled (pre-verify) state must stay legible — the placeholder
+            // tells the user what to do next, so don't dim it into the glass.
+            .opacity(enabled ? 1 : 0.82)
         }
         .menuStyle(.borderlessButton)
         .disabled(!enabled)
@@ -1009,11 +1021,8 @@ private struct TrackersStep: View {
             TextField("/path/to/repo", text: $draft.path)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
-                .padding(.vertical, 7).padding(.horizontal, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
-                )
+                .focused($focus, equals: .path)
+                .lemonField(focused: focus == .path)
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     for p in providers {
                         _ = p.loadObject(ofClass: URL.self) { url, _ in
@@ -1032,24 +1041,21 @@ private struct TrackersStep: View {
             Toggle(isOn: $draft.allReposInFolder) {
                 Text("All repos in this folder")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
             }
             .toggleStyle(.checkbox)
 
             if draft.allReposInFolder {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("HOME SUBDIR — optional")
                         .font(.system(size: 9, weight: .bold))
-                        .kerning(1.4)
-                        .foregroundStyle(.tertiary)
+                        .kerning(1.3)
+                        .foregroundStyle(LD.textTertiary)
                     TextField("e.g. memory", text: $draft.homeRepo)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
-                        .padding(.vertical, 7).padding(.horizontal, 9)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5),
-                        )
+                        .focused($focus, equals: .homeRepo)
+                        .lemonField(focused: focus == .homeRepo)
                 }
                 .padding(.leading, 20)
             }
@@ -1140,395 +1146,6 @@ private struct TrackersStep: View {
     }
 }
 
-// MARK: - Step 1: Linear
-
-private struct LinearStep: View {
-    @Binding var apiKey: String
-    @Binding var userId: String
-    @Binding var userName: String
-    let onNext: () -> Void
-
-    @State private var isVerifying = false
-    @State private var verifyError: String?
-
-    private var canContinue: Bool {
-        !userId.isEmpty
-    }
-
-    var body: some View {
-        StepShell(
-            emoji: "🍋",
-            title: "Connect Linear",
-            subtitle: "Lemon polls your Linear queue for issues tagged 🍋\nand works on them automatically.",
-            nextEnabled: canContinue,
-            nextAction: onNext,
-        ) {
-            VStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 4) {
-                        Text("Linear API Key")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Link("↗", destination: URL(string: "https://linear.app/settings/api")!)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                    SecureField("lin_api_...", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12, design: .monospaced))
-                        .onChange(of: apiKey) { _, new in
-                            // Pasted keys frequently arrive with trailing newlines or
-                            // surrounding whitespace from clipboard helpers; strip them
-                            // before they poison the Authorization header.
-                            let cleaned = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if cleaned != new { apiKey = cleaned }
-                            userId = ""; userName = ""; verifyError = nil
-                        }
-                }
-
-                Button {
-                    verify()
-                } label: {
-                    HStack(spacing: 8) {
-                        if isVerifying { ProgressView().scaleEffect(0.65) }
-                        else { Image(systemName: "bolt.fill") }
-                        Text(isVerifying ? "Verifying…" : "Verify API Key")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(LemonButtonStyle())
-                .disabled(apiKey.isEmpty || isVerifying)
-
-                if !userName.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(LD.statusDone)
-                        Text("Connected as \(userName)")
-                            .font(.system(size: 13, weight: .medium))
-                        Spacer()
-                    }
-                    .padding(12)
-                    .background(LD.statusDone.opacity(0.08), in: RoundedRectangle(cornerRadius: LD.r10))
-                }
-
-                if let err = verifyError {
-                    Text(err)
-                        .font(.system(size: 10))
-                        .foregroundStyle(LD.coral)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func verify() {
-        isVerifying = true
-        verifyError = nil
-        let key = apiKey
-        Task.detached {
-            Logger.onboarding.info("Verifying Linear API key")
-            let client = LinearClient()
-            do {
-                let viewer = try await client.fetchViewer(apiKey: key)
-                Logger.onboarding.info("Verified as \(viewer.name) (\(viewer.email))")
-                await MainActor.run {
-                    userId = viewer.id
-                    userName = viewer.name
-                    isVerifying = false
-                }
-            } catch {
-                Logger.onboarding.error("Linear verify failed: \(error)")
-                await MainActor.run {
-                    verifyError = error.localizedDescription
-                    isVerifying = false
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Step 2: Workspace
-
-private struct WorkspaceStep: View {
-    let apiKey: String
-    @Binding var repos: [WorkspaceRepo]
-    let onNext: () -> Void
-    let onBack: () -> Void
-
-    @State private var teams: [LinearClient.LinearTeam] = []
-    @State private var teamsLoading = true
-    @State private var toolStatus: [String: ToolCheck] = [:]
-    @State private var checkTimer: Timer?
-
-    struct ToolCheck {
-        let present: Bool
-        let hint: String? // non-nil only when not present or needs attention
-    }
-
-    private let requiredTools: [(name: String, installHint: String)] = [
-        ("git", "Included with Xcode Command Line Tools"),
-        ("gh", "brew install gh  →  gh auth login"),
-        ("claude", "Install from claude.ai/code"),
-    ]
-
-    private var reposValid: Bool {
-        repos.contains { !$0.path.isEmpty && !$0.issuePrefix.isEmpty }
-    }
-
-    private var toolsOK: Bool {
-        requiredTools.allSatisfy { toolStatus[$0.name]?.present == true }
-    }
-
-    private var canContinue: Bool {
-        reposValid && toolsOK
-    }
-
-    var body: some View {
-        StepShell(
-            emoji: "🗂️",
-            title: "Your Workspace",
-            subtitle: "Map your Linear teams to local repos.",
-            backAction: onBack,
-            nextEnabled: canContinue,
-            nextAction: onNext,
-        ) {
-            VStack(spacing: 14) {
-                prereqBar
-                repoList
-            }
-        }
-        .onAppear {
-            loadTeams()
-            runToolChecks()
-            checkTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
-                Task { @MainActor in runToolChecks() }
-            }
-        }
-        .onDisappear { checkTimer?.invalidate() }
-    }
-
-    // MARK: - Prereq bar (compact horizontal pills)
-
-    private var prereqBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("PREREQUISITES")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(0.8)
-                .foregroundStyle(.tertiary)
-
-            HStack(spacing: 8) {
-                ForEach(requiredTools, id: \.name) { tool in
-                    let check = toolStatus[tool.name]
-                    HStack(spacing: 5) {
-                        if check == nil {
-                            ProgressView().scaleEffect(0.5).frame(width: 12, height: 12)
-                        } else if check!.present {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(LD.statusDone)
-                                .font(.system(size: 11))
-                        } else {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(LD.coral)
-                                .font(.system(size: 11))
-                        }
-                        Text(tool.name)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.primary.opacity(0.05), in: Capsule())
-                    .help(check?.hint ?? (check?.present == false ? tool.installHint : ""))
-                }
-                Spacer()
-            }
-
-            // Show hint for first failing tool
-            if let failing = requiredTools.first(where: { toolStatus[$0.name]?.present == false }) {
-                Text(toolStatus[failing.name]?.hint ?? failing.installHint)
-                    .font(.system(size: 10))
-                    .foregroundStyle(LD.coral)
-            }
-        }
-        .padding(12)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-    }
-
-    // MARK: - Repo list
-
-    private var repoList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("REPOS")
-                .font(.system(size: 9, weight: .bold))
-                .kerning(0.8)
-                .foregroundStyle(.tertiary)
-
-            ForEach($repos) { $repo in
-                OnboardingRepoRow(repo: $repo, teams: teams, teamsLoading: teamsLoading) {
-                    if repos.count > 1 { repos.removeAll { $0.id == repo.id } }
-                }
-            }
-
-            Button {
-                repos.append(WorkspaceRepo(issuePrefix: "", path: ""))
-            } label: {
-                Label("Add another repo", systemImage: "plus")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .buttonStyle(GhostButtonStyle())
-        }
-    }
-
-    // MARK: - Load teams from Linear
-
-    private func loadTeams() {
-        guard !apiKey.isEmpty else { teamsLoading = false; return }
-        Task.detached {
-            let client = LinearClient()
-            let fetched = await (try? client.fetchTeams(apiKey: apiKey)) ?? []
-            Logger.onboarding.info("Fetched \(fetched.count) Linear teams")
-            await MainActor.run {
-                teams = fetched
-                teamsLoading = false
-                // Pre-fill prefix if we only have one team and one row
-                if fetched.count == 1, repos.count == 1, repos[0].issuePrefix.isEmpty {
-                    repos[0].issuePrefix = fetched[0].key
-                }
-            }
-        }
-    }
-
-    // MARK: - Tool checks (login shell so PATH includes brew/npm/etc.)
-
-    private func runToolChecks() {
-        for tool in requiredTools {
-            Task.detached {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                p.arguments = ["-l", "-c", "cd /tmp && which \(tool.name)"]
-                p.standardOutput = Pipe()
-                p.standardError = Pipe()
-                try? p.run(); p.waitUntilExit()
-                var present = p.terminationStatus == 0
-
-                var hint: String? = nil
-                if present, tool.name == "gh" {
-                    let auth = Process()
-                    auth.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                    auth.arguments = ["-l", "-c", "cd /tmp && gh auth status"]
-                    auth.standardOutput = Pipe()
-                    auth.standardError = Pipe()
-                    try? auth.run(); auth.waitUntilExit()
-                    if auth.terminationStatus != 0 {
-                        present = false
-                        hint = "gh found but not authenticated — run: gh auth login"
-                    }
-                }
-
-                Logger.onboarding.debug("Tool check \(tool.name): present=\(present)")
-                await MainActor.run {
-                    toolStatus[tool.name] = ToolCheck(present: present, hint: hint)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Onboarding repo row
-
-private struct OnboardingRepoRow: View {
-    @Binding var repo: WorkspaceRepo
-    let teams: [LinearClient.LinearTeam]
-    let teamsLoading: Bool
-    let onDelete: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                // Team / prefix row
-                HStack(spacing: 8) {
-                    Text("Team")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
-
-                    if teamsLoading {
-                        ProgressView().scaleEffect(0.6)
-                    } else if teams.isEmpty {
-                        TextField("e.g. HRP", text: $repo.issuePrefix)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 11, design: .monospaced))
-                            .frame(width: 90)
-                    } else {
-                        Picker("", selection: $repo.issuePrefix) {
-                            Text("Select…").tag("")
-                            ForEach(teams) { team in
-                                Text("\(team.key) — \(team.name)").tag(team.key)
-                            }
-                        }
-                        .labelsHidden()
-                        Spacer()
-                    }
-                }
-
-                // Path row
-                HStack(spacing: 8) {
-                    Text(repo.allReposInFolder ? "Folder" : "Repo")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
-                    TextField(repo.allReposInFolder ? "/path/to/projects" : "/path/to/repo", text: $repo.path)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11, design: .monospaced))
-                        .onChange(of: repo.path) { _, new in
-                            let cleaned = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if cleaned != new { repo.path = cleaned }
-                        }
-                }
-
-                // "All repos in folder" toggle
-                HStack(spacing: 8) {
-                    Spacer().frame(width: 44)
-                    Toggle(isOn: $repo.allReposInFolder) {
-                        Text("All repos in this folder")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    .toggleStyle(.checkbox)
-                    Spacer()
-                }
-
-                // Home repo (only relevant in multi-repo mode)
-                if repo.allReposInFolder {
-                    HStack(spacing: 8) {
-                        Text("Home")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 36, alignment: .trailing)
-                        TextField("e.g. memory", text: $repo.homeRepo)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 11, design: .monospaced))
-                        Text("optional")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .help("Subdirectory where Claude launches. Create LEMON.md there with repo navigation instructions for this team.")
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-
-            Button(action: onDelete) {
-                Image(systemName: "minus.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(LD.coral.opacity(0.7))
-            }
-            .buttonStyle(.borderless)
-            .padding(.top, 2)
-        }
-        .padding(10)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-    }
-}
-
 // MARK: - Step 4: Local AI
 
 enum LocalAI {
@@ -1593,6 +1210,20 @@ private struct LocalAIStep: View {
             }
         }
 
+        var shortName: String {
+            switch self {
+            case .e4b: "4B"
+            case .e2b: "2B"
+            }
+        }
+
+        var footprint: String {
+            switch self {
+            case .e4b: "~5.2 GB"
+            case .e2b: "~3.6 GB"
+            }
+        }
+
         var approxMB: Int {
             self == .e4b ? 5200 : 3600
         }
@@ -1633,9 +1264,9 @@ private struct LocalAIStep: View {
 
     var body: some View {
         StepShell(
-            emoji: "🤖",
-            title: "Local AI",
-            subtitle: "A small on-device model resolves obvious session prompts\nwithout interrupting you.",
+            stepNumber: 3,
+            title: "Add the on-device model",
+            subtitle: "A small Gemma resolves the obvious prompts so a session doesn’t stall on you.",
             backAction: onBack,
             nextLabel: "Continue",
             nextEnabled: canEnable,
@@ -1681,11 +1312,19 @@ private struct LocalAIStep: View {
     // MARK: - Prereq bar
 
     private var prereqBar: some View {
-        HStack(spacing: 6) {
-            prereqPill("tmux", present: toolStatus["tmux"], hint: LocalAI.installCommand)
-            prereqPill("hf", present: toolStatus["hf"], hint: LocalAI.installCommand)
-            hfLoginPill
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 7) {
+            Text("REQUIREMENTS")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.3)
+                .foregroundStyle(LD.textTertiary)
+            HStack(spacing: 6) {
+                DependencyChip(label: "tmux", status: chipStatus(toolStatus["tmux"]))
+                    .help(toolStatus["tmux"] == false ? LocalAI.installCommand : "")
+                DependencyChip(label: "hf", status: chipStatus(toolStatus["hf"]))
+                    .help(toolStatus["hf"] == false ? LocalAI.installCommand : "")
+                hfLoginPill
+                Spacer(minLength: 0)
+            }
             if let hint = missingHint {
                 Text(hint)
                     .font(.system(size: 10))
@@ -1693,9 +1332,14 @@ private struct LocalAIStep: View {
                     .lineLimit(1).truncationMode(.middle)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+    }
+
+    private func chipStatus(_ present: Bool?) -> DependencyChip.Status {
+        switch present {
+        case .none: .loading
+        case .some(true): .ok
+        case .some(false): .attention
+        }
     }
 
     @ViewBuilder
@@ -1704,51 +1348,16 @@ private struct LocalAIStep: View {
         case .unknown:
             EmptyView()
         case let .loggedIn(user):
-            HStack(spacing: 4) {
-                Image(systemName: "person.circle.fill")
-                    .foregroundStyle(LD.statusDone).font(.system(size: 10))
-                Text("hf: \(user)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(.primary.opacity(0.04), in: Capsule())
+            DependencyChip(label: "hf · \(user)", status: .ok)
         case .notLoggedIn:
-            HStack(spacing: 4) {
-                Image(systemName: "person.crop.circle.badge.questionmark")
-                    .foregroundStyle(.secondary).font(.system(size: 10))
-                Text("hf: signed out")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(.primary.opacity(0.04), in: Capsule())
-            .help(Text(verbatim: "Run 'hf auth login' if model access requires it."))
+            DependencyChip(label: "hf · sign in", status: .attention)
+                .help(Text(verbatim: "Run 'hf auth login' if model access requires it."))
         }
     }
 
     private var missingHint: String? {
         guard toolStatus["tmux"] == false || toolStatus["hf"] == false else { return nil }
         return LocalAI.installCommand
-    }
-
-    private func prereqPill(_ name: String, present: Bool?, hint: String) -> some View {
-        HStack(spacing: 5) {
-            if present == nil {
-                ProgressView().scaleEffect(0.5).frame(width: 12, height: 12)
-            } else if present == true {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(LD.statusDone).font(.system(size: 11))
-            } else {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(LD.coral).font(.system(size: 11))
-            }
-            Text(name).font(.system(size: 11, weight: .medium, design: .monospaced))
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(.primary.opacity(0.05), in: Capsule())
-        .help(present == false ? hint : "")
     }
 
     // MARK: - Model download section
@@ -1759,7 +1368,7 @@ private struct LocalAIStep: View {
                 Text("GEMMA MODEL")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(0.8)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Spacer()
                 if case .done = downloadState {
                     statusDot(.done, "ready")
@@ -1772,32 +1381,32 @@ private struct LocalAIStep: View {
 
             switch downloadState {
             case .idle:
-                HStack(spacing: 8) {
-                    Picker("", selection: $modelSize) {
-                        ForEach(ModelSize.allCases) { size in
-                            Text(size.label).tag(size)
-                        }
+                LemonSegmented(values: ModelSize.allCases, selection: $modelSize) { (size: ModelSize, selected: Bool) in
+                    HStack(spacing: 6) {
+                        Text(size.shortName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(selected ? LD.textPrimary : LD.textSecondary)
+                        Text(size.footprint)
+                            .font(.system(size: 11))
+                            .foregroundStyle(LD.textTertiary)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
-
-                    Spacer(minLength: 4)
-
-                    Button {
-                        startDownload()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.down.circle").font(.system(size: 11))
-                            Text("Download").font(.system(size: 11, weight: .semibold))
-                        }
-                    }
-                    .buttonStyle(LemonButtonStyle())
-                    .disabled(!hfOK)
                 }
+
+                Button {
+                    startDownload()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle").font(.system(size: 12))
+                        Text("Download model & runner").font(.system(size: 12, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(LemonButtonStyle())
+                .disabled(!hfOK)
+
                 Text(modelSize.hfId)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                     .lineLimit(1).truncationMode(.middle)
 
             case .running:
@@ -1812,7 +1421,7 @@ private struct LocalAIStep: View {
             case .done:
                 Text(modelDir)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
 
             case let .failed(err):
@@ -1820,7 +1429,7 @@ private struct LocalAIStep: View {
                     ScrollView {
                         Text(err)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(LD.textSecondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -1832,7 +1441,7 @@ private struct LocalAIStep: View {
             }
         }
         .padding(10)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thin, cornerRadius: LD.r10)
     }
 
     private enum DotState { case running, done, failed }
@@ -1849,7 +1458,7 @@ private struct LocalAIStep: View {
             }
             Text(label)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
         }
     }
 
@@ -1861,7 +1470,7 @@ private struct LocalAIStep: View {
                 Text("SWIFTLM RUNNER")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(0.8)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(LD.textTertiary)
                 Spacer()
                 switch swiftLMState {
                 case .done: statusDot(.done, "ready")
@@ -1876,18 +1485,26 @@ private struct LocalAIStep: View {
                 HStack(spacing: 8) {
                     Text("SharpAI/SwiftLM b648 · macOS arm64")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
-                    Button {
-                        startSwiftLMDownload()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.down.circle").font(.system(size: 11))
-                            Text("Download").font(.system(size: 11, weight: .semibold))
-                        }
+                    // Every step keeps at least one yellow. While the model is
+                    // still pending, its "Download model & runner" lemon button
+                    // owns the step's single yellow and this stays neutral. Once
+                    // the model is done, this runner pull IS the primary action
+                    // (Continue is disabled until it lands), so it carries the
+                    // yellow — otherwise the step would show no CTA at all.
+                    let runnerLabel = HStack(spacing: 5) {
+                        Image(systemName: "arrow.down.circle").font(.system(size: 11))
+                        Text("Download").font(.system(size: 11, weight: .semibold))
                     }
-                    .buttonStyle(LemonButtonStyle())
+                    if downloadState == .done {
+                        Button(action: startSwiftLMDownload) { runnerLabel }
+                            .buttonStyle(LemonButtonStyle())
+                    } else {
+                        Button(action: startSwiftLMDownload) { runnerLabel }
+                            .buttonStyle(GhostButtonStyle())
+                    }
                 }
 
             case .running:
@@ -1895,7 +1512,7 @@ private struct LocalAIStep: View {
                     ProgressView().scaleEffect(0.6).frame(height: 10)
                     Text("github.com/SharpAI/SwiftLM")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                     Spacer()
                     Button("Cancel") { cancelSwiftLMDownload() }
                         .buttonStyle(GhostButtonStyle())
@@ -1905,7 +1522,7 @@ private struct LocalAIStep: View {
             case .done:
                 Text(swiftLMPath)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
 
             case let .failed(err):
@@ -1913,7 +1530,7 @@ private struct LocalAIStep: View {
                     ScrollView {
                         Text(err)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(LD.textSecondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -1925,7 +1542,7 @@ private struct LocalAIStep: View {
             }
         }
         .padding(10)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thin, cornerRadius: LD.r10)
     }
 
     // MARK: - Actions
@@ -2180,9 +1797,9 @@ private struct ReadyStep: View {
 
     var body: some View {
         StepShell(
-            emoji: "✅",
-            title: "You're all set",
-            subtitle: "Lemon is ready. Tag any issue with the 🍋 label\nand Lemon will pick it up within 60 seconds.",
+            stepNumber: 4,
+            title: "You’re all set",
+            subtitle: "This is the loop you’ll drive from your tracker.",
             backAction: onBack,
             nextLabel: "Start Lemon",
             nextEnabled: canStart,
@@ -2285,16 +1902,21 @@ private struct ReadyStep: View {
                     Text("\(app) automation denied")
                         .font(.system(size: 12, weight: .semibold))
                     Text("Lemon needs to open \(app) to show running sessions. Without this, sessions still run (detached tmux) but no window appears.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11)).foregroundStyle(LD.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button {
                         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
                         NSWorkspace.shared.open(url)
                     } label: {
-                        Text("Open Privacy & Security → Automation")
-                            .font(.system(size: 11, weight: .medium))
+                        HStack(spacing: 3) {
+                            Text("Open Privacy & Security → Automation")
+                                .font(.system(size: 11, weight: .medium))
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundStyle(LD.textSecondary)
                     }
-                    .buttonStyle(.link)
+                    .buttonStyle(.plain)
                     .padding(.top, 2)
                 }
                 Spacer()
@@ -2315,7 +1937,7 @@ private struct ReadyStep: View {
                     .font(.system(size: 11, weight: .semibold))
                 Text("Add a GitHub PAT + an owner/repo pair in Settings after launch. Same 🍋 labels, same comment loop.")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
@@ -2334,11 +1956,11 @@ private struct ReadyStep: View {
                 case .pending:
                     ProgressView().scaleEffect(0.6).frame(width: 14, height: 14)
                     Text("Preparing 🍋 labels…")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11)).foregroundStyle(LD.textSecondary)
                 case .creating:
                     ProgressView().scaleEffect(0.6).frame(width: 14, height: 14)
                     Text("Creating 🍋 labels in your trackers…")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11)).foregroundStyle(LD.textSecondary)
                 case let .done(count):
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(LD.statusDone).font(.system(size: 13))
@@ -2352,7 +1974,7 @@ private struct ReadyStep: View {
                             .font(.system(size: 11, weight: .semibold))
                         Text(err)
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(LD.textSecondary)
                             .lineLimit(2).truncationMode(.tail)
                     }
                     Spacer(minLength: 8)
@@ -2365,7 +1987,8 @@ private struct ReadyStep: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
 
-            Divider().padding(.horizontal, 8)
+            Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
+                .padding(.horizontal, 8)
 
             // Workflow pipeline — teaches lifecycle even while loading
             VStack(spacing: 0) {
@@ -2379,7 +2002,7 @@ private struct ReadyStep: View {
             .opacity(labelsReady ? 1.0 : 0.45)
             .animation(LD.smooth, value: labelsReady)
         }
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thin, cornerRadius: LD.r10)
     }
 
     private func workflowRow(_ emoji: String, _ name: String?, _ action: String, _ detail: String, _ color: Color, _ isLast: Bool) -> some View {
@@ -2390,7 +2013,7 @@ private struct ReadyStep: View {
                     .frame(width: 3, height: 14)
                 if !isLast {
                     Rectangle()
-                        .fill(.primary.opacity(0.1))
+                        .fill(LD.textPrimary.opacity(0.1))
                         .frame(width: 1, height: 16)
                 }
             }
@@ -2402,6 +2025,7 @@ private struct ReadyStep: View {
                         Text(emoji).font(.system(size: 9))
                         if let n = name {
                             Text(n).font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(LD.textSecondary)
                         }
                     }
                     .padding(.horizontal, 5).padding(.vertical, 2)
@@ -2409,15 +2033,17 @@ private struct ReadyStep: View {
 
                     Image(systemName: "arrow.right")
                         .font(.system(size: 7, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(LD.textTertiary)
 
+                    // Status lives in the rail + tag wash; the action word stays
+                    // warm-neutral so the legend reads as one color family.
                     Text(action)
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(color)
+                        .foregroundStyle(LD.textPrimary)
                 }
                 Text(detail)
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
             }
             Spacer()
         }
@@ -2439,11 +2065,11 @@ private struct ReadyStep: View {
             if !checked {
                 HStack(spacing: 8) {
                     ProgressView().scaleEffect(0.65)
-                    Text(pendingText).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(pendingText).font(.system(size: 12)).foregroundStyle(LD.textSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.thin, cornerRadius: LD.r10)
             } else if claudeAccount != nil {
                 HStack(spacing: 10) {
                     Image(systemName: successIcon).foregroundStyle(successColor).font(.system(size: 16))
@@ -2457,7 +2083,7 @@ private struct ReadyStep: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LD.coral).font(.system(size: 16))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(warningTitle).font(.system(size: 12, weight: .semibold))
-                        Text(warningDetail).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(warningDetail).font(.system(size: 11)).foregroundStyle(LD.textSecondary)
                     }
                     Spacer()
                 }
@@ -2471,15 +2097,19 @@ private struct ReadyStep: View {
 
     private var launchAtLoginRow: some View {
         HStack(spacing: 10) {
-            iconBox("power.circle.fill", tint: launchAtLogin ? LD.lemon : .secondary)
+            // Neutral icon — state is carried by the green switch, keeping the
+            // page's one yellow on the footer CTA.
+            iconBox("power.circle.fill", tint: launchAtLogin ? LD.statusDone : LD.textTertiary)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Launch at login").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LD.textPrimary)
                 Text("Recommended if Lemon lives on a Mac that stays on")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(LD.textSecondary)
             }
             Spacer()
             Toggle("", isOn: $launchAtLogin)
                 .labelsHidden()
+                .tint(LD.statusDone)
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {
                         if enabled { try SMAppService.mainApp.register() }
@@ -2491,7 +2121,7 @@ private struct ReadyStep: View {
                 }
         }
         .padding(14)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thin, cornerRadius: LD.r10)
     }
 
     private func iconBox(_ systemName: String, tint: Color) -> some View {
@@ -2643,11 +2273,16 @@ private struct LemonMdStep: View {
         return false
     }
 
+    private var isIdle: Bool {
+        if case .idle = proposalState { return true }
+        return false
+    }
+
     var body: some View {
         StepShell(
-            emoji: "📋",
-            title: "🍋 Instructions",
-            subtitle: "LEMON.md tells Lemon how your codebase works.\nClaude will draft one — edit before saving.",
+            stepNumber: 2,
+            title: "Teach Lemon your codebase",
+            subtitle: "LEMON.md is the brief Claude reads before every task. Draft one — edit before it saves.",
             backAction: onBack,
             // Footer reflects the actual state:
             //  - draft ready, unsaved → Save (primary, lemon) + Skip for now (secondary, grey)
@@ -2655,6 +2290,10 @@ private struct LemonMdStep: View {
             //  - idle/analyzing/failed → Skip for now (primary, lemon)
             nextLabel: isReadyToSave ? "Save" : (saved ? "Continue" : "Skip for now"),
             nextEnabled: true,
+            // In the idle state the lemon already lives on the "Draft with
+            // Claude" button in the body, so the footer "Skip for now" goes
+            // ghost — one yellow per step.
+            nextGhost: isIdle,
             nextAction: isReadyToSave ? { save() } : onNext,
             addAnotherLabel: isReadyToSave ? "Skip for now" : nil,
             addAnotherEnabled: isReadyToSave,
@@ -2680,7 +2319,7 @@ private struct LemonMdStep: View {
                             Text("Saved").font(.system(size: 11, weight: .semibold))
                             Text(path)
                                 .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(LD.textSecondary)
                                 .lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()
@@ -2696,38 +2335,73 @@ private struct LemonMdStep: View {
     // MARK: - State views
 
     private var idleView: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             if let path = lemonMdPath {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.text")
-                        .font(.system(size: 11)).foregroundStyle(LD.lemon)
+                        .font(.system(size: 11)).foregroundStyle(LD.textSecondary)
                     Text(path)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                         .lineLimit(1).truncationMode(.middle)
                     Spacer()
                 }
                 .padding(10)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.thin, cornerRadius: LD.r10)
             }
 
+            // Draft preview — the machine surface is opaque console, not glass.
+            Text("DRAFT PREVIEW")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.3)
+                .foregroundStyle(LD.textTertiary)
+            consolePreview
+
+            // The step's one lemon — Claude is the real primary action here.
             Button {
                 analyze()
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
-                    Text("Propose LEMON.md with Claude")
+                    Text("Draft with Claude")
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(LemonButtonStyle())
             .disabled(primaryRepo == nil)
 
-            Text("Claude reviews your repo structure and writes\noperating instructions Lemon reads before each task.")
+            Text("Claude reads your repo and proposes one. You edit before it saves.")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+                .foregroundStyle(LD.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A representative LEMON.md skeleton, rendered on the opaque console
+    /// surface — mirrors the design's `.code` block.
+    private var consolePreview: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            consoleLine("# ", "project — build & test")
+            consoleLine("$ ", "make build && make test", code: true)
+            consoleLine("# ", "conventions")
+            consoleLine("- ", "branch from origin/main", plain: true)
+            consoleLine("- ", "never touch infra/", plain: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11).padding(.vertical, 10)
+        .lemonGlass(.opaque, cornerRadius: LD.r6)
+    }
+
+    private func consoleLine(_ prefix: String, _ body: String, code: Bool = false, plain: Bool = false) -> some View {
+        HStack(spacing: 0) {
+            Text(prefix)
+                .foregroundStyle(LD.consoleText.opacity(0.45))
+            Text(body)
+                .foregroundStyle(LD.consoleText.opacity(plain ? 0.78 : code ? 0.92 : 0.78))
+        }
+        .font(.system(size: 10.5, design: .monospaced))
+        .lineLimit(1)
     }
 
     private var analyzingView: some View {
@@ -2737,12 +2411,12 @@ private struct LemonMdStep: View {
                 Text("Analyzing your codebase…")
                     .font(.system(size: 12, weight: .semibold))
                 Text("Reviewing structure, README, and recent commits")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .font(.system(size: 10)).foregroundStyle(LD.textSecondary)
             }
             Spacer()
         }
         .padding(14)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thin, cornerRadius: LD.r10)
     }
 
     private var editorView: some View {
@@ -2750,11 +2424,11 @@ private struct LemonMdStep: View {
             HStack(spacing: 6) {
                 Text("LEMON.md")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
                 if let path = lemonMdPath {
                     Text("→ \(path)")
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(LD.textQuaternary)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 Spacer()
@@ -2763,11 +2437,12 @@ private struct LemonMdStep: View {
             }
             TextEditor(text: $editedContent)
                 .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(LD.consoleText)
+                .tint(LD.lemondrop)
                 .frame(minHeight: 200, maxHeight: 260)
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-                .overlay(RoundedRectangle(cornerRadius: LD.r10).stroke(.primary.opacity(0.08), lineWidth: 1))
+                .lemonGlass(.opaque, cornerRadius: LD.r6)
         }
     }
 
@@ -2777,7 +2452,7 @@ private struct LemonMdStep: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LD.coral)
                 Text("Analysis failed").font(.system(size: 12, weight: .semibold))
             }
-            Text(err).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(err).font(.system(size: 10)).foregroundStyle(LD.textSecondary)
             Button("Try Again") { analyze() }.buttonStyle(GhostButtonStyle())
         }
         .padding(14)
