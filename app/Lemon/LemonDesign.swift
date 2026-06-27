@@ -16,10 +16,10 @@ enum LD {
     static let linearMark = Color(r: 0.918, g: 0.682, b: 0.227) // #EAAE3A — warmer than lemon, distinct
     static let githubMark = Color(r: 0.420, g: 0.820, b: 0.500) // brightened statusDone for chip glyphs
 
-    // Linear's real brand ink — periwinkle. Source of truth for both the
-    // SourceFavicon Linear mark and the selected-Linear-card tint + ring, so
-    // the favicon and the card wash read as one coherent hue. (linearMark above
-    // stays amber — it's the typographic SourceGlyph/IssueSource.accent, separate.)
+    /// Linear's real brand ink — periwinkle. Source of truth for both the
+    /// SourceFavicon Linear mark and the selected-Linear-card tint + ring, so
+    /// the favicon and the card wash read as one coherent hue. (linearMark above
+    /// stays amber — it's the typographic SourceGlyph/IssueSource.accent, separate.)
     static let linearInk = Color(r: 157 / 255, g: 164 / 255, b: 245 / 255) // #9DA4F5
 
     // Status palette
@@ -50,20 +50,22 @@ enum LD {
     static let slide = Animation.easeInOut(duration: 0.30)
 
     // MARK: Glass material fills
+
     //
     // Warm-dark glass at four thicknesses (see design/ui_kits/lemon/materials.html).
     // Each is a baked Color carried at the design's opacity; the SwiftUI Material
     // substrate underneath supplies the actual backdrop blur where applicable.
     static let glassThinFill = Color(r: 34 / 255, g: 28 / 255, b: 18 / 255, a: 0.50) // resting rows, chips
     static let glassRegularFill = Color(r: 46 / 255, g: 38 / 255, b: 24 / 255, a: 0.72) // hover, focus, selected
-    static let glassThickFill = Color(r: 33 / 255, g: 27 / 255, b: 17 / 255, a: 0.64) // popover root, panels
+    static let glassThickFill = Color(r: 33 / 255, g: 27 / 255, b: 17 / 255, a: 0.50) // popover root, panels — lower alpha = more desktop bleed
     static let glassOpaqueFill = consoleBackground // console / terminal — solid, no blur
-    // Warm tinted floor for a footer/action bar — the onboarding footer's
-    // `.foot` fill. A touch lighter + warmer than the thick root so the action
-    // row reads as a distinct shelf without a stroke.
+    /// Warm tinted floor for a footer/action bar — the onboarding footer's
+    /// `.foot` fill. A touch lighter + warmer than the thick root so the action
+    /// row reads as a distinct shelf without a stroke.
     static let footerFill = Color(r: 44 / 255, g: 36 / 255, b: 23 / 255, a: 0.42)
 
     // MARK: Hairlines
+
     //
     // Half-pixel catches of light, never a 1px border. Brighten thin → regular as
     // a surface advances. Dividers are a warm near-white at low alpha.
@@ -78,11 +80,13 @@ enum LD {
     static let hairlineWidth: CGFloat = 0.5
 
     // MARK: Popover shadow (the only shadow — cast by the window, not its parts)
+
     static let popoverShadowColor = Color.black.opacity(0.55)
     static let popoverShadowRadius: CGFloat = 28
     static let popoverShadowY: CGFloat = 22
 
     // MARK: Source-tint washes + selected-ring overrides
+
     //
     // Saturation only ever appears at wash scale on a selected surface. The ring
     // override lifts the selected hairline to the source hue at low alpha.
@@ -95,12 +99,14 @@ enum LD {
     static let tintCoralRing = coral.opacity(0.35)
 
     // MARK: Warm text ramp (one hue, stepped down in opacity — never a new color)
+
     static let textPrimary = Color(r: 236 / 255, g: 230 / 255, b: 216 / 255) // #ECE6D8
     static let textSecondary = textPrimary.opacity(0.66)
     static let textTertiary = textPrimary.opacity(0.50)
     static let textQuaternary = textPrimary.opacity(0.30)
 
     // MARK: Spacing rhythm (4 · 6/8 · 10–14 · 18–22)
+
     static let spaceHairline: CGFloat = 4
     static let spaceInlineTight: CGFloat = 6
     static let spaceInline: CGFloat = 8
@@ -108,6 +114,7 @@ enum LD {
     static let spaceSection: CGFloat = 20
 
     // MARK: Motion — entrance + micro-state (see design/ui_kits/lemon/motion.html)
+
     static let riseDistance: CGFloat = 7
     static let riseDuration: Double = 0.52
     static let riseCurve = Animation.timingCurve(0.2, 0.75, 0.2, 1.0, duration: 0.52)
@@ -249,10 +256,14 @@ enum GlassElevation {
     }
 
     /// Only the popover root drops a shadow.
-    var hasShadow: Bool { self == .thick }
+    var hasShadow: Bool {
+        self == .thick
+    }
 
     /// The opaque console surface does not blur the desktop behind it.
-    var blursBackdrop: Bool { self != .opaque }
+    var blursBackdrop: Bool {
+        self != .opaque
+    }
 
     /// SwiftUI material substrate for the blurred tiers.
     var material: Material {
@@ -269,9 +280,9 @@ enum GlassElevation {
 /// shadow (thick only). Use `.lemonGlass(_:)` rather than this type directly.
 struct LemonGlass: ViewModifier {
     let elevation: GlassElevation
-    var tint: Color? = nil
+    var tint: Color?
     var cornerRadius: CGFloat = LD.r10
-    var ringOverride: Color? = nil
+    var ringOverride: Color?
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -323,7 +334,8 @@ extension View {
     func lemonGlass(_ elevation: GlassElevation,
                     tint: Color? = nil,
                     cornerRadius: CGFloat = LD.r10,
-                    ring: Color? = nil) -> some View {
+                    ring: Color? = nil) -> some View
+    {
         modifier(LemonGlass(elevation: elevation, tint: tint,
                             cornerRadius: cornerRadius, ringOverride: ring))
     }

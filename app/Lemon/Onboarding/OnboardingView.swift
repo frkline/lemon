@@ -91,8 +91,13 @@ struct OnboardingView: View {
         }
         // 340pt single-column popover — inherits the warm-glass shell instead
         // of the old 520pt light panel, so nothing resizes or recolors when
-        // OnboardingView is swapped for PopoverView on finish.
-        .frame(width: 340)
+        // OnboardingView is swapped for PopoverView on finish. A fixed height is
+        // required: OnboardingView is shown directly by LemonApp (it does NOT
+        // route through PopoverView's min/max-height ZStack), and StepShell's
+        // ScrollView is greedy — without a height floor the real menu-bar popover
+        // collapses to just the header + footer (the smoke harness forces a fixed
+        // window, so it couldn't surface this).
+        .frame(width: 340, height: 600)
         // Popover root = thick warm glass at r14, mirroring PopoverView.
         .lemonGlass(.thick, cornerRadius: LD.r14)
         // Force dark appearance so native fields (SecureField/TextField text,
@@ -116,9 +121,9 @@ struct OnboardingView: View {
             Spacer()
             StepRail(total: OnboardingStep.allCases.count, current: step.rawValue)
         }
-        .padding(.leading, 14)
+        .padding(.leading, 16)
         .padding(.trailing, 14)
-        .padding(.top, 13)
+        .padding(.top, 16)
         .padding(.bottom, 11)
         .rise(0)
     }
@@ -307,13 +312,13 @@ struct OnboardingView: View {
 /// duplicated here so onboarding (a separate view tree, shown before
 /// PopoverView ever mounts) gets the same treatment. Idempotent.
 private struct OnboardingWindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context _: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async { [weak view] in configure(view?.window) }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: NSView, context _: Context) {
         DispatchQueue.main.async { [weak nsView] in configure(nsView?.window) }
     }
 
@@ -353,7 +358,9 @@ private struct StepShell<Content: View>: View {
     var addAnotherAction: (() -> Void)?
     @ViewBuilder let content: Content
 
-    private var totalSteps: Int { OnboardingStep.allCases.count }
+    private var totalSteps: Int {
+        OnboardingStep.allCases.count
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1014,7 +1021,7 @@ private struct TrackersStep: View {
                 SourceGlyph(source: draft.sourceKind, size: 10)
                 Text(draft.surfaceId.isEmpty ? placeholder : draft.surfaceId)
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(draft.surfaceId.isEmpty ? LD.textTertiary : LD.textPrimary)
+                    .foregroundStyle(draft.surfaceId.isEmpty ? LD.textSecondary : LD.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9))
@@ -1022,7 +1029,9 @@ private struct TrackersStep: View {
             }
             .lemonField(focused: false)
             .contentShape(RoundedRectangle(cornerRadius: LD.r6))
-            .opacity(enabled ? 1 : 0.55)
+            // Disabled (pre-verify) state must stay legible — the placeholder
+            // tells the user what to do next, so don't dim it into the glass.
+            .opacity(enabled ? 1 : 0.82)
         }
         .menuStyle(.borderlessButton)
         .disabled(!enabled)
@@ -1506,17 +1515,23 @@ private struct LocalAIStep: View {
                         .foregroundStyle(LD.textSecondary)
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
-                    // Ghost, not lemon — the model Download above is the step's
-                    // single yellow; this runner pull rides alongside it neutral.
-                    Button {
-                        startSwiftLMDownload()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.down.circle").font(.system(size: 11))
-                            Text("Download").font(.system(size: 11, weight: .semibold))
-                        }
+                    // Every step keeps at least one yellow. While the model is
+                    // still pending, its "Download model & runner" lemon button
+                    // owns the step's single yellow and this stays neutral. Once
+                    // the model is done, this runner pull IS the primary action
+                    // (Continue is disabled until it lands), so it carries the
+                    // yellow — otherwise the step would show no CTA at all.
+                    let runnerLabel = HStack(spacing: 5) {
+                        Image(systemName: "arrow.down.circle").font(.system(size: 11))
+                        Text("Download").font(.system(size: 11, weight: .semibold))
                     }
-                    .buttonStyle(GhostButtonStyle())
+                    if downloadState == .done {
+                        Button(action: startSwiftLMDownload) { runnerLabel }
+                            .buttonStyle(LemonButtonStyle())
+                    } else {
+                        Button(action: startSwiftLMDownload) { runnerLabel }
+                            .buttonStyle(GhostButtonStyle())
+                    }
                 }
 
             case .running:

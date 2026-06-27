@@ -36,10 +36,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // window — Lemon stays a menu-bar app end-to-end.
         if !KeychainStore.shared.isConfigured {
             Task { @MainActor in
-                // Brief delay so MenuBarExtra has time to install its
-                // NSStatusItem before we try to click it.
-                try? await Task.sleep(for: .milliseconds(350))
-                LemonApp.openMenuBarPopover()
+                // Poll until the MenuBarExtra NSStatusItem exists, then click it.
+                // A single fixed-delay click silently no-ops when the status item
+                // hasn't installed yet — so retry (~3s budget) until it lands.
+                for _ in 0 ..< 20 {
+                    if LemonApp.openMenuBarPopover() { return }
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
             }
         }
     }

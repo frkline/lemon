@@ -57,7 +57,7 @@ struct SessionRowView: View {
         }
     }
 
-    // Meta order: [status dot + neutral label] · favicon(16) · mono id. Gap 7.
+    /// Meta order: [status dot + neutral label] · favicon(16) · mono id. Gap 7.
     private var metaLine: some View {
         HStack(spacing: 7) {
             statusTag
@@ -71,8 +71,8 @@ struct SessionRowView: View {
         }
     }
 
-    // 6px status-colored dot with a soft halo + an 11px/600 label in the
-    // neutral warm secondary (NOT the status hue) so the dot carries the color.
+    /// 6px status-colored dot with a soft halo + an 11px/600 label in the
+    /// neutral warm secondary (NOT the status hue) so the dot carries the color.
     private var statusTag: some View {
         HStack(spacing: 6) {
             Circle()

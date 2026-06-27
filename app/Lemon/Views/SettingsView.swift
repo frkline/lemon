@@ -197,7 +197,7 @@ struct SettingsView: View {
             .foregroundStyle(LD.textTertiary)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Capsule().fill(LD.glassThinFill))
-        .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
+            .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
     }
 
     private var identitiesEmptyState: some View {
@@ -968,7 +968,6 @@ struct SettingsView: View {
             withAnimation { saved = false }
         }
     }
-
 }
 
 // MARK: - Toggle style

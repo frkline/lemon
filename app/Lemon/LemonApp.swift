@@ -118,33 +118,26 @@ struct LemonApp: App {
     /// launch when the user isn't configured yet — keeps the wizard in the
     /// same surface they'll meet day-to-day, no separate window. Also
     /// re-used by `.lemonRerunSetup` from Settings.
+    /// Clicks the MenuBarExtra's status button to open its popover. Returns
+    /// `true` once it found a status button to click, `false` if none exists
+    /// yet (SwiftUI installs the `NSStatusItem` a beat after launch, so the
+    /// caller should retry until this returns true). Activates the app first so
+    /// the popover can become key.
     @MainActor
-    static func openMenuBarPopover() {
-        // NSStatusBar doesn't expose its items publicly, so we walk
-        // NSApp.windows for the AppKit-side window backing the MenuBarExtra
-        // popover. The window has no title, no identifier, and is owned by
-        // the system status bar. Its rootView's host view is what gets
-        // toggled by clicking the menu bar icon.
-        //
-        // Strategy: find the NSStatusItem via NSApp.windows → first key
-        // window whose level matches statusBar, OR walk the menu-bar
-        // status item buttons by hit-testing the system status bar.
-        // SwiftUI's MenuBarExtra installs exactly one NSStatusItem in the
-        // shared NSStatusBar; we iterate the bar to find it.
-        let statusBar = NSStatusBar.system
-        // NSStatusBar.system has a private `_statusItems` collection;
-        // public API doesn't expose it. Fall back to walking NSApp.windows
-        // to find the popover's host window and toggling its visibility.
-        if let items = statusBar.value(forKey: "_statusItems") as? [NSStatusItem] {
-            for item in items {
-                if let button = item.button {
-                    button.performClick(nil)
-                    return
-                }
+    @discardableResult
+    static func openMenuBarPopover() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        // NSStatusBar.system exposes its items only via the private
+        // `_statusItems` KVC collection; SwiftUI's MenuBarExtra installs exactly
+        // one. performClick on its button toggles the popover open.
+        let items = NSStatusBar.system.value(forKey: "_statusItems") as? [NSStatusItem]
+        guard let items else { return false }
+        for item in items {
+            if let button = item.button {
+                button.performClick(nil)
+                return true
             }
         }
-        // Fallback: activate the app so the menu bar icon is at least
-        // visually pulsed; the user can click it themselves.
-        NSApp.activate(ignoringOtherApps: true)
+        return false
     }
 }

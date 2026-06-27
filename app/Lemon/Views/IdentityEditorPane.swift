@@ -46,9 +46,17 @@ struct IdentityEditorPane: View {
     }
 
     // Source-discipline: GitHub → tintGithub, Linear → tintLinear. Never cross.
-    private var sourceTint: Color { isGitHub ? LD.tintGithub : LD.tintLinear }
-    private var sourceRing: Color { isGitHub ? LD.tintGithubRing : LD.tintLinearRing }
-    private var kindName: String { isGitHub ? "GitHub" : "Linear" }
+    private var sourceTint: Color {
+        isGitHub ? LD.tintGithub : LD.tintLinear
+    }
+
+    private var sourceRing: Color {
+        isGitHub ? LD.tintGithubRing : LD.tintLinearRing
+    }
+
+    private var kindName: String {
+        isGitHub ? "GitHub" : "Linear"
+    }
 
     /// The verified handle, whether it came from a fresh verify or the stored
     /// identity. Drives the "GitHub · @handle" title on the selected glass.

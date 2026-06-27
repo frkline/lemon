@@ -480,13 +480,13 @@ struct PopoverView: View {
 /// `.lemonGlass`, which both blocks the Liquid-Glass bleed and leaks a white
 /// ring at the rounded corners. Idempotent — safe to run on every layout pass.
 private struct WindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context _: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async { [weak view] in configure(view?.window) }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: NSView, context _: Context) {
         DispatchQueue.main.async { [weak nsView] in configure(nsView?.window) }
     }
 
