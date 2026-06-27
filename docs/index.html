@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Lemon — Run Claude Code from your Linear or GitHub queue.</title>
 <meta name="description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device. Tag an issue with 🍋, get a PR." />
 <meta property="og:title" content="Lemon — Run Claude Code from your Linear or GitHub queue." />
@@ -13,11 +14,12 @@
 <style>
 /* ============================================================
    LEMON.LIVING — restyled introduction
-   Single page. Daylight by default; flips to Midnight with the
-   system (prefers-color-scheme) or a manual Auto/Light/Dark toggle.
+   Single page. Dark-only (Midnight): warm-dark glass, locked to
+   match the app. No light/auto theme, no toggle.
    ============================================================ */
 
 :root{
+  color-scheme:dark;
   --lemon:#F7C842; --lemondrop:#FEF4CC; --coral:#FF6B46; --citrus:#2D4A1E;
   --linearMark:#9DA4F5; --githubMark:#F2EFE9;
   --statusExecuting:#F7C842; --statusWaiting:#FF6B46; --statusDone:#45C27A;
@@ -32,41 +34,14 @@ body{
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   background:var(--page); color:var(--ink); min-height:100vh;
-  transition:background .45s ease, color .45s ease;
 }
 .page{max-width:1180px; margin:0 auto; position:relative; overflow:hidden}
 
 /* ---- Theme variables ---------------------------------------
-   Daylight (warm paper) is the default and the light-system look.
-   Midnight (warm-dark glass) takes over when the OS is in dark
-   mode, or when the toggle forces it. A manual choice always wins. */
+   Dark-only (Midnight): warm-dark glass, locked unconditionally
+   to match the app. Warm near-black canvas, #ECE6D8 ink ramp,
+   #F7C842 lemon accent. No light palette, no system swap. */
 :root{
-  --pageSolid:#EFE7D6;
-  --page:radial-gradient(125% 80% at 12% -8%, #FCF8F0 0%, #F4EEE0 46%, #ECE3D0 100%);
-  --ink:#241D12; --ink2:rgba(40,32,18,.64); --ink3:rgba(40,32,18,.44);
-  --ink4:rgba(40,32,18,.26);
-  --hair:rgba(40,32,18,.13); --hair2:rgba(40,32,18,.07);
-  --panel:rgba(255,255,255,.56); --panelRing:rgba(40,32,18,.09);
-  --panelHi:rgba(255,255,255,.7);
-  --chipBg:rgba(40,32,18,.05); --chipRing:rgba(40,32,18,.10);
-  --appShadow:0 34px 80px rgba(40,28,8,.30);
-  --accentText:#B07E1A;
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --pageSolid:#15100a;
-    --page:radial-gradient(125% 80% at 12% -8%, #2f2740 0%, #201a13 42%, #15100a 100%);
-    --ink:#ECE6D8; --ink2:rgba(236,230,216,.66); --ink3:rgba(236,230,216,.42);
-    --ink4:rgba(236,230,216,.26);
-    --hair:rgba(236,230,216,.12); --hair2:rgba(236,230,216,.07);
-    --panel:rgba(255,255,255,.028); --panelRing:rgba(255,255,255,.08);
-    --panelHi:rgba(255,255,255,.05);
-    --chipBg:rgba(236,230,216,.06); --chipRing:rgba(236,230,216,.12);
-    --appShadow:0 30px 70px rgba(0,0,0,.55);
-    --accentText:#F7C842;
-  }
-}
-:root[data-theme="dark"]{
   --pageSolid:#15100a;
   --page:radial-gradient(125% 80% at 12% -8%, #2f2740 0%, #201a13 42%, #15100a 100%);
   --ink:#ECE6D8; --ink2:rgba(236,230,216,.66); --ink3:rgba(236,230,216,.42);
@@ -481,14 +456,6 @@ em{font-style:italic;color:var(--ink)}
 .foot a{color:var(--ink3);font-size:13px;text-decoration:none}
 .foot .cp{color:var(--ink4);font-size:12px;letter-spacing:.2px}
 
-/* ---- Theme toggle ---- */
-.themetoggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;
-  border:0;border-radius:9px;color:var(--ink2);cursor:pointer;font-family:inherit;background:transparent;
-  transition:color .2s}
-.themetoggle:hover{color:var(--ink)}
-.themetoggle .ti{display:flex}
-.themetoggle .ti svg{width:16px;height:16px;display:block}
-
 /* ---- Pull quote ---- */
 .pullquote{position:relative;padding:108px 84px}
 .pullquote blockquote{margin:22px 0 0;font-size:48px;line-height:1.04;letter-spacing:-1.4px;
@@ -506,7 +473,7 @@ em{font-style:italic;color:var(--ink)}
    ============================================================ */
 @media (max-width: 860px){
   .nav{padding:20px 24px 0}
-  .navlinks{display:none}              /* brand · theme · GitHub stay */
+  .navlinks{display:none}              /* brand · GitHub stay */
   .wrap{padding:0 24px}
   .band{padding:60px 24px}
   .band.tight{padding:48px 24px}
@@ -554,7 +521,6 @@ em{font-style:italic;color:var(--ink)}
       <a href="#setup">Setup</a>
     </nav>
     <span class="spacer"></span>
-    <button class="themetoggle" id="themeBtn" type="button" aria-label="Color theme" title="Theme: Auto"><span class="ti" data-ti></span></button>
     <a class="ghostlink" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">GitHub ↗</a>
   </header>
 
@@ -1009,34 +975,5 @@ em{font-style:italic;color:var(--ink)}
     </nav>
   </footer>
 </main>
-
-<script>
-  // Theme: Auto (follow system) → Light → Dark, persisted. Manual wins.
-  const root = document.documentElement;
-  const btn = document.getElementById('themeBtn');
-  const order = ['auto','light','dark'];
-  const ICON = {
-    auto:'<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.4"></circle><path d="M8 1.9a6.1 6.1 0 0 1 0 12.2z" fill="currentColor"></path></svg>',
-    light:'<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="3.3" fill="currentColor"></circle><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><line x1="9" y1="1.6" x2="9" y2="3.2"></line><line x1="9" y1="14.8" x2="9" y2="16.4"></line><line x1="1.6" y1="9" x2="3.2" y2="9"></line><line x1="14.8" y1="9" x2="16.4" y2="9"></line><line x1="3.9" y1="3.9" x2="5" y2="5"></line><line x1="13" y1="13" x2="14.1" y2="14.1"></line><line x1="14.1" y1="3.9" x2="13" y2="5"></line><line x1="5" y1="13" x2="3.9" y2="14.1"></line></g></svg>',
-    dark:'<svg viewBox="0 0 16 16"><path d="M13.3 10.1A5.6 5.6 0 0 1 5.9 2.7a.6.6 0 0 0-.8-.8 6.5 6.5 0 1 0 8.9 8.9.6.6 0 0 0-.7-.7z" fill="currentColor"></path></svg>'
-  };
-  const TITLE = { auto:'Theme: Auto (follows your system)', light:'Theme: Light', dark:'Theme: Dark' };
-  function apply(mode){
-    if(mode==='auto') root.removeAttribute('data-theme');
-    else root.setAttribute('data-theme', mode);
-    if(btn){
-      btn.querySelector('[data-ti]').innerHTML = ICON[mode];
-      btn.title = TITLE[mode];
-    }
-    try{ localStorage.setItem('lemon-theme', mode); }catch(e){}
-  }
-  let cur = 'auto';
-  try{ cur = localStorage.getItem('lemon-theme') || 'auto'; }catch(e){}
-  apply(cur);
-  if(btn) btn.addEventListener('click', ()=>{
-    cur = order[(order.indexOf(cur)+1) % order.length];
-    apply(cur);
-  });
-</script>
 </body>
 </html>
