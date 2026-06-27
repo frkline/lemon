@@ -1,0 +1,492 @@
+<!-- @dsCard group="Onboarding" name="Onboarding" subtitle="First-run wizard, in the popover shell" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>onboarding.html</title><style>
+:root {
+  /* Brand */
+  --lemon:#F7C842; --lemondrop:#FEF4CC; --coral:#FF6B46; --citrus:#2D4A1E;
+  /* Source marks */
+  --linearMark:#9DA4F5; --githubMark:#F2EFE9;
+  /* Status */
+  --statusPlanning:#6197FA; --statusExecuting:#F7C842; --statusWaiting:#FF6B46;
+  --statusReviewing:#66C78F; --statusDone:#45C27A; --statusFailed:#F24545;
+  /* Console */
+  --console:#17110A; --consoleText:#E8E0CC;
+  /* Chrome text on warm-dark glass */
+  --primary:#ECE6D8; --secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50); --quaternary:rgba(236,230,216,.30);
+  /* Radii */
+  --r3:3px; --r6:6px; --r10:10px; --r14:14px;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { min-height:100%; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  /* Representative desktop behind a translucent menubar popover — the real
+     compositing context for Liquid Glass. */
+  background:
+    radial-gradient(120% 90% at 18% 0%, #3a2f4a 0%, #241d30 40%, #14101c 100%),
+    #14101c;
+  color:var(--primary); -webkit-font-smoothing:antialiased;
+  padding:28px; display:flex; flex-wrap:wrap; gap:26px 22px; align-items:flex-start;
+}
+.label { color:var(--secondary); font-size:10px; font-weight:700;
+  letter-spacing:1.4px; text-transform:uppercase; margin:2px 0 9px; }
+.mono { font-family:"SF Mono",ui-monospace,Menlo,monospace; }
+.frame { width:344px; }
+
+/* ---- Menubar shell + notch (identical to popover-root) ---- */
+.shell { position:relative; padding-top:7px; }
+.notch { position:absolute; top:0; right:46px; width:15px; height:15px;
+  background:rgba(41,34,22,.72); border-radius:3px; transform:rotate(45deg);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10); }
+
+/* root = THICK glass: blur 36 · bg .64 · ring .10 · shadow */
+.pop { position:relative; border-radius:var(--r14); overflow:hidden;
+  background:rgba(33,27,17,.66);
+  backdrop-filter:blur(36px) saturate(1.3);
+  -webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10), 0 22px 56px rgba(0,0,0,.55); }
+
+/* ---- Persistent header — same anatomy as the daily popover ----
+   Logo + name on the left; the step-rail takes the slot the live
+   "2 running" count pill occupies once configured. */
+.head { display:flex; align-items:center; gap:8px; padding:13px 14px 11px; }
+.logo { font-size:15px; line-height:1; }
+.name { font-size:13px; font-weight:700; letter-spacing:-.1px; }
+.rail { margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
+.rail .dot { width:5px; height:5px; border-radius:999px;
+  background:transparent; box-shadow:inset 0 0 0 1px var(--quaternary); }
+.rail .dot.done { background:var(--secondary); box-shadow:none; }
+.rail .dot.now { width:14px; background:var(--primary); box-shadow:none; }
+.hr { height:.5px; background:rgba(236,230,216,.12); }
+
+/* ---- Step content ---- */
+.body { padding:14px 14px 12px; }
+.eyebrow { color:var(--tertiary); font-size:9px; font-weight:700;
+  letter-spacing:1.3px; text-transform:uppercase; margin-bottom:7px; }
+.title { font-size:16px; font-weight:700; letter-spacing:-.3px; line-height:1.12; }
+.sub { color:var(--secondary); font-size:12px; font-weight:500; line-height:1.45;
+  margin-top:5px; }
+
+.block { margin-top:14px; }
+.cap-l { color:var(--tertiary); font-size:9px; font-weight:700; letter-spacing:1.3px;
+  text-transform:uppercase; margin-bottom:7px; display:flex; align-items:center; gap:7px; }
+.cap-l .hint { font-weight:500; letter-spacing:0; text-transform:none;
+  color:var(--quaternary); font-size:10px; }
+
+/* segmented control — thin track, selected segment thickens to regular */
+.seg { display:flex; gap:3px; padding:3px; border-radius:var(--r10);
+  background:rgba(34,28,18,.46); box-shadow:inset 0 0 0 .5px rgba(255,255,255,.07); }
+.opt { flex:1; height:30px; display:inline-flex; align-items:center; justify-content:center;
+  gap:6px; border-radius:var(--r6); font-size:12px; font-weight:600;
+  color:var(--secondary); }
+.opt.on { background:rgba(46,38,24,.78);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); color:var(--primary); }
+.opt .sz { color:var(--tertiary); font-weight:500; font-size:11px; }
+
+/* text input — resting thin; .focus thickens to regular + brighter ring */
+.field { display:flex; align-items:center; gap:8px; height:34px; padding:0 10px;
+  border-radius:var(--r6); background:rgba(34,28,18,.46);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.08); }
+.field.focus { background:rgba(46,38,24,.72);
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.20); }
+.field .val { flex:1; min-width:0; font-size:12px; color:var(--primary);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.field .ph { flex:1; font-size:12px; color:var(--tertiary); }
+.field .caret { width:1px; height:15px; background:var(--lemondrop); opacity:.7; }
+.field .chev { color:var(--quaternary); font-size:13px; }
+.inl { display:inline-flex; align-items:center; height:22px; padding:0 9px;
+  border-radius:var(--r6); font-size:11px; font-weight:600; color:var(--secondary);
+  background:rgba(236,230,216,.06); box-shadow:inset 0 0 0 .5px rgba(236,230,216,.12); }
+.help { color:var(--tertiary); font-size:10px; line-height:1.5; margin-top:6px; }
+.linklike { color:var(--secondary); font-size:11px; font-weight:500; }
+
+/* favicon tiles — verbatim from color/popover cards */
+.fav { display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; border-radius:5px; flex:none; }
+.fav svg { width:11px; height:11px; display:block; }
+.fav.linear { background:rgba(94,106,210,.22); box-shadow:inset 0 0 0 .5px rgba(124,134,232,.48); }
+.fav.github { background:rgba(150,152,168,.22); box-shadow:inset 0 0 0 .5px rgba(214,216,228,.30); }
+
+/* connected identity row */
+.idrow { display:flex; align-items:center; gap:9px; padding:9px 11px;
+  border-radius:var(--r10); background:rgba(34,28,18,.46);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.07); }
+.idrow .nm { font-size:12px; font-weight:600; }
+.idrow .h { font-size:10px; color:var(--tertiary); }
+.ok { margin-left:auto; display:inline-flex; align-items:center; gap:4px;
+  color:var(--statusDone); font-size:10px; font-weight:600; }
+.ok .d { width:6px; height:6px; border-radius:50%; background:var(--statusDone);
+  box-shadow:0 0 0 2.5px rgba(69,194,122,.22); }
+
+/* dependency chips */
+.chips { display:flex; gap:6px; }
+.chip { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 9px;
+  border-radius:999px; font-size:11px; font-weight:600; color:var(--secondary);
+  background:rgba(34,28,18,.46); box-shadow:inset 0 0 0 .5px rgba(255,255,255,.08); }
+.chip .d { width:6px; height:6px; border-radius:50%; flex:none; }
+.chip.todo { color:var(--tertiary); }
+
+/* console / LEMON.md preview — opaque, the machine surface is not glass */
+.code { background:var(--console); border-radius:var(--r6); padding:10px 11px;
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.05); }
+.code .ln { font-size:10.5px; line-height:1.7; color:rgba(232,224,204,.78); }
+.code .ln .k { color:rgba(232,224,204,.45); }
+
+/* full-width generative / primary-in-body action */
+.wide { display:flex; align-items:center; justify-content:center; gap:8px;
+  height:38px; border-radius:var(--r6); font-size:12.5px; font-weight:600; }
+.wide.lemon { background:var(--lemon); color:var(--citrus); }
+.wide.ghost { color:var(--secondary); background:rgba(236,230,216,.05);
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.11); }
+
+/* label legend rows (Ready) — status at dot scale only */
+.leg { display:flex; align-items:center; gap:9px; padding:7px 0; }
+.leg + .leg { box-shadow:inset 0 .5px 0 rgba(236,230,216,.08); }
+.leg .tag { display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px;
+  border-radius:var(--r6); font-size:10.5px; font-weight:600; color:var(--secondary);
+  background:rgba(236,230,216,.06); box-shadow:inset 0 0 0 .5px rgba(236,230,216,.10);
+  white-space:nowrap; }
+.leg .arr { color:var(--quaternary); font-size:11px; }
+.leg .mean { color:var(--secondary); font-size:11px; }
+.leg .d { width:6px; height:6px; border-radius:50%; flex:none; }
+
+/* switch — reused from settings */
+.sw { width:34px; height:20px; border-radius:999px; display:inline-flex; align-items:center;
+  padding:2px; flex:none; }
+.sw.on { background:var(--statusDone); justify-content:flex-end; }
+.sw.off { background:rgba(236,230,216,.14); justify-content:flex-start; }
+.sw .k { width:16px; height:16px; border-radius:999px; background:#fff; }
+.setrow { display:flex; align-items:center; gap:10px; padding:10px 11px;
+  border-radius:var(--r10); background:rgba(34,28,18,.46);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.07); }
+.setrow .t { font-size:12px; font-weight:600; }
+.setrow .d2 { color:var(--tertiary); font-size:10px; }
+
+/* ---- footer ---- */
+.foot { display:flex; align-items:center; gap:9px; padding:11px 14px;
+  background:rgba(44,36,23,.42); box-shadow:inset 0 .5px 0 rgba(255,255,255,.10); }
+.btn { display:inline-flex; align-items:center; height:30px; padding:0 14px;
+  border-radius:var(--r6); font-size:12px; font-weight:600; }
+.btn.primary { background:var(--lemon); color:var(--citrus); }
+.btn.ghost { color:var(--secondary); background:transparent; }
+.btn.disabled { color:var(--tertiary); background:rgba(236,230,216,.05);
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.09); }
+.btn.skip { color:var(--secondary); background:transparent; }
+.foot .sp { margin-left:auto; }
+
+/* ---- entrance: staggered rise (verbatim spec) ---- */
+.rise { opacity:1; }
+@media (prefers-reduced-motion: no-preference) {
+  .rise { opacity:0; animation:rise .52s cubic-bezier(.2,.75,.2,1) both; }
+  .d1{animation-delay:.04s}.d2{animation-delay:.12s}.d3{animation-delay:.20s}
+  .d4{animation-delay:.28s}.d5{animation-delay:.36s}
+}
+@keyframes rise { from{opacity:0;transform:translateY(7px)} to{opacity:1;transform:none} }
+
+/* rationale doc */
+.doc { width:792px; max-width:100%; border-radius:18px; background:rgba(33,27,17,.62);
+  backdrop-filter:blur(36px) saturate(1.3); -webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 22px 56px rgba(0,0,0,.5);
+  padding:30px 32px 28px; }
+.doc .eb { display:flex; align-items:center; gap:8px; color:var(--tertiary); font-size:10px;
+  font-weight:700; letter-spacing:1.7px; text-transform:uppercase; margin-bottom:14px; }
+.doc .eb i { width:6px; height:6px; border-radius:50%; background:var(--lemon); }
+.doc h2 { font-size:22px; font-weight:700; letter-spacing:-.4px; margin-bottom:10px; }
+.doc h2 em { font-style:normal; color:var(--lemon); }
+.doc .lead { color:var(--secondary); font-size:13px; line-height:1.6; max-width:70ch; }
+.doc .rh { font-size:11px; font-weight:700; letter-spacing:1.3px; text-transform:uppercase;
+  color:var(--tertiary); margin:22px 0 10px; }
+.doc p.b { color:var(--secondary); font-size:12px; line-height:1.6; max-width:74ch; margin-bottom:9px; }
+.doc p.b b { color:var(--primary); font-weight:600; }
+.doc .grid { display:grid; grid-template-columns:1fr 1fr; gap:13px 26px; }
+.doc .pr { display:grid; grid-template-columns:auto 1fr; gap:11px; }
+.doc .prn { color:var(--lemon); font-size:11px; font-weight:600; opacity:.92; padding-top:1px; }
+.doc .prt { font-size:12.5px; font-weight:650; margin-bottom:4px; }
+.doc .prd { color:var(--secondary); font-size:11px; line-height:1.5; }
+.doc .new { margin-top:18px; display:flex; gap:12px; align-items:flex-start;
+  background:rgba(247,200,66,.06); border-radius:12px; padding:14px 16px;
+  box-shadow:inset 0 0 0 .5px rgba(247,200,66,.22); }
+.doc .new .k { color:var(--lemon); font-size:12px; font-weight:700; flex:none; }
+.doc .new ul { list-style:none; }
+.doc .new li { color:var(--secondary); font-size:11.5px; line-height:1.55; padding:2px 0; }
+.doc .new li b { color:var(--primary); font-weight:600; }
+.doc .hr2 { height:.5px; background:rgba(236,230,216,.13); margin:22px 0; }
+</style></head>
+<body>
+
+<!-- ============ STEP 1 · CONNECT + WORKSPACE (merged) ============
+     Product decision: Connect (tracker/identity) and Workspace (repo
+     mapping) are ONE step, not two. Merging makes the tracker→repo binding
+     legible *as you set it* — this identity routes *this* folder — and the
+     identity card sits directly above the path it routes. The pane scrolls,
+     so the extra vertical room is free. -->
+<div class="frame">
+  <div class="label">Onboarding · Step 1 — Connect + Workspace</div>
+  <div class="shell">
+    <div class="notch"></div>
+    <div class="pop">
+      <div class="head rise d1">
+        <span class="logo">&#127819;</span><span class="name">Lemon</span>
+        <span class="rail"><span class="dot now"></span><span class="dot"></span>
+          <span class="dot"></span><span class="dot"></span></span>
+      </div>
+      <div class="hr"></div>
+      <div class="body">
+        <div class="rise d1">
+          <div class="eyebrow">Set up &middot; 1 of 4</div>
+          <div class="title">Connect your workspace</div>
+          <div class="sub">Link where your issues live, then point that identity at the repo it routes on this Mac.</div>
+        </div>
+
+        <div class="block rise d2">
+          <div class="cap-l">Issue tracker</div>
+          <div class="seg">
+            <span class="opt on"><span class="fav linear"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span>Linear</span>
+            <span class="opt"><span class="fav github"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span>GitHub</span>
+          </div>
+        </div>
+
+        <div class="block rise d3">
+          <div class="cap-l">API key <span class="hint">create one ↗</span></div>
+          <div class="field focus">
+            <span class="val mono">lin_api_4f2c8&hellip;</span><span class="caret"></span>
+            <span class="inl">Verify</span>
+          </div>
+          <div class="help">Personal key, scoped to your workspace. Stored in Keychain — it never leaves this Mac.</div>
+        </div>
+
+        <!-- The identity, then directly below it the path it routes — the
+             binding visible in one glance. -->
+        <div class="block rise d3">
+          <div class="cap-l">Routes to</div>
+          <div class="idrow">
+            <span class="fav linear"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span>
+            <div><div class="nm">Work Linear · Engineering</div><div class="h mono">@frank · linear.app</div></div>
+            <span class="ok"><span class="d"></span>connected</span>
+          </div>
+        </div>
+
+        <div class="block rise d4">
+          <div class="cap-l">Local folder <span class="hint">drop a folder, or paste a path</span></div>
+          <div class="field focus">
+            <span class="val mono">~/Projects/web</span><span class="caret"></span>
+          </div>
+        </div>
+
+        <div class="block rise d4">
+          <div class="setrow">
+            <div style="flex:1"><div class="t">All repos in this folder</div>
+              <div class="d2">Route each repo by its own name.</div></div>
+            <span class="sw off"><span class="k"></span></span>
+          </div>
+        </div>
+      </div>
+      <div class="foot rise d4">
+        <span class="btn ghost">Quit</span>
+        <span class="sp"></span>
+        <span class="btn skip">Add another</span>
+        <span class="btn primary">Continue</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STEP 2 · INSTRUCTIONS (LEMON.md) ============ -->
+<div class="frame">
+  <div class="label">Onboarding · Step 2 — Instructions</div>
+  <div class="shell">
+    <div class="notch"></div>
+    <div class="pop">
+      <div class="head rise d1">
+        <span class="logo">&#127819;</span><span class="name">Lemon</span>
+        <span class="rail"><span class="dot done"></span><span class="dot now"></span>
+          <span class="dot"></span><span class="dot"></span></span>
+      </div>
+      <div class="hr"></div>
+      <div class="body">
+        <div class="rise d1">
+          <div class="eyebrow">Set up &middot; 2 of 4</div>
+          <div class="title">Teach Lemon your codebase</div>
+          <div class="sub"><span class="mono" style="font-size:11px">LEMON.md</span> is the brief Claude reads before every task.</div>
+        </div>
+
+        <div class="block rise d2">
+          <div class="cap-l">Draft preview</div>
+          <div class="code">
+            <div class="ln mono"><span class="k"># </span>web — build &amp; test</div>
+            <div class="ln mono"><span class="k">$ </span>pnpm install &amp;&amp; pnpm test</div>
+            <div class="ln mono"><span class="k"># </span>conventions</div>
+            <div class="ln mono">- branch from origin/main</div>
+            <div class="ln mono">- never touch <span class="k">infra/</span></div>
+          </div>
+        </div>
+
+        <div class="block rise d3">
+          <div class="wide lemon">✦&nbsp; Draft with Claude</div>
+          <div class="help">Claude reads your repo and proposes one. You edit before it saves.</div>
+        </div>
+      </div>
+      <div class="foot rise d4">
+        <span class="btn ghost">Back</span>
+        <span class="sp"></span>
+        <span class="btn skip">Skip for now</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STEP 3 · LOCAL AI ============ -->
+<div class="frame">
+  <div class="label">Onboarding · Step 3 — Local AI</div>
+  <div class="shell">
+    <div class="notch"></div>
+    <div class="pop">
+      <div class="head rise d1">
+        <span class="logo">&#127819;</span><span class="name">Lemon</span>
+        <span class="rail"><span class="dot done"></span><span class="dot done"></span>
+          <span class="dot now"></span><span class="dot"></span></span>
+      </div>
+      <div class="hr"></div>
+      <div class="body">
+        <div class="rise d1">
+          <div class="eyebrow">Set up &middot; 3 of 4</div>
+          <div class="title">Add the on-device model</div>
+          <div class="sub">A small Gemma resolves the obvious prompts so a session doesn’t stall on you.</div>
+        </div>
+
+        <div class="block rise d2">
+          <div class="cap-l">Requirements</div>
+          <div class="chips">
+            <span class="chip"><span class="d" style="background:var(--statusDone)"></span>tmux</span>
+            <span class="chip"><span class="d" style="background:var(--statusDone)"></span>hf</span>
+            <span class="chip todo"><span class="d" style="background:var(--coral)"></span>hf · sign in</span>
+          </div>
+        </div>
+
+        <div class="block rise d3">
+          <div class="cap-l">Gemma model</div>
+          <div class="seg">
+            <span class="opt on">4B <span class="sz">~5.2 GB</span></span>
+            <span class="opt">2B <span class="sz">~3.6 GB</span></span>
+          </div>
+          <div class="help mono" style="font-size:10px">gemma-4-e4b-it-4bit · SwiftLM b648 · arm64</div>
+        </div>
+
+        <div class="block rise d4">
+          <div class="wide lemon">↓&nbsp; Download model &amp; runner</div>
+          <div class="help">≈ 5.7 GB total. You can keep setting up while it pulls.</div>
+        </div>
+      </div>
+      <div class="foot rise d5">
+        <span class="btn ghost">Back</span>
+        <span class="sp"></span>
+        <span class="btn disabled">Continue</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STEP 4 · READY ============ -->
+<div class="frame">
+  <div class="label">Onboarding · Step 4 — Ready</div>
+  <div class="shell">
+    <div class="notch"></div>
+    <div class="pop">
+      <div class="head rise d1">
+        <span class="logo">&#127819;</span><span class="name">Lemon</span>
+        <span class="rail"><span class="dot done"></span><span class="dot done"></span>
+          <span class="dot done"></span><span class="dot now"></span></span>
+      </div>
+      <div class="hr"></div>
+      <div class="body">
+        <div class="rise d1">
+          <div class="eyebrow">Set up &middot; 4 of 4</div>
+          <div class="title">You’re all set</div>
+          <div class="sub">This is the loop you’ll drive from your tracker.</div>
+        </div>
+
+        <div class="block rise d2">
+          <div class="leg">
+            <span class="tag">🍋 Tag it</span><span class="arr">→</span>
+            <span class="mean">queued for Lemon</span>
+          </div>
+          <div class="leg">
+            <span class="d" style="background:var(--statusExecuting)"></span>
+            <span class="tag">🍋 In Progress</span><span class="arr">→</span>
+            <span class="mean">Claude is working</span>
+          </div>
+          <div class="leg">
+            <span class="d" style="background:var(--statusWaiting)"></span>
+            <span class="tag">🍋 Waiting</span><span class="arr">→</span>
+            <span class="mean">needs you — phone pinged</span>
+          </div>
+          <div class="leg">
+            <span class="d" style="background:var(--statusDone)"></span>
+            <span class="tag">🍋 Complete</span><span class="arr">→</span>
+            <span class="mean">PR open, report posted</span>
+          </div>
+        </div>
+
+        <div class="block rise d3">
+          <div class="setrow">
+            <div style="flex:1"><div class="t">Launch at login</div>
+              <div class="d2">Start Lemon when you sign in.</div></div>
+            <span class="sw on"><span class="k"></span></span>
+          </div>
+        </div>
+      </div>
+      <div class="foot rise d4">
+        <span class="btn ghost">Back</span>
+        <span class="sp"></span>
+        <span class="btn primary">Start Lemon</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RATIONALE ============ -->
+<div class="doc">
+  <div class="eb"><i></i>Onboarding · Design note</div>
+  <h2>The <em>same room</em>, lit for the first time</h2>
+  <p class="lead">Onboarding renders inside the very same <span class="mono" style="font-size:12px">MenuBarExtra</span> popover window the user lives in afterward — <span class="mono" style="font-size:12px">LemonApp</span> swaps <span class="mono" style="font-size:12px">OnboardingView</span> for <span class="mono" style="font-size:12px">PopoverView</span> in one closure. So onboarding is not a front door; it is the daily popover before there are any sessions in it. We hold the warm-glass shell, the 340-pt width, the header anatomy, and the rise/stagger entrance fixed, and let only the content change. When the user presses <b>Start Lemon</b>, nothing resizes or recolors — the window stays put and the empty session list slides in where the wizard was.</p>
+
+  <div class="rh">Decision — same shell, not a front door</div>
+  <p class="b">The current wizard declares its own <span class="mono" style="font-size:11px">.frame(width:520).background(.regularMaterial)</span>, so the popover balloons to a 520-pt light-mode panel with serif headlines, then snaps to the 340-pt warm popover the instant setup completes. That resize-and-recolor jolt is the tell that it’s a different app. <b>We design at 340 pt on the thick warm glass.</b> Ethos 07 (“built for the corner — everything assumes a 340-pt popover”) makes this non-negotiable, and matching the width is what makes “same surface” literally true rather than just thematically close. Narrow forces honesty: each step does one job, stacked vertically, instead of a two-column desktop form.</p>
+
+  <div class="rh">Seven principles, applied to first-run</div>
+  <div class="grid">
+    <div class="pr"><div class="prn mono">01</div><div><div class="prt">Material over stroke</div><div class="prd">Steps live on thick glass; fields and the segmented track are thin glass that thicken to regular on focus/selection. No outlines — depth is blur and fill, exactly as in the daily UI.</div></div></div>
+    <div class="pr"><div class="prn mono">02</div><div><div class="prt">Warm, not cold</div><div class="prd">We replace <span class="mono" style="font-size:10px">.regularMaterial</span> (the cold system panel) with the warm <span class="mono" style="font-size:10px">rgba(33,27,17,·)</span> base. The light background goes; the amber dark arrives on step one.</div></div></div>
+    <div class="pr"><div class="prn mono">03</div><div><div class="prt">Color is earned</div><div class="prd">One lemon per step — the CTA (or the <b>Draft with Claude</b> action, which is the step’s real primary). The progress rail is neutral, not yellow. Status appears only at dot scale on the Ready legend.</div></div></div>
+    <div class="pr"><div class="prn mono">04</div><div><div class="prt">Machine truth in mono</div><div class="prd">API keys, the Gemma checkpoint, the folder path, and the LEMON.md preview are SF Mono. Titles, labels, and helper prose are SF Pro. <b>No serif display face</b> — the type is the system stack.</div></div></div>
+    <div class="pr"><div class="prn mono">05</div><div><div class="prt">Width-stable identity</div><div class="prd">Linear/GitHub use the same fixed favicon tiles as the session list. The connected-identity row on step 2 is the exact card the user re-meets in Settings.</div></div></div>
+    <div class="pr"><div class="prn mono">06</div><div><div class="prt">Quiet by default</div><div class="prd">No emoji heroes, no big illustration. The loud moment is the single CTA. Even “connected” and “Waiting” are a 6-px dot, not a banner.</div></div></div>
+    <div class="pr"><div class="prn mono">07</div><div><div class="prt">Built for the corner</div><div class="prd">340 pt, ≥28-pt hit targets, tall and scrollable. The wizard never presumes a window to breathe in — it breathes in the popover.</div></div></div>
+  </div>
+
+  <div class="rh">The progress indicator</div>
+  <p class="b">The current top-edge <b>lemon progress bar</b> spends yellow a second time on every screen — a direct violation of “color is earned.” We replace it with a <b>step rail in the header’s right slot</b>, exactly where the live “2 running” count pill sits once configured (so the header anatomy is identical day one and day two). It encodes the sequence honestly — onboarding really is ordered, you must connect before you can map a repo — using the system’s own <b>opacity ramp</b> rather than a new color: done steps are <span class="mono" style="font-size:10px">secondary</span> dots, the current step is a <span class="mono" style="font-size:10px">primary</span> capsule, upcoming steps are <span class="mono" style="font-size:10px">quaternary</span> outlines. We deliberately rejected 01/02/03 numerals: at 340 pt they add machine-noise to a human header, and “1 of 4” already lives in each step’s eyebrow for the reader who wants the count.</p>
+
+  <div class="rh">Token mapping</div>
+  <p class="b">Everything above is built from existing tokens: thick/thin/regular glass (Materials), <span class="mono" style="font-size:10px">--lemon / --citrus</span> on the one CTA, the <span class="mono" style="font-size:10px">--primary→--quaternary</span> text-and-dot ramp, <span class="mono" style="font-size:10px">r6</span> fields/buttons inside <span class="mono" style="font-size:10px">r10</span> blocks inside the <span class="mono" style="font-size:10px">r14</span> popover (concentric corners), 4-pt spacing, the Linear/GitHub favicon SVGs, the settings switch, and the <span class="mono" style="font-size:10px">rise .52s cubic-bezier(.2,.75,.2,1)</span> stagger. Between steps, content uses the existing horizontal slide (<span class="mono" style="font-size:10px">LD.slide</span>).</p>
+
+  <div class="new">
+    <span class="k">New</span>
+    <div>
+      <div style="color:var(--primary);font-size:12px;font-weight:600;margin-bottom:6px">Patterns onboarding needs that the foundation doesn’t define yet — flag for a top-up:</div>
+      <ul>
+        <li><b>Step rail</b> — header-right progress affordance: 5-px dots on the <span class="mono" style="font-size:10px">primary/secondary/quaternary</span> ramp, current step a 14×5 <span class="mono" style="font-size:10px">r3</span> capsule. Reusable anywhere a finite sequence needs a quiet position marker.</li>
+        <li><b>Segmented control</b> — two-option toggle (Linear/GitHub, 4B/2B). Thin <span class="mono" style="font-size:10px">r10</span> track; selected segment thickens to the regular tier. Today’s system has the <span class="mono" style="font-size:10px">.cap</span> pill and buttons but no segmented selector.</li>
+        <li><b>Editable text field</b> — settings only shows a read-only masked credential. Onboarding needs the live input states: resting thin glass, <b>focus</b> = regular tier + brighter <span class="mono" style="font-size:10px">.20</span> neutral ring + lemondrop caret, mono value, tertiary placeholder, optional inline <span class="mono" style="font-size:10px">Verify</span> affordance.</li>
+        <li><b>Dependency chip</b> — pill with a status-colored leading dot (<span class="mono" style="font-size:10px">tmux ✓</span>, <span class="mono" style="font-size:10px">hf · sign in</span>). A small extension of the existing <span class="mono" style="font-size:10px">.cap</span>.</li>
+        <li><b>Inline link style</b> — “create one ↗” is rendered <span class="mono" style="font-size:10px">secondary</span>, not the platform blue the current wizard uses, to keep the palette closed. Confirm this as the standard link treatment.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="hr2"></div>
+  <p class="b" style="margin-bottom:0;color:var(--tertiary)"><b style="color:var(--secondary)">Settled — kept the merged step (4 steps, not 5):</b> an earlier draft split Connect (tracker/identity) and Workspace (repo mapping) into two steps because 340 pt rewards one-job-per-step. We <b>kept them merged</b>: the binding — <i>this identity routes <b>this</b> folder</i> — is only legible when you set it in one place, with the identity card sitting directly above the path it routes. Splitting scattered that mapping across two panes, and the pane scrolls now, so the vertical room is free. The remaining open call: whether the Local-AI <b>Download</b> belongs in the body (shown here) with the footer <b>Continue</b> staying neutral until the pull finishes, vs. a single footer action that changes label — both keep one yellow, but the state model differs.</p>
+</div>
+
+</body></html>

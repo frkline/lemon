@@ -58,6 +58,10 @@ enum LD {
     static let glassRegularFill = Color(r: 46 / 255, g: 38 / 255, b: 24 / 255, a: 0.72) // hover, focus, selected
     static let glassThickFill = Color(r: 33 / 255, g: 27 / 255, b: 17 / 255, a: 0.64) // popover root, panels
     static let glassOpaqueFill = consoleBackground // console / terminal — solid, no blur
+    // Warm tinted floor for a footer/action bar — the onboarding footer's
+    // `.foot` fill. A touch lighter + warmer than the thick root so the action
+    // row reads as a distinct shelf without a stroke.
+    static let footerFill = Color(r: 44 / 255, g: 36 / 255, b: 23 / 255, a: 0.42)
 
     // MARK: Hairlines
     //
@@ -568,5 +572,174 @@ struct SourceMark: View {
         // borderless menu style and balloon to fill the popover.
         .fixedSize()
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Step rail (finite-sequence position marker)
+
+/// A quiet progress marker for a finite, ordered sequence. It sits in the
+/// header's right slot — the exact position the live "N running" count pill
+/// occupies once configured — so the day-one (onboarding) and day-two (daily)
+/// headers share one anatomy. Position is encoded with the warm opacity ramp,
+/// never a new hue: completed steps are `secondary` dots, the current step a
+/// `primary` 14×5 capsule, upcoming steps `quaternary` outlines.
+/// See design/ui_kits/lemon/onboarding.html (`.rail`).
+struct StepRail: View {
+    let total: Int
+    let current: Int // 0-based index of the active step
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0 ..< total, id: \.self) { i in
+                marker(for: i)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Step \(current + 1) of \(total)")
+    }
+
+    @ViewBuilder
+    private func marker(for i: Int) -> some View {
+        let shape = Capsule(style: .continuous)
+        if i == current {
+            shape.fill(LD.textPrimary).frame(width: 14, height: 5)
+        } else if i < current {
+            shape.fill(LD.textSecondary).frame(width: 5, height: 5)
+        } else {
+            shape.strokeBorder(LD.textQuaternary, lineWidth: 1).frame(width: 5, height: 5)
+        }
+    }
+}
+
+// MARK: - Segmented control (two-option toggle)
+
+/// A segmented selector. The track is thin glass at r10; the selected segment
+/// thickens to the regular tier at r6 — depth by material, not by a moving
+/// accent. Replaces SwiftUI's `.pickerStyle(.segmented)`, whose system-accent
+/// blue clashes with the closed warm palette. `content` renders each option's
+/// interior given its selected state (e.g. a `SourceFavicon` + label, or a
+/// size + footprint hint). See design/ui_kits/lemon/onboarding.html (`.seg`).
+struct LemonSegmented<Value: Hashable, Content: View>: View {
+    let values: [Value]
+    @Binding var selection: Value
+    var height: CGFloat = 30
+    @ViewBuilder let content: (Value, Bool) -> Content
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(values, id: \.self) { value in
+                let selected = value == selection
+                Button {
+                    withAnimation(LD.snappy) { selection = value }
+                } label: {
+                    content(value, selected)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: height)
+                        .contentShape(RoundedRectangle(cornerRadius: LD.r6, style: .continuous))
+                        .modifier(SegmentSelection(selected: selected))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .lemonGlass(.thin, cornerRadius: LD.r10)
+    }
+}
+
+/// The selected segment lifts to the regular glass tier; unselected segments
+/// stay bare so the track shows through.
+private struct SegmentSelection: ViewModifier {
+    let selected: Bool
+    func body(content: Content) -> some View {
+        if selected {
+            content.lemonGlass(.regular, cornerRadius: LD.r6)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Editable field chrome
+
+extension View {
+    /// Wraps an input control in the editable-field chrome: resting thin glass
+    /// at r6, thickening to the regular tier with a brighter neutral ring (`.20`)
+    /// when `focused`. The lemondrop caret comes from `.tint` applied here; pair
+    /// with a mono font on the value for keys / paths / identifiers and a
+    /// tertiary placeholder. The system-only counterpart to the read-only masked
+    /// credential the daily UI shows. See onboarding.html (`.field`).
+    func lemonField(focused: Bool, height: CGFloat = 34) -> some View {
+        modifier(LemonFieldChrome(focused: focused, height: height))
+    }
+}
+
+struct LemonFieldChrome: ViewModifier {
+    let focused: Bool
+    var height: CGFloat = 34
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: height)
+            .lemonGlass(focused ? .regular : .thin, cornerRadius: LD.r6,
+                        ring: focused ? LD.textPrimary.opacity(0.20) : nil)
+            .tint(LD.lemondrop)
+            .animation(LD.smooth, value: focused)
+    }
+}
+
+// MARK: - Dependency chip
+
+/// A `.cap`-style pill with a status-coloured leading dot — `tmux ✓`, `hf ✓`,
+/// `hf · sign in`. A small extension of the resting chip: the dot carries the
+/// state at dot scale (color is earned), the label stays warm-neutral. The
+/// loading variant shows a mini spinner in the dot's place.
+/// See design/ui_kits/lemon/onboarding.html (`.chip`).
+struct DependencyChip: View {
+    let label: String
+    let status: Status
+
+    enum Status: Equatable { case loading, ok, attention }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            switch status {
+            case .loading:
+                ProgressView().controlSize(.mini).frame(width: 8, height: 8)
+            case .ok:
+                Circle().fill(LD.statusDone).frame(width: 6, height: 6)
+            case .attention:
+                Circle().fill(LD.coral).frame(width: 6, height: 6)
+            }
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(status == .attention ? LD.textTertiary : LD.textSecondary)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .lemonGlass(.thin, cornerRadius: 999)
+    }
+}
+
+// MARK: - Inline link
+
+/// The standard inline link treatment — "create one ↗" rendered in warm
+/// `LD.textSecondary`, never the platform blue, to keep the palette closed.
+struct InlineLink: View {
+    let title: String
+    let url: URL
+
+    var body: some View {
+        Link(destination: url) {
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(LD.textSecondary)
+        }
+        .buttonStyle(.plain)
     }
 }

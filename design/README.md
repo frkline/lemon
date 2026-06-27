@@ -30,6 +30,7 @@ Captured in full in `ui_kits/lemon/ethos.html`. In short:
 | **Chrome** | `popover-root`, `session-row` |
 | **Settings** | `settings-panels`, `pair-row` |
 | **Editors** | `editor-panes` |
+| **Onboarding** | `onboarding` |
 
 Each card's group/name/subtitle live in its first-line `<!-- @dsCard … -->`
 marker, which the Claude Design pane indexes on.
