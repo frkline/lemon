@@ -56,6 +56,23 @@ Round-trips through the `DesignSync` tool / `/design-sync` skill. This directory
 Sync **one component at a time**; never wholesale-replace. Remote edits made in
 the Design pane win — pull before you push so you don't clobber them.
 
+## Landing page (`design/landing/`)
+
+The revamped **lemon.living** marketing site, designed against this system.
+
+- `lemon.living.html` — the high-fidelity HTML design reference (prototype; the
+  shipped page is `docs/index.html`).
+- `README.md` — the full handoff: tokens, theme system, section-by-section spec.
+- `SITE_GUIDANCE.md` — visual rules / do's & don'ts for the site (the handoff's CLAUDE.md).
+- `screenshots/01–06-lemon.png` — rendered references (hero light/dark, orchestrator,
+  remote control, built-on, manifesto).
+
+The live site is served from `docs/` (GitHub Pages, CNAME `lemon.living`). When
+porting the reference to `docs/index.html`: move the `<template>` body into the
+DOM so it renders without JS, drop the `data-screen-label` affordance, keep only
+the theme-toggle script, and confirm the two flagged placeholders (Gemma
+checkpoint, install commands) against real values before shipping.
+
 ## Notes
 
 - **Fonts.** Lemon has no custom brand font — its type *is* the Apple system

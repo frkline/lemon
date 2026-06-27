@@ -62,6 +62,15 @@ before push; remote pane edits win). Lemon ships **no custom brand font** — th
 type *is* the Apple system stack (SF Pro / SF Mono), so non-Apple renderers
 substitute and the Design pane's "missing brand fonts" notice is expected.
 
+The **marketing site** (lemon.living) is served from `docs/` via GitHub Pages
+(`docs/CNAME`, `docs/.nojekyll`). Its design reference + handoff live in
+`design/landing/`; `docs/index.html` is the shipped port. Dependency-free —
+system fonts + CSS + inline SVG, one inline theme-toggle script (Auto/Light/Dark,
+persisted in `localStorage["lemon-theme"]`). Two values are sourced from the app,
+not invented: the Gemma checkpoint (`gemma-4-{e4b,e2b}-it-4bit`, 4-bit MLX) and
+the install flow (`brew install hf tmux gh claude-code` + signed `.app` from
+GitHub Releases). Target is macOS 26.
+
 ## App architecture
 
 ```
