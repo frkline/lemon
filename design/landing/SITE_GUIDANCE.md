@@ -7,8 +7,9 @@ Claude iOS app.
 
 ## What this site is
 A single, meticulous, Apple-HIG-flavoured page. It follows the **Lemon Design System** and
-adapts to system light/dark. Warm, quiet, dense-but-breathing. Marketing copy is confident
-and understated — never hypey.
+is **dark-only** — warm-dark glass, locked to match the app (an unapologetically warm-dark
+menu-bar tool). Warm, quiet, dense-but-breathing. Marketing copy is confident and
+understated — never hypey.
 
 ## Visual rules (from the Lemon ethos — keep these)
 1. **Material over stroke.** Depth = blur + fill opacity. Hairlines are 0.5px. Never heavier borders.
@@ -19,20 +20,22 @@ and understated — never hypey.
 5. **Quiet by default, loud when it matters.** Only a live agent or a failure raises its voice.
 
 ## Theme system
-- CSS custom properties on `:root`. **Daylight** (warm paper) is default; **Midnight**
-  (warm-dark glass) applies via `@media (prefers-color-scheme: dark)` or a forced
-  `:root[data-theme="dark"]`. Manual choice wins over system.
-- Nav toggle cycles Auto → Light → Dark, persisted in `localStorage["lemon-theme"]`
-  (`auto` removes `data-theme`).
-- The embedded **app UI** surfaces (popover, console, terminal, connection tiles) are
-  **always warm-dark glass**; the **phone** mock is **always light** (it's the Claude iOS app).
-  Only the marketing page chrome swaps light/dark.
+- **Dark-only.** The site ships a single **Midnight** (warm-dark glass) palette as CSS custom
+  properties on `:root`, locked unconditionally. There is **no** light/auto theme, no toggle,
+  no `data-theme` attribute, and no `prefers-color-scheme` swap. `<meta name="color-scheme"
+  content="dark">` + `color-scheme:dark` on `:root` so UA controls/scrollbars render dark.
+- This is deliberate: brand coherence with the dark-glass app. A light marketing page would
+  read as a different product than the warm-dark tool it's selling.
+- The embedded **app UI** surfaces (popover, console, terminal, connection tiles) are warm-dark
+  glass; the **phone** mock is **light** (it depicts the Claude iOS app, which is light). Those
+  are fixed surface treatments, unrelated to any page theme.
 
 ## Tokens
 Full token tables live in `design_handoff_lemon_living/README.md`. Quick reference:
 - Brand: `--lemon #F7C842`, `--coral #FF6B46`, `--citrus #2D4A1E`, `--lemondrop #FEF4CC`.
-- Accent (manifesto gold italic): `--accentText` = `#B07E1A` (light) / `#F7C842` (dark).
-- Neutrals are **one hue** stepped by opacity: ink / ink2 (.64–.66) / ink3 (.42–.44) / ink4 (.26).
+- Accent (manifesto gold italic): `--accentText` = `#F7C842`.
+- Canvas: `--pageSolid #15100a` (warm near-black) under a warm radial `--page` gradient.
+- Neutrals are **one hue** stepped by opacity off `#ECE6D8`: ink / ink2 (.66) / ink3 (.42) / ink4 (.26).
 - Console surface is opaque `#17110A` (not glass).
 - Type: SF Pro Text (humans) + SF Mono (machines). Nothing below 10px; body ≥13px.
 
