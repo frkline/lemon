@@ -51,6 +51,26 @@ All colors, animations, and button styles live in `app/Lemon/LemonDesign.swift` 
 - Animations: `LD.snappy` for interactions, `LD.smooth` for state changes, `LD.slide` for step transitions
 - Button styles: `LemonButtonStyle` (primary), `GhostButtonStyle` (secondary)
 
+`app/Lemon/LemonDesign.swift` is the code source of truth. The human-readable
+companion lives in **`design/`** — a self-contained HTML mirror of the system
+(open any `design/ui_kits/lemon/*.html` in a browser), including the seven-principle
+ethos, color/type/spacing/material/motion foundations, and a card per chrome
+surface. It is synced to a Claude Design project (claude.ai/design, projectId
+`dfaaaca4-3ca6-46e6-b4bd-f11312794011`) via the `/design-sync` skill / `DesignSync`
+tool with `localDir: design/`. See `design/README.md` for the sync flow (pull
+before push; remote pane edits win). Lemon ships **no custom brand font** — the
+type *is* the Apple system stack (SF Pro / SF Mono), so non-Apple renderers
+substitute and the Design pane's "missing brand fonts" notice is expected.
+
+The **marketing site** (lemon.living) is served from `docs/` via GitHub Pages
+(`docs/CNAME`, `docs/.nojekyll`). Its design reference + handoff live in
+`design/landing/`; `docs/index.html` is the shipped port. Dependency-free —
+system fonts + CSS + inline SVG, one inline theme-toggle script (Auto/Light/Dark,
+persisted in `localStorage["lemon-theme"]`). Two values are sourced from the app,
+not invented: the Gemma checkpoint (`gemma-4-{e4b,e2b}-it-4bit`, 4-bit MLX) and
+the install flow (`brew install hf tmux gh claude-code` + signed `.app` from
+GitHub Releases). Target is macOS 26.
+
 ## App architecture
 
 ```

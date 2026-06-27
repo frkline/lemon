@@ -3,13 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lemon — Run Claude Code from your Linear or GitHub queue.</title>
-<meta name="description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device. Tag an issue with 🍋, get a PR." />
-<meta property="og:title" content="Lemon — Run Claude Code from your Linear or GitHub queue." />
-<meta property="og:description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device." />
-<meta property="og:type" content="website" />
-<meta name="theme-color" content="#F7C842" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍋</text></svg>" />
+<title>lemon.living</title>
 <style>
 /* ============================================================
    LEMON.LIVING — restyled introduction
@@ -154,11 +148,7 @@ em{font-style:italic;color:var(--ink)}
     radial-gradient(66% 58% at 16% 92%, rgba(255,107,70,.26), transparent 60%),
     radial-gradient(50% 50% at 50% 50%, rgba(157,164,245,.16), transparent 70%),
     linear-gradient(158deg,#3b3050 0%,#271f33 52%,#171019 100%);
-  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 50px 110px rgba(16,10,3,.5);
-  /* Dissolve the right edge into the page instead of a hard rectangle stop.
-     The popover content lives in the left ~55%, so it stays crisp. */
-  -webkit-mask-image:linear-gradient(to right,#000 0%,#000 55%,transparent 96%);
-  mask-image:linear-gradient(to right,#000 0%,#000 55%,transparent 96%)}
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 50px 110px rgba(16,10,3,.5)}
 .menubar{position:relative;z-index:2;display:flex;align-items:center;height:30px;padding:0 13px;
   background:rgba(18,13,9,.40);backdrop-filter:blur(18px) saturate(1.4);
   -webkit-backdrop-filter:blur(18px) saturate(1.4);
@@ -483,8 +473,8 @@ em{font-style:italic;color:var(--ink)}
 
 /* ---- Theme toggle ---- */
 .themetoggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;
-  border:0;border-radius:9px;color:var(--ink2);cursor:pointer;font-family:inherit;background:transparent;
-  transition:color .2s}
+  border-radius:9px;color:var(--ink2);cursor:pointer;font-family:inherit;background:var(--panel);
+  box-shadow:inset 0 0 0 .5px var(--panelRing);transition:color .2s,background .2s}
 .themetoggle:hover{color:var(--ink)}
 .themetoggle .ti{display:flex}
 .themetoggle .ti svg{width:16px;height:16px;display:block}
@@ -497,65 +487,22 @@ em{font-style:italic;color:var(--ink)}
 
 /* reduced motion */
 @media (prefers-reduced-motion: reduce){ .status.live .d{animation:none} }
-
-/* ============================================================
-   Responsive — the layout is a desktop grid by default. Collapse
-   to a single column, shrink the 84px gutters, and scale the
-   fixed-px product mocks so the page reads on phones. Nothing
-   below depends on JS to become visible.
-   ============================================================ */
-@media (max-width: 860px){
-  .nav{padding:20px 24px 0}
-  .navlinks{display:none}              /* brand · theme · GitHub stay */
-  .wrap{padding:0 24px}
-  .band{padding:60px 24px}
-  .band.tight{padding:48px 24px}
-  .pullquote{padding:60px 24px}
-
-  /* stack every multi-column grid */
-  .hero{grid-template-columns:1fr; gap:26px; padding:32px 24px 52px}
-  .pitch{grid-template-columns:1fr; gap:26px}
-  .split{grid-template-columns:1fr; gap:34px}
-  .split.flip .copycol{order:0}        /* copy leads when stacked */
-  .steps{grid-template-columns:1fr 1fr; column-gap:24px; row-gap:32px}
-  .steps li,.steps li+li{padding:0; box-shadow:none}
-  .twocol,.recgrid,.builton{grid-template-columns:1fr}
-
-  /* type down a step */
-  h1,.hero h1{font-size:40px; letter-spacing:-1.3px}
-  h2{font-size:29px}
-  .pitch-q h2{font-size:38px; letter-spacing:-1px}
-  .herokick{font-size:20px}
-  .hero .lead{max-width:none; margin:18px 0 28px}
-
-  /* fixed-px mocks: fit the viewport */
-  .hero-visual{justify-self:stretch; margin-right:0; display:flex; justify-content:center; overflow:hidden}
-  .macscene{zoom:.5}
-  .split .pop{width:100%}
-}
-@media (max-width: 480px){
-  .steps{grid-template-columns:1fr}
-  h1,.hero h1{font-size:34px; letter-spacing:-1px}
-  .pitch-q h2{font-size:30px}
-  .macscene{zoom:.42}
-  .nav{gap:10px}
-}
 </style>
 </head>
 <body>
 
-<main class="page" id="pageRoot">
+<template id="page">
   <!-- NAV -->
   <header class="nav">
     <div class="brand"><span class="lemon">🍋</span> Lemon</div>
     <nav class="navlinks">
-      <a href="#loop">The loop</a>
-      <a href="#how">How it works</a>
-      <a href="#setup">Setup</a>
+      <a href="#">The loop</a>
+      <a href="#">How it works</a>
+      <a href="#">Setup</a>
     </nav>
     <span class="spacer"></span>
     <button class="themetoggle" id="themeBtn" type="button" aria-label="Color theme" title="Theme: Auto"><span class="ti" data-ti></span></button>
-    <a class="ghostlink" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">GitHub ↗</a>
+    <a class="ghostlink" href="#">GitHub ↗</a>
   </header>
 
   <!-- HERO -->
@@ -566,10 +513,10 @@ em{font-style:italic;color:var(--ink)}
       <p class="herokick">Built for the Mac&nbsp;mini on your desk.</p>
       <p class="lead">The quiet machine in the corner of your desk becomes an orchestrator in the corner of your screen — facilitating Claude Code across your Linear and GitHub issues, watched by <b>Gemma running locally</b>, one click off the menu bar.</p>
       <div class="cta">
-        <a class="btn primary" href="https://github.com/frkline/lemon/releases" target="_blank" rel="noopener">Download for Apple silicon</a>
-        <a class="btn ghost" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">View source</a>
+        <a class="btn primary" href="#">Download for Apple silicon</a>
+        <a class="btn ghost" href="#">View source</a>
       </div>
-      <p class="fineprint mono">macOS 26 · Claude Code · Gemma 4 runs fully on-device</p>
+      <p class="fineprint mono">macOS 14 · Claude Code · Gemma runs locally in ~1.2 GB</p>
     </div>
     <div class="hero-visual">
       <div class="macscene">
@@ -642,7 +589,7 @@ em{font-style:italic;color:var(--ink)}
   <div class="rule"></div>
 
   <!-- THE LOOP -->
-  <section class="band" id="loop">
+  <section class="band">
     <div class="band-head">
       <span class="eyebrow"><i></i>The loop</span>
       <h2>Claude takes the cruft.<br>You keep the keys.</h2>
@@ -675,7 +622,7 @@ em{font-style:italic;color:var(--ink)}
   <div class="rule"></div>
 
   <!-- ORCHESTRATOR -->
-  <section class="band split" id="how">
+  <section class="band split">
     <div class="copycol">
       <span class="eyebrow"><i></i>The orchestrator</span>
       <h2>It lives in the menu bar — not a tab.</h2>
@@ -824,7 +771,7 @@ em{font-style:italic;color:var(--ink)}
         <span class="dotsep"></span>
         <span class="sc">Metal · Apple silicon</span>
         <span class="dotsep"></span>
-        <span class="sc">~4 GB on disk · zero API calls</span>
+        <span class="sc">~1.2 GB · zero API calls</span>
       </div>
     </div>
     <div class="vizcol">
@@ -906,12 +853,12 @@ em{font-style:italic;color:var(--ink)}
       <div class="dep">
         <div class="dn"><span class="ok">✓</span>MLX + Gemma</div>
         <p>The supervisor runs entirely on-device — a quantized Gemma model reading every diff on Metal, with no token ever leaving the Mac.</p>
-        <div class="spec">Gemma 4 · E4B / E2B · 4-bit · MLX on Apple silicon</div>
+        <div class="spec">Gemma · 4-bit · MLX on Apple silicon</div>
       </div>
       <div class="dep">
         <div class="dn"><span class="ok">✓</span>SwiftUI + AppKit</div>
         <p>The menu-bar app and its Liquid Glass surfaces — native, notarized, and nothing like Electron.</p>
-        <div class="spec">MenuBarExtra · NSStatusItem · macOS 26</div>
+        <div class="spec">MenuBarExtra · NSStatusItem · macOS 14+</div>
       </div>
       <div class="dep">
         <div class="dn"><span class="ok">✓</span>Linear + GitHub</div>
@@ -924,7 +871,7 @@ em{font-style:italic;color:var(--ink)}
   <div class="rule"></div>
 
   <!-- SETUP -->
-  <section class="band setup" id="setup">
+  <section class="band setup">
     <div class="copycol">
       <span class="eyebrow"><i></i>Setup</span>
       <h2>Two commands and a wizard.</h2>
@@ -940,16 +887,14 @@ em{font-style:italic;color:var(--ink)}
             <span class="t mono">zsh — lemon</span>
           </div>
           <div class="body mono">
-            <div><span class="dim"># runtime prereqs</span></div>
-            <div><span class="pr">›</span> <span class="cm">brew install</span> hf tmux gh claude-code</div>
+            <div><span class="dim"># install</span></div>
+            <div><span class="pr">›</span> <span class="cm">brew install</span> lemon-living/tap/lemon</div>
             <div style="height:10px"></div>
-            <div><span class="dim"># grab the signed .app from GitHub Releases, drag to /Applications</span></div>
-            <div><span class="pr">›</span> <span class="cm">open</span> https://github.com/frkline/lemon/releases</div>
-            <div style="height:10px"></div>
-            <div><span class="dim"># first launch — the onboarding wizard handles the rest</span></div>
+            <div><span class="dim"># launch — the wizard handles the rest</span></div>
+            <div><span class="pr">›</span> <span class="cm">lemon</span> setup</div>
             <div><span class="dim">  ✓ connected Linear · 6 teams</span></div>
             <div><span class="dim">  ✓ connected GitHub · acme/web</span></div>
-            <div><span class="dim">  ✓ pulled supervisor model · gemma-4-e2b-it-4bit</span></div>
+            <div><span class="dim">  ✓ pulled supervisor model · 1.2 GB</span></div>
             <div><span class="dim">  ✓ Lemon is in your menu bar →</span></div>
           </div>
         </div>
@@ -1003,14 +948,21 @@ em{font-style:italic;color:var(--ink)}
     <div class="brand"><span class="lemon">🍋</span> Lemon</div>
     <span class="cp mono">lemon.living</span>
     <nav class="fl">
-      <a href="https://github.com/frkline/lemon" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://github.com/frkline/lemon#readme" target="_blank" rel="noopener">Docs</a>
-      <a href="https://github.com/frkline/lemon/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="#">GitHub</a>
+      <a href="#">Docs</a>
+      <a href="#">Privacy</a>
+      <a href="#">Releases</a>
     </nav>
   </footer>
-</main>
+</template>
+
+<main class="page" id="pageRoot" data-screen-label="lemon.living"></main>
 
 <script>
+  // Render the page once.
+  const tpl = document.getElementById('page');
+  document.getElementById('pageRoot').appendChild(tpl.content.cloneNode(true));
+
   // Theme: Auto (follow system) → Light → Dark, persisted. Manual wins.
   const root = document.documentElement;
   const btn = document.getElementById('themeBtn');

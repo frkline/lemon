@@ -1,0 +1,93 @@
+<!-- @dsCard group="Foundations" name="Spacing & Radii" subtitle="4-pt rhythm, radius scale, density" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>spacing.html</title><style>
+:root{
+  --lemon:#F7C842;--linearMark:#9DA4F5;
+  --primary:#ECE6D8;--secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50);--quaternary:rgba(236,230,216,.30);
+  --r3:3px;--r6:6px;--r10:10px;--r14:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  background:radial-gradient(120% 90% at 18% 0%,#3a2f4a 0%,#241d30 40%,#14101c 100%) fixed,#14101c;
+  color:var(--primary);-webkit-font-smoothing:antialiased;padding:32px;}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace}
+.doc{width:820px;max-width:100%;border-radius:18px;background:rgba(33,27,17,.62);
+  backdrop-filter:blur(36px) saturate(1.3);-webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 22px 56px rgba(0,0,0,.5);
+  padding:36px 38px 34px;}
+.eyebrow{display:flex;align-items:center;gap:8px;color:var(--tertiary);font-size:10px;
+  font-weight:700;letter-spacing:1.7px;text-transform:uppercase;margin-bottom:16px}
+.eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--lemon)}
+h1{font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1.08;margin-bottom:12px}
+.lead{color:var(--secondary);font-size:13.5px;line-height:1.6;max-width:64ch}
+.hr{height:.5px;background:rgba(236,230,216,.13);margin:26px 0}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:34px}
+h2{font-size:10px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;
+  color:var(--tertiary);margin-bottom:14px}
+/* radius row */
+.rad{display:flex;align-items:center;gap:14px;padding:9px 0}
+.rad + .rad{box-shadow:inset 0 .5px 0 rgba(236,230,216,.08)}
+.rbox{width:40px;height:40px;flex:none;background:rgba(236,230,216,.10);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.16)}
+.rn{font-size:12px;font-weight:600}
+.rv{font-size:10px;color:var(--tertiary);margin-top:1px}
+.ru{margin-left:auto;color:var(--secondary);font-size:10.5px;text-align:right;max-width:22ch;line-height:1.35}
+/* spacing scale */
+.sp{display:flex;align-items:center;gap:14px;padding:7px 0}
+.sbar{height:10px;background:var(--lemon);border-radius:2px;opacity:.85;flex:none}
+.sv{font-size:11px;font-weight:600;width:42px;flex:none}
+.su{color:var(--secondary);font-size:10.5px}
+/* density sample */
+.samp{border-radius:12px;overflow:hidden;background:rgba(34,28,18,.5);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.08);margin-top:4px}
+.srow{display:flex;align-items:center;gap:8px;padding:11px 14px}
+.srow + .srow{box-shadow:inset 0 .5px 0 rgba(236,230,216,.08)}
+.srow .st{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;color:var(--secondary)}
+.srow .st .d{width:6px;height:6px;border-radius:50%;background:var(--linearMark)}
+.fav{width:16px;height:16px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;flex:none;
+  background:rgba(94,106,210,.22);box-shadow:inset 0 0 0 .5px rgba(124,134,232,.48)}
+.fav svg{width:11px;height:11px;display:block}
+.srow .id{font-size:10px;color:var(--tertiary)}
+.srow .ch{margin-left:auto;color:var(--quaternary);font-size:13px}
+.tagrow{display:flex;gap:8px;margin-top:14px}
+.tag{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:7px;
+  font-size:11px;font-weight:600;background:rgba(236,230,216,.06);color:var(--secondary);
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.10)}
+.cap{color:var(--tertiary);font-size:10.5px;margin-top:9px;line-height:1.5}
+.cap b{color:var(--secondary);font-weight:600}
+</style></head>
+<body><div class="doc">
+  <div class="eyebrow"><i></i>Foundations &middot; Spacing &amp; Radii</div>
+  <h1>Spacing &amp; radii</h1>
+  <p class="lead">A 4-pt rhythm and a four-stop radius scale keep the whole popover coherent at a glance. Corners nest: an inner element always rounds tighter than the surface holding it, so concentric edges stay parallel.</p>
+  <div class="hr"></div>
+  <div class="cols">
+    <div>
+      <h2>Radius scale</h2>
+      <div class="rad"><span class="rbox" style="border-radius:var(--r3)"></span><div><div class="rn">r3</div><div class="rv mono">3px</div></div><div class="ru">Inner chips, accent ticks.</div></div>
+      <div class="rad"><span class="rbox" style="border-radius:var(--r6)"></span><div><div class="rn">r6</div><div class="rv mono">6px</div></div><div class="ru">Buttons, inputs, favicon tiles.</div></div>
+      <div class="rad"><span class="rbox" style="border-radius:var(--r10)"></span><div><div class="rn">r10</div><div class="rv mono">10px</div></div><div class="ru">Rows, cards, list groups.</div></div>
+      <div class="rad"><span class="rbox" style="border-radius:var(--r14)"></span><div><div class="rn">r14</div><div class="rv mono">14px</div></div><div class="ru">Popover root, settings panels.</div></div>
+      <h2 style="margin-top:26px">Spacing rhythm</h2>
+      <div class="sp"><span class="sv mono">4</span><span class="sbar" style="width:8px"></span><span class="su">hairline gaps, icon insets</span></div>
+      <div class="sp"><span class="sv mono">6&ndash;8</span><span class="sbar" style="width:16px"></span><span class="su">within a row &mdash; meta, chips</span></div>
+      <div class="sp"><span class="sv mono">10&ndash;14</span><span class="sbar" style="width:28px"></span><span class="su">row padding, between blocks</span></div>
+      <div class="sp"><span class="sv mono">18&ndash;22</span><span class="sbar" style="width:44px"></span><span class="su">section breaks, panel padding</span></div>
+    </div>
+    <div>
+      <h2>Density &amp; hit targets</h2>
+      <div class="samp">
+        <div class="srow"><span class="st"><span class="d"></span>Executing</span><span class="fav"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span><span class="id mono">LEM-42</span><span class="ch">&rsaquo;</span></div>
+        <div class="srow"><span class="st"><span class="d"></span>Waiting</span><span class="fav"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span><span class="id mono">LEM-38</span><span class="ch">&rsaquo;</span></div>
+      </div>
+      <div class="tagrow">
+        <span class="tag">Open terminal</span>
+        <span class="tag">Stop</span>
+      </div>
+      <p class="cap"><b>Compact, not cramped.</b> Rows run <b>~44&thinsp;pt</b> tall with 11&times;14 padding; buttons hold a <b>28&thinsp;pt</b> minimum even inside the dense popover. The menubar context rewards tight vertical rhythm, but nothing interactive drops below a comfortable target.</p>
+      <p class="cap" style="margin-top:12px"><b>Concentric corners.</b> The r6 favicon sits inside an r10 row inside the r14 popover &mdash; each step tighter so the rounded edges read as parallel, never mismatched.</p>
+    </div>
+  </div>
+</div></body></html>

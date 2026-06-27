@@ -1,0 +1,83 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>source-glyph.html</title><style>
+:root {
+  /* Brand */
+  --lemon:#F7C842; --lemondrop:#FEF4CC; --coral:#FF6B46; --citrus:#2D4A1E;
+  /* Source marks */
+  --linearMark:#9DA4F5; --githubMark:#F2EFE9;
+  /* Status */
+  --statusPlanning:#6197FA; --statusExecuting:#F7C842; --statusWaiting:#FF6B46;
+  --statusReviewing:#66C78F; --statusDone:#45C27A; --statusFailed:#F24545;
+  /* Console */
+  --console:#17110A; --consoleText:#E8E0CC;
+  /* Chrome text on warm-dark glass */
+  --primary:#ECE6D8; --secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50); --quaternary:rgba(236,230,216,.30);
+  /* Radii */
+  --r3:3px; --r6:6px; --r10:10px; --r14:14px;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  /* Representative desktop behind a translucent menubar popover — the real
+     compositing context for Liquid Glass, per the PR's own unchecked box. */
+  background:
+    radial-gradient(120% 90% at 18% 0%, #3a2f4a 0%, #241d30 40%, #14101c 100%),
+    #14101c;
+  color:var(--primary);
+  -webkit-font-smoothing:antialiased;
+  padding:28px; display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start;
+}
+.label { color:var(--secondary); font-size:10px; font-weight:700;
+  letter-spacing:1.4px; text-transform:uppercase; margin:2px 0 9px; }
+.mono { font-family:"SF Mono",ui-monospace,Menlo,monospace; }
+
+/* ---- Glass surfaces ---- */
+.glass { position:relative; border-radius:var(--r10); overflow:hidden;
+  background:rgba(34,28,18,.52); backdrop-filter:blur(20px) saturate(1.2);
+  -webkit-backdrop-filter:blur(20px) saturate(1.2);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.07); }
+.glass.hover { background:rgba(40,33,21,.72); backdrop-filter:blur(30px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); }
+.glass.tint-lemon::after,.glass .tintfill { }
+.glass.tint-lemon { background-image:linear-gradient(rgba(247,200,66,.04),rgba(247,200,66,.04)); }
+.glass.tint-linear { background-image:linear-gradient(rgba(234,174,58,.036),rgba(234,174,58,.036)); }
+.glass.tint-github { background-image:linear-gradient(rgba(107,209,128,.03),rgba(107,209,128,.03)); }
+.glass.tint-coral  { background-image:linear-gradient(rgba(255,107,70,.04),rgba(255,107,70,.04)); }
+.glass.selected { background:rgba(40,33,21,.72); }
+.glass.selected.tint-linear { box-shadow:inset 0 0 0 .5px rgba(234,174,58,.35); }
+.glass.selected.tint-github { box-shadow:inset 0 0 0 .5px rgba(107,209,128,.35); }
+.glass.selected.tint-coral  { box-shadow:inset 0 0 0 .5px rgba(255,107,70,.35); }
+
+/* floating (ultraThin + tint + brighter top edge) — pills, action rows */
+.cap { display:inline-flex; align-items:center; gap:4px; border-radius:999px;
+  background:rgba(60,52,36,.40); backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); padding:3px 7px; }
+
+/* card chrome for the design pane */
+.card { border-radius:14px; padding:20px; }
+.stack { display:flex; flex-direction:column; gap:14px; }
+.row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+.frame { width:340px; }
+.fav { display:inline-flex; align-items:center; justify-content:center;
+  width:22px; height:22px; border-radius:6px; flex:none; }
+.fav svg { width:15px; height:15px; display:block; }
+.fav.linear { background:rgba(94,106,210,.22); box-shadow:inset 0 0 0 .5px rgba(124,134,232,.48); }
+.fav.github { background:rgba(150,152,168,.22); box-shadow:inset 0 0 0 .5px rgba(214,216,228,.30); }
+.pair { display:inline-flex; align-items:center; gap:7px; }
+.pid { font-family:"SF Mono",ui-monospace,Menlo,monospace; color:var(--secondary);
+  font-size:10px; font-weight:600; }</style></head>
+<body><div class="frame"><div class="label">SourceGlyph · provider mark</div>
+<div class="row" style="gap:18px">
+  <span class="fav linear"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span>
+  <span class="fav github"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span>
+</div>
+<div class="row" style="gap:18px;margin-top:14px">
+  <span class="pair"><span class="fav linear" style="width:16px;height:16px;border-radius:5px"><svg viewBox="0 0 12 12" aria-hidden="true"><g fill="var(--linearMark)"><rect transform="rotate(45 6 6)" x="0.6" y="2.9" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="5.25" width="10.8" height="1.5" rx=".75"></rect><rect transform="rotate(45 6 6)" x="0.6" y="7.6" width="10.8" height="1.5" rx=".75"></rect></g></svg></span><span class="pid">LEM-42</span></span>
+  <span class="pair"><span class="fav github" style="width:16px;height:16px;border-radius:5px"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="var(--githubMark)" d="M3.7 5.4 5.5 2.4 7.1 4.6C7.7 4.5 8.3 4.5 8.9 4.6L10.5 2.4 12.3 5.4C13.2 6.7 13.5 7.9 13.5 9A5.5 5.2 0 0 1 2.5 9C2.5 7.9 2.8 6.7 3.7 5.4Z"></path></svg></span><span class="pid">acme/web#7</span></span>
+</div>
+<p style="color:var(--tertiary);font-size:10px;margin-top:16px;line-height:1.5">Favicon-style tiles, width-stable. Linear → light purple diagonal mark (#5E6AD2 family), GitHub → white cat silhouette on grey. Lemon-yellow stays reserved for the primary CTA.</p></div></body></html>

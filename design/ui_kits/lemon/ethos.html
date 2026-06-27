@@ -1,0 +1,50 @@
+<!-- @dsCard group="Foundations" name="Ethos" subtitle="The seven principles" -->
+<!doctype html><html><head><meta charset="utf-8">
+<title>ethos.html</title><style>
+:root{
+  --lemon:#F7C842;--lemondrop:#FEF4CC;--coral:#FF6B46;--citrus:#2D4A1E;
+  --primary:#ECE6D8;--secondary:rgba(236,230,216,.66);
+  --tertiary:rgba(236,230,216,.50);--quaternary:rgba(236,230,216,.30);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  background:radial-gradient(120% 90% at 18% 0%,#3a2f4a 0%,#241d30 40%,#14101c 100%) fixed,#14101c;
+  color:var(--primary);-webkit-font-smoothing:antialiased;padding:32px;}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace}
+.doc{width:780px;max-width:100%;border-radius:18px;background:rgba(33,27,17,.62);
+  backdrop-filter:blur(36px) saturate(1.3);-webkit-backdrop-filter:blur(36px) saturate(1.3);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.10),0 22px 56px rgba(0,0,0,.5);
+  padding:36px 38px 34px;}
+.eyebrow{display:flex;align-items:center;gap:8px;color:var(--tertiary);font-size:10px;
+  font-weight:700;letter-spacing:1.7px;text-transform:uppercase;margin-bottom:18px}
+.eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--lemon)}
+h1{font-size:30px;font-weight:700;letter-spacing:-.6px;line-height:1.05;margin-bottom:14px}
+h1 em{font-style:normal;color:var(--lemon)}
+.lead{color:var(--secondary);font-size:14.5px;line-height:1.62;max-width:62ch}
+.hr{height:.5px;background:rgba(236,230,216,.13);margin:28px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:26px 34px}
+.pr{display:grid;grid-template-columns:auto 1fr;gap:13px}
+.prn{color:var(--lemon);font-size:12px;font-weight:600;letter-spacing:.5px;padding-top:2px;opacity:.92}
+.prt{font-size:13.5px;font-weight:650;letter-spacing:-.1px;margin-bottom:5px}
+.prd{color:var(--secondary);font-size:11.5px;line-height:1.55}
+.foot{display:flex;align-items:center;gap:9px;margin-top:30px;color:var(--tertiary);font-size:10.5px}
+.foot .dot{width:5px;height:5px;border-radius:50%;background:var(--quaternary)}
+</style></head>
+<body><div class="doc">
+  <div class="eyebrow"><i></i>Design System &middot; Foundations</div>
+  <h1>The <em>Lemon</em> ethos</h1>
+  <p class="lead">Lemon hangs off the menubar and runs coding agents against your Linear issues and GitHub repos. It is chrome that sits over your real desktop, so it has to feel like part of the machine &mdash; warm, dense, and quiet, until the one moment it isn&rsquo;t. Seven principles hold the system together.</p>
+  <div class="hr"></div>
+  <div class="grid">
+    <div class="pr"><div class="prn mono">01</div><div><div class="prt">Material over stroke</div><div class="prd">Depth comes from the glass and its blur, not from borders. A surface steps forward by thickening its material &mdash; never by drawing a heavier line. Hairlines are half a pixel and barely there.</div></div></div>
+    <div class="pr"><div class="prn mono">02</div><div><div class="prt">Warm, not cold</div><div class="prd">Every neutral is pulled toward amber and citrus. The chrome is dark, but it&rsquo;s a dark that belongs beside a lemon &mdash; never gunmetal, never a cold gray panel.</div></div></div>
+    <div class="pr"><div class="prn mono">03</div><div><div class="prt">Color is earned</div><div class="prd">Yellow is reserved for the single primary action. State lives in one small dot. Most of the interface is quiet warm-neutral text, because saturation is a signal and signals must stay scarce.</div></div></div>
+    <div class="pr"><div class="prn mono">04</div><div><div class="prt">Machine truth in mono</div><div class="prd">Identifiers, paths, and console output are set in SF Mono &mdash; the literal truth handed back by Linear, GitHub, and the agent. Prose and labels are SF Pro. The typeface says what&rsquo;s human and what&rsquo;s machine.</div></div></div>
+    <div class="pr"><div class="prn mono">05</div><div><div class="prt">Width-stable identity</div><div class="prd">Source marks are fixed-size favicon tiles. A list of sessions never reflows when a status flips, so the eye can rest on stable columns and scan down without jitter.</div></div></div>
+    <div class="pr"><div class="prn mono">06</div><div><div class="prt">Quiet by default, loud when it matters</div><div class="prd">A resting row whispers. A live agent or a failure is the only thing allowed to raise its voice &mdash; and even then the loud signal is small, just unmistakable.</div></div></div>
+    <div class="pr"><div class="prn mono">07</div><div><div class="prt">Built for the corner</div><div class="prd">Everything assumes a 340-pt popover in the top-right corner of the screen. Density is high, hit targets stay at least 28&thinsp;pt, and nothing presumes a full window to breathe in.</div></div></div>
+    <div class="pr"><div class="prn mono">&mdash;</div><div><div class="prt" style="color:var(--secondary)">In one line</div><div class="prd">Liquid Glass, meticulous and Apple-quiet: warm dark, mono where it counts, color only when something is actually happening.</div></div></div>
+  </div>
+  <div class="foot mono"><span class="dot"></span>Lemon &middot; Liquid Glass for the menubar</div>
+</div></body></html>
