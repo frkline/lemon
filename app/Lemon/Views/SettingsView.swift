@@ -13,8 +13,6 @@ struct SettingsView: View {
     @State private var githubUser = ""
     @State private var pairs: [WorkspacePair] = []
     @State private var saved = false
-    @State private var editingWorkspace = false
-    @State private var ghVerifyState: VerifyState = .idle
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var aiTestState: AITestState = .idle
 
@@ -32,13 +30,6 @@ struct SettingsView: View {
         case failed(String)
     }
 
-    enum VerifyState: Equatable {
-        case idle
-        case verifying
-        case ok(login: String)
-        case failed(String)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
@@ -52,7 +43,7 @@ struct SettingsView: View {
                 .padding(24)
                 .padding(.bottom, 4)
             }
-            Divider()
+            Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
             settingsFooter
         }
         .frame(minHeight: 780)
@@ -66,19 +57,21 @@ struct SettingsView: View {
             sectionLabel("General")
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    configGlyph("power", tint: launchAtLogin ? LD.statusDone : .secondary.opacity(0.6))
+                    rowIconCell("power", on: launchAtLogin)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text("Launch at Login")
                                 .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(LD.textPrimary)
                             Spacer()
                         }
                         Text("Start Lemon automatically when you log in.")
                             .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(LD.textTertiary)
                     }
                     Toggle("", isOn: $launchAtLogin)
                         .labelsHidden()
+                        .toggleStyle(LemonToggleStyle())
                         .onChange(of: launchAtLogin) { _, enabled in
                             do {
                                 if enabled { try SMAppService.mainApp.register() }
@@ -90,7 +83,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11)
             }
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.thick, cornerRadius: LD.r14)
         }
     }
 
@@ -136,11 +129,11 @@ struct SettingsView: View {
                     ForEach(allIdentities) { ident in
                         identityRow(ident)
                         if ident.id != allIdentities.last?.id {
-                            Divider().padding(.leading, 56).opacity(0.6)
+                            Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 56)
                         }
                     }
                 }
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.thick, cornerRadius: LD.r14)
             }
         }
     }
@@ -188,33 +181,34 @@ struct SettingsView: View {
             Text("Add")
                 .font(.system(size: 11, weight: .medium))
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(LD.textSecondary)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(.primary.opacity(0.05), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .background(LD.glassThinFill, in: Capsule())
+        .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
     }
 
     private var identityCountChip: some View {
         Text("\(allIdentities.count)")
             .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(LD.textTertiary)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Capsule().fill(.primary.opacity(0.05)))
+            .background(Capsule().fill(LD.glassThinFill))
+        .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
     }
 
     private var identitiesEmptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No identities connected.")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
             Text("Connect Linear, GitHub, or a GitHub Enterprise instance to start routing workspaces.")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thick, cornerRadius: LD.r14)
     }
 
     private func identityRow(_ ident: Identity) -> some View {
@@ -230,33 +224,33 @@ struct SettingsView: View {
                     HStack(spacing: 6) {
                         Text(ident.label.isEmpty ? ident.kind.displayName : ident.label)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(LD.textPrimary)
                         if !ident.handle.isEmpty {
                             Text("@\(ident.handle)")
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(LD.textTertiary)
                         }
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(LD.textQuaternary)
                     }
                     HStack(spacing: 6) {
                         if let host = ident.host, !host.isEmpty {
                             Text(host)
                                 .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(LD.textTertiary)
                             Text("·")
                                 .font(.system(size: 9))
-                                .foregroundStyle(.quaternary)
+                                .foregroundStyle(LD.textQuaternary)
                         }
                         Text("\(ident.knownSurfaces.count) surface\(ident.knownSurfaces.count == 1 ? "" : "s")")
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(LD.textSecondary)
                         if let fetched = ident.surfacesFetchedAt {
                             Text("· refreshed \(relative(fetched))")
                                 .font(.system(size: 9))
-                                .foregroundStyle(.quaternary)
+                                .foregroundStyle(LD.textQuaternary)
                         }
                     }
                 }
@@ -296,11 +290,11 @@ struct SettingsView: View {
                     ForEach(allWorkspaces) { ws in
                         workspaceListRow(ws)
                         if ws.id != allWorkspaces.last?.id {
-                            Divider().padding(.leading, 56).opacity(0.6)
+                            Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 56)
                         }
                     }
                 }
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+                .lemonGlass(.thick, cornerRadius: LD.r14)
             }
         }
     }
@@ -309,14 +303,14 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No workspaces yet.")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LD.textSecondary)
             Text("Add a folder + routing to start polling. Lemon needs at least one connected identity to route through.")
                 .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+        .lemonGlass(.thick, cornerRadius: LD.r14)
     }
 
     private func workspaceListRow(_ ws: Workspace) -> some View {
@@ -343,31 +337,31 @@ struct SettingsView: View {
                     }
                     Image(systemName: ws.allReposInFolder ? "folder.fill.badge.plus" : "folder.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(LD.textQuaternary)
                 }
                 .frame(width: 32)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(displayName.isEmpty ? "Unnamed workspace" : displayName)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(LD.textPrimary)
                         if ws.allReposInFolder {
-                            editorialChip("folder", tint: .secondary)
+                            editorialChip("folder", tint: LD.textSecondary)
                         }
                         if ws.allReposInFolder, !ws.homeRepo.isEmpty {
-                            editorialChip("→ \(ws.homeRepo)/", tint: LD.lemon, mono: true)
+                            editorialChip("→ \(ws.homeRepo)/", tint: LD.textSecondary, mono: true)
                         }
                         Spacer(minLength: 0)
                         workspaceLiveChip(status: status, ident: ident)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(LD.textQuaternary)
                     }
                     HStack(spacing: 6) {
                         if let ident, let surface {
                             Text("\(ident.label) · \(surface.key)")
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(LD.textTertiary)
                                 .lineLimit(1)
                         } else if let ident {
                             HStack(spacing: 4) {
@@ -377,7 +371,7 @@ struct SettingsView: View {
                                     .font(.system(size: 9))
                                     .foregroundStyle(LD.coral)
                             }
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(LD.textTertiary)
                         } else {
                             Text("Routing missing — identity deleted")
                                 .font(.system(size: 10))
@@ -386,13 +380,13 @@ struct SettingsView: View {
                     }
                     Text(ws.path.isEmpty ? "(no path set)" : ws.path)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if let line = status?.subtitle {
                         Text(line)
                             .font(.system(size: 9))
-                            .foregroundStyle(status?.error == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(LD.coral))
+                            .foregroundStyle(status?.error == nil ? AnyShapeStyle(LD.textQuaternary) : AnyShapeStyle(LD.coral))
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -409,21 +403,21 @@ struct SettingsView: View {
     private func workspaceLiveChip(status: WorkspaceStatus?, ident: Identity?) -> some View {
         if ident == nil {
             HStack(spacing: 3) {
-                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Circle().fill(LD.coral).frame(width: 5, height: 5)
                 Text("orphan")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(LD.coral)
             }
         } else if let status, status.error != nil {
             HStack(spacing: 3) {
-                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Circle().fill(LD.coral).frame(width: 5, height: 5)
                 Text("err")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(LD.coral)
             }
         } else if status?.lastPolledAt != nil {
             HStack(spacing: 3) {
-                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
+                Circle().fill(LD.statusDone).frame(width: 5, height: 5)
                 Text("live")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(LD.statusDone)
@@ -431,230 +425,27 @@ struct SettingsView: View {
         } else {
             Text("idle")
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.quaternary)
-        }
-    }
-
-    private var githubSection: some View {
-        let connectedDetail: String? = {
-            if case let .ok(login) = ghVerifyState { return "@\(login)" }
-            if !githubUser.isEmpty { return "@\(githubUser)" }
-            return nil
-        }()
-        return sourceCredentialSection(
-            source: .github,
-            heading: "GitHub",
-            subhead: "Personal Access Token",
-            placeholder: "ghp_… (scope: repo)",
-            connected: !githubToken.isEmpty,
-            connectedDetail: connectedDetail,
-            keyBinding: $githubToken,
-            verifyAction: { Task { await verifyGitHubToken() } },
-            verifyState: ghVerifyState,
-        )
-    }
-
-    /// Shared editorial credential card. Eyebrow + serif-leaning subhead,
-    /// monospace token field, optional Verify action with inline state.
-    private func sourceCredentialSection(
-        source: IssueSource,
-        heading: String,
-        subhead: String,
-        placeholder: String,
-        connected: Bool,
-        connectedDetail: String?,
-        keyBinding: Binding<String>,
-        verifyAction: (() -> Void)?,
-        verifyState: VerifyState?,
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(heading.uppercased())
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundStyle(.tertiary)
-                SourceGlyph(source: source, size: 8)
-                Spacer()
-                if connected { connectedBadge }
-                if let detail = connectedDetail {
-                    Text(detail)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text(subhead)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                SecureField(placeholder, text: keyBinding)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5),
-                    )
-                if let verifyAction {
-                    HStack(spacing: 8) {
-                        Button("Verify") { verifyAction() }
-                            .buttonStyle(GhostButtonStyle())
-                            .disabled(keyBinding.wrappedValue.isEmpty || verifyState == .verifying)
-                        verifyStateRow(verifyState)
-                        Spacer()
-                    }
-                }
-            }
-            .padding(14)
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-            .overlay(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(source.accent.opacity(connected ? 0.20 : 0.08), lineWidth: 0.5),
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func verifyStateRow(_ state: VerifyState?) -> some View {
-        switch state {
-        case .verifying:
-            HStack(spacing: 4) {
-                ProgressView().controlSize(.small)
-                Text("verifying…")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-        case let .ok(login):
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(LD.statusDone)
-                Text("@\(login)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(LD.statusDone)
-            }
-        case let .failed(msg):
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.octagon.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(LD.coral)
-                Text(msg)
-                    .font(.system(size: 10))
-                    .foregroundStyle(LD.coral)
-                    .lineLimit(1)
-            }
-        default:
-            EmptyView()
-        }
-    }
-
-    private var workspaceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                sectionLabel("Workspace pairs")
-                pairCountChip
-                Spacer()
-                Button("Edit") { editingWorkspace = true }
-                    .buttonStyle(GhostButtonStyle())
-            }
-            if pairs.isEmpty {
-                HStack(spacing: 12) {
-                    iconBox("folder.fill", tint: .secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No pairs configured")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.tertiary)
-                        Text("Add one in the editor — Linear team or GitHub owner/repo.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.quaternary)
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(pairs) { pair in
-                        pairRow(pair)
-                        if pair.id != pairs.last?.id {
-                            Divider().padding(.leading, 56).opacity(0.6)
-                        }
-                    }
-                }
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
-            }
-        }
-        .sheet(isPresented: $editingWorkspace) {
-            WorkspaceEditorView(pairs: $pairs, onDone: { editingWorkspace = false })
+                .foregroundStyle(LD.textQuaternary)
         }
     }
 
     /// Tiny "N · 10" pair count, set in monospace for editorial restraint.
     private var pairCountChip: some View {
         HStack(spacing: 3) {
-            Text("\(pairs.count)")
+            Text("\(allWorkspaces.count)")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(pairs.count >= KeychainStore.maxPairs ? LD.coral : .secondary)
+                .foregroundStyle(allWorkspaces.count >= KeychainStore.maxPairs ? LD.coral : LD.textSecondary)
             Text("·")
                 .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(LD.textQuaternary)
             Text("\(KeychainStore.maxPairs)")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(Capsule().fill(.primary.opacity(0.05)))
-    }
-
-    private func pairRow(_ pair: WorkspacePair) -> some View {
-        let pairStatus = orchestrator.pairStatus(for: pair.id)
-        return HStack(spacing: 12) {
-            // Source ornament: a hairline-bordered glyph stack. The folder
-            // glyph below it whispers "this lives on disk" without competing
-            // with the source identity.
-            VStack(spacing: 4) {
-                SourceGlyph(source: pair.source.source, size: 9)
-                Image(systemName: pair.workspace.allReposInFolder
-                    ? "folder.fill.badge.plus"
-                    : "folder.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
-            }
-            .frame(width: 32)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(pair.workspace.matchKey.isEmpty ? "—" : pair.workspace.matchKey)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.primary)
-                    if pair.workspace.allReposInFolder {
-                        editorialChip("folder", tint: .secondary)
-                    }
-                    if pair.workspace.allReposInFolder, !pair.workspace.homeRepo.isEmpty {
-                        editorialChip("→ \(pair.workspace.homeRepo)/", tint: LD.lemon, mono: true)
-                    }
-                    Spacer()
-                    pairConnectionChip(pair: pair, status: pairStatus)
-                }
-                Text(pair.workspace.path.isEmpty ? "(no path set)" : pair.workspace.path)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let line = pairStatus?.subtitle {
-                    Text(line)
-                        .font(.system(size: 10))
-                        .foregroundStyle(pairStatus?.error == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(LD.coral))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
+        .background(Capsule().fill(LD.glassThinFill))
+        .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
     }
 
     /// Editorial chip — kerned uppercase or monospace, hairline border for restraint.
@@ -673,32 +464,6 @@ struct SettingsView: View {
             .overlay(Capsule().strokeBorder(tint.opacity(0.20), lineWidth: 0.5))
     }
 
-    @ViewBuilder
-    private func pairConnectionChip(pair _: WorkspacePair, status: PairStatus?) -> some View {
-        if let status, status.error != nil {
-            // Coral dot — error state needs attention.
-            HStack(spacing: 3) {
-                Circle().fill(LD.coral).frame(width: 4, height: 4)
-                Text("err")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(LD.coral)
-            }
-        } else if status?.lastPolledAt != nil {
-            // Quiet green dot — last poll succeeded.
-            HStack(spacing: 3) {
-                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
-                Text("live")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(LD.statusDone)
-            }
-        } else {
-            // Pre-first-poll: hush.
-            Text("idle")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.quaternary)
-        }
-    }
-
     // MARK: - Local AI
 
     private var localAISection: some View {
@@ -714,27 +479,23 @@ struct SettingsView: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 sectionLabel("Local AI")
                 Spacer()
-                Text("SwiftLM \(LocalAI.swiftLMBuild)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(LD.citrus)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(LD.lemon.opacity(0.18), in: RoundedRectangle(cornerRadius: LD.r3))
+                eyebrowBadge("SwiftLM \(LocalAI.swiftLMBuild)")
             }
 
             VStack(spacing: 0) {
                 aiRow(icon: "cpu", label: "Gemma model",
                       path: modelPath.isEmpty ? "Not configured" : modelPath,
                       ready: modelReady)
-                Divider().padding(.leading, 54)
+                Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 54)
                 aiRow(icon: "terminal.fill", label: "SwiftLM runner",
                       path: swiftLMPath.isEmpty ? "Not configured" : swiftLMPath,
                       ready: swiftLMReady)
                 if modelReady, swiftLMReady {
-                    Divider().padding(.leading, 54)
+                    Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 54)
                     aiTestRow
                 }
             }
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.thick, cornerRadius: LD.r14)
         }
     }
 
@@ -753,21 +514,18 @@ struct SettingsView: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 sectionLabel("MCP Server")
                 Spacer()
-                Text("Claude Code · recursive mode")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(LD.citrus)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(LD.lemon.opacity(0.18), in: RoundedRectangle(cornerRadius: LD.r3))
+                eyebrowBadge("Claude Code · recursive mode")
             }
 
             VStack(spacing: 0) {
                 // Toggle row
                 HStack(spacing: 12) {
-                    configGlyph("network", tint: running ? LD.statusDone : .secondary.opacity(0.6))
+                    rowIconCell("network", on: running)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text("Expose to Claude Code")
                                 .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(LD.textPrimary)
                             Spacer()
                             mcpRunningChip(running: running)
                         }
@@ -775,12 +533,13 @@ struct SettingsView: View {
                             ? endpoint
                             : "Flip on to let another Claude observe and steer Lemon sessions.")
                             .font(.system(size: 10, design: running ? .monospaced : .default))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(LD.textTertiary)
                             .lineLimit(2)
                             .truncationMode(.tail)
                     }
                     Toggle("", isOn: $mcpEnabled)
                         .labelsHidden()
+                        .toggleStyle(LemonToggleStyle())
                         .onChange(of: mcpEnabled) { _, enabled in
                             applyMcpToggle(enabled: enabled)
                         }
@@ -788,17 +547,17 @@ struct SettingsView: View {
                 .padding(.horizontal, 14).padding(.vertical, 11)
 
                 if mcpEnabled {
-                    Divider().padding(.leading, 56).opacity(0.6)
+                    Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 56)
 
                     // Port row
                     HStack(spacing: 12) {
-                        configGlyph("number", tint: .secondary.opacity(0.7))
+                        configGlyph("number", tint: LD.textSecondary.opacity(0.7))
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Port")
                                 .font(.system(size: 12, weight: .semibold))
                             Text("Default 8765 — toggle off/on to apply changes.")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(LD.textTertiary)
                         }
                         Spacer(minLength: 8)
                         TextField("8765", value: $mcpPort, format: .number.grouping(.never))
@@ -809,16 +568,16 @@ struct SettingsView: View {
                             .padding(.vertical, 5)
                             .background(
                                 RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5),
+                                    .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: 0.5),
                             )
                     }
                     .padding(.horizontal, 14).padding(.vertical, 11)
 
-                    Divider().padding(.leading, 56).opacity(0.6)
+                    Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 56)
 
                     // Copy config row
                     HStack(spacing: 12) {
-                        configGlyph("doc.on.clipboard", tint: .secondary.opacity(0.7))
+                        configGlyph("doc.on.clipboard", tint: LD.textSecondary.opacity(0.7))
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Add to Claude Code")
                                 .font(.system(size: 12, weight: .semibold))
@@ -831,7 +590,7 @@ struct SettingsView: View {
                             } else {
                                 Text("Copies a JSON snippet for ~/.claude.json")
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(LD.textTertiary)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                             }
@@ -844,7 +603,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                 }
             }
-            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: LD.r10))
+            .lemonGlass(.thick, cornerRadius: LD.r14)
         }
     }
 
@@ -898,7 +657,7 @@ struct SettingsView: View {
                     ScrollView {
                         Text(aiTestDetail)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(LD.textSecondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -906,7 +665,7 @@ struct SettingsView: View {
                 } else {
                     Text(aiTestDetail)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LD.textSecondary)
                         .lineLimit(2)
                         .truncationMode(.tail)
                         .textSelection(.enabled)
@@ -918,7 +677,7 @@ struct SettingsView: View {
                 ProgressView().scaleEffect(0.6).frame(width: 18, height: 18)
             default:
                 Button("Run", action: runAITest)
-                    .buttonStyle(LemonButtonStyle())
+                    .buttonStyle(GhostButtonStyle())
                     .font(.system(size: 11, weight: .semibold))
             }
         }
@@ -928,7 +687,7 @@ struct SettingsView: View {
 
     private var aiTestTint: Color {
         switch aiTestState {
-        case .idle: .secondary
+        case .idle: LD.textSecondary
         case .starting, .classifying: LD.lemon
         case .passed: LD.statusDone
         case .failed: LD.coral
@@ -1028,13 +787,13 @@ struct SettingsView: View {
                 HStack(spacing: 6) {
                     Text(label)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(LD.textPrimary)
                     Spacer()
                     configStatusChip(ready: ready)
                 }
                 Text(path)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LD.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
             }
         }
@@ -1087,7 +846,7 @@ struct SettingsView: View {
         } else {
             Text("off")
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(LD.textQuaternary)
         }
     }
 
@@ -1122,11 +881,11 @@ struct SettingsView: View {
                     Text("Re-run setup")
                         .font(.system(size: 10, weight: .medium))
                 }
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(LD.textTertiary)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
-                .background(.primary.opacity(0.04), in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+                .background(LD.glassThinFill, in: Capsule())
+                .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
             }
             .buttonStyle(.plain)
 
@@ -1155,36 +914,34 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private func iconBox(_ systemName: String, tint: Color) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: LD.r6)
-                .fill(tint.opacity(0.12))
-                .frame(width: 28, height: 28)
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(tint)
-        }
+    /// 26×26 leading icon cell — statusDone wash + statusDone glyph when active,
+    /// dimmed warm text when off. Matches the identity-row icon cell in
+    /// settings-panels.html (statusDone bg, 13px glyph, r7 continuous corner).
+    private func rowIconCell(_ systemName: String, on: Bool = true) -> some View {
+        let tint = on ? LD.statusDone : LD.textSecondary.opacity(0.6)
+        return Image(systemName: systemName)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: 26, height: 26)
+            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
-    private var connectedBadge: some View {
-        HStack(spacing: 3) {
-            Circle()
-                .fill(LD.statusDone)
-                .frame(width: 5, height: 5)
-            Text("Connected")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(LD.statusDone)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(LD.statusDone.opacity(0.10), in: Capsule())
+    /// Small monospace eyebrow tag — a `.cap`-style warm pill. Neutral, not a
+    /// lemon wash: the single yellow accent stays reserved for the Save CTA.
+    private func eyebrowBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(LD.textSecondary)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(LD.glassThinFill, in: Capsule())
+            .overlay(Capsule().strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
     }
 
     private func sectionLabel(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 9, weight: .bold))
             .kerning(1.2)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(LD.textTertiary)
     }
 
     // MARK: - Load / save
@@ -1209,409 +966,30 @@ struct SettingsView: View {
         }
     }
 
-    private func verifyGitHubToken() async {
-        await MainActor.run { ghVerifyState = .verifying }
-        do {
-            let identity = try await GitHubClient().verifyCredential(token: githubToken)
-            // The login (used as the assignee filter) lives in displayName when
-            // the user hasn't set a name on GH; CredentialIdentity stores both
-            // sides of that fallback in displayName, so re-derive login from id
-            // shape isn't reliable. Persist a best-effort login = displayName.
-            await MainActor.run {
-                ghVerifyState = .ok(login: identity.displayName)
-                githubUser = identity.displayName
-            }
-        } catch {
-            await MainActor.run {
-                ghVerifyState = .failed(error.localizedDescription)
-            }
-        }
-    }
 }
 
-// MARK: - Workspace editor sheet
+// MARK: - Toggle style
 
-//
-// Editorial polish: eyebrow + dateline-style metadata, generous whitespace,
-// one primary action (Done) in lemon-yellow, restrained typography. Each
-// pair row reveals its source-shaped fields (Linear → prefix, GitHub →
-// owner/repo), with inline validation hints.
-
-struct WorkspaceEditorView: View {
-    @Binding var pairs: [WorkspacePair]
-    let onDone: () -> Void
-
-    @State private var confirmingDeleteId: UUID? = nil
-    @State private var deleteTask: Task<Void, Never>?
-
-    private var atCap: Bool {
-        pairs.count >= KeychainStore.maxPairs
-    }
-
-    private var duplicateMatchKeys: Set<String> {
-        // Helps surface "you've got two LEM rows pointing at different paths".
-        // Case-insensitive within the same source.
-        let perSource = Dictionary(grouping: pairs) { "\($0.source.source.rawValue):\($0.workspace.matchKey.lowercased())" }
-        return Set(perSource.filter { $0.value.count > 1 }.keys)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Eyebrow + heading + dateline metadata row, lemon.living-style.
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("WORKSPACE")
-                            .font(.system(size: 9, weight: .bold))
-                            .kerning(1.6)
-                            .foregroundStyle(LD.lemon)
-                        Text("Pairs")
-                            .font(.system(size: 22, weight: .bold, design: .serif))
-                            .foregroundStyle(.primary)
-                    }
-                    Spacer()
-                    Button("Done") { onDone() }
-                        .buttonStyle(LemonButtonStyle())
-                        .keyboardShortcut(.defaultAction)
-                }
-                HStack(spacing: 10) {
-                    metaItem(label: "Configured", value: "\(pairs.count) of \(KeychainStore.maxPairs)")
-                    metaDivider
-                    metaItem(label: "Linear", value: "\(pairs.count(where: { $0.source.source == .linear }))")
-                    metaDivider
-                    metaItem(label: "GitHub", value: "\(pairs.count(where: { $0.source.source == .github }))")
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
-
-            Divider().opacity(0.5)
-
-            // Pair list
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 12) {
-                    ForEach($pairs) { $pair in
-                        PairRowView(
-                            pair: $pair,
-                            isDuplicate: duplicateMatchKeys.contains(
-                                "\(pair.source.source.rawValue):\(pair.workspace.matchKey.lowercased())",
-                            ) && !pair.workspace.matchKey.isEmpty,
-                            confirmingDelete: confirmingDeleteId == pair.id,
-                            onDelete: { handleDelete(pair.id) },
-                        )
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                removal: .opacity.combined(with: .move(edge: .leading)),
-                            ),
-                        )
-                    }
-
-                    addPairButton
-
-                    if atCap {
-                        Text("Soft cap. Bump it in KeychainStore.maxPairs if you genuinely need more — the limit's there to keep per-poll fan-out bounded.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 2)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 18)
-                .animation(LD.snappy, value: pairs.count)
-                .animation(LD.snappy, value: confirmingDeleteId)
-            }
-        }
-        .frame(width: 560, height: 620)
-        .background(.regularMaterial)
-    }
-
-    private var addPairButton: some View {
+/// The Lemon settings toggle — a 34×20 capsule track that fills `LD.statusDone`
+/// when on, with a 16×16 white knob (2pt inset) that slides to the trailing
+/// edge. Matches the launch-at-login / MCP toggle in settings-panels.html.
+/// Off-state track is a hushed warm-text wash, never the cool system green.
+struct LemonToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
         Button {
-            addLinearPair()
+            configuration.isOn.toggle()
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(atCap ? "10-pair limit reached" : "Add pair")
-                    .font(.system(size: 12, weight: .semibold))
-                if !atCap {
-                    Text("Linear by default — toggle the source in the row.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+            Capsule()
+                .fill(configuration.isOn ? LD.statusDone : LD.textPrimary.opacity(0.16))
+                .frame(width: 34, height: 20)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 16, height: 16)
+                        .padding(2)
                 }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(
-                        atCap ? Color.secondary.opacity(0.15) : LD.lemon.opacity(0.35),
-                        style: StrokeStyle(lineWidth: 1, dash: [4, 3]),
-                    ),
-            )
-            .foregroundStyle(atCap ? AnyShapeStyle(.tertiary) : AnyShapeStyle(LD.lemon))
         }
         .buttonStyle(.plain)
-        .disabled(atCap)
-        .opacity(atCap ? 0.55 : 1)
-    }
-
-    private func addLinearPair() {
-        withAnimation(LD.snappy) {
-            pairs.append(WorkspacePair(
-                source: SourceConfig(source: .linear, displayName: "Linear", linearTeamKeys: [""]),
-                workspace: WorkspaceMapping(matchKey: "", path: ""),
-            ))
-        }
-    }
-
-    private func handleDelete(_ id: UUID) {
-        if confirmingDeleteId == id {
-            deleteTask?.cancel()
-            confirmingDeleteId = nil
-            withAnimation(LD.snappy) {
-                pairs.removeAll { $0.id == id }
-            }
-        } else {
-            confirmingDeleteId = id
-            deleteTask?.cancel()
-            deleteTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(3))
-                if !Task.isCancelled {
-                    withAnimation(LD.smooth) { confirmingDeleteId = nil }
-                }
-            }
-        }
-    }
-
-    private func metaItem(label: String, value: String) -> some View {
-        HStack(spacing: 5) {
-            Text(label.uppercased())
-                .font(.system(size: 8, weight: .bold))
-                .kerning(1.2)
-                .foregroundStyle(.tertiary)
-            Text(value)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var metaDivider: some View {
-        Text("·")
-            .font(.system(size: 10))
-            .foregroundStyle(.quaternary)
-    }
-}
-
-struct PairRowView: View {
-    @Binding var pair: WorkspacePair
-    let isDuplicate: Bool
-    let confirmingDelete: Bool
-    let onDelete: () -> Void
-
-    @State private var hovered = false
-
-    private var validation: ValidationState {
-        if pair.workspace.matchKey.trimmingCharacters(in: .whitespaces).isEmpty {
-            return .missingKey
-        }
-        if pair.workspace.path.trimmingCharacters(in: .whitespaces).isEmpty {
-            return .missingPath
-        }
-        if pair.source.source == .github, !pair.workspace.matchKey.contains("/") {
-            return .ghShape
-        }
-        if isDuplicate {
-            return .duplicate
-        }
-        return .ok
-    }
-
-    enum ValidationState {
-        case ok, missingKey, missingPath, ghShape, duplicate
-
-        var hint: String? {
-            switch self {
-            case .ok: nil
-            case .missingKey: "Add a Linear team prefix or owner/repo."
-            case .missingPath: "Point this pair at a local repo or folder."
-            case .ghShape: "GitHub matchKey should be owner/repo (e.g. acme/widgets)."
-            case .duplicate: "Another row already claims this key."
-            }
-        }
-
-        var color: Color? {
-            switch self {
-            case .ok: nil
-            case .missingKey, .missingPath, .duplicate, .ghShape: LD.coral
-            }
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Top: source picker + delete (delete morphs into "Remove?" when armed).
-            HStack(spacing: 10) {
-                Picker("", selection: Binding(
-                    get: { pair.source.source },
-                    set: { syncSource($0) },
-                )) {
-                    Label("Linear", systemImage: "circle.hexagongrid.fill").tag(IssueSource.linear)
-                    Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right").tag(IssueSource.github)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 200)
-
-                SourceGlyph(source: pair.source.source)
-                    .help(pair.source.source.displayName)
-
-                Spacer()
-
-                Button(action: onDelete) {
-                    HStack(spacing: 4) {
-                        Image(systemName: confirmingDelete ? "trash.fill" : "trash")
-                            .font(.system(size: 11, weight: .medium))
-                        if confirmingDelete {
-                            Text("Remove?")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                    }
-                    .foregroundStyle(confirmingDelete ? .white : LD.coral)
-                    .padding(.horizontal, confirmingDelete ? 8 : 6)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule().fill(confirmingDelete ? LD.coral : LD.coral.opacity(0.10)),
-                    )
-                    .animation(LD.snappy, value: confirmingDelete)
-                }
-                .buttonStyle(.plain)
-                .help(confirmingDelete ? "Click again to confirm" : "Remove this pair")
-            }
-
-            // Identifier field (source-aware label + placeholder).
-            field(
-                label: pair.source.source == .github ? "REPO" : "TEAM",
-                placeholder: pair.source.source == .github ? "owner/repo" : "e.g. HRP",
-                text: $pair.workspace.matchKey,
-            )
-            .onChange(of: pair.workspace.matchKey) { _, newKey in
-                // Keep SourceConfig allowlist in sync with matchKey.
-                syncMatchKey(newKey)
-            }
-
-            // Path field — "PATH" for single repo, "FOLDER" for multi-repo.
-            // Distinct from the matchKey label above so GitHub's REPO / local
-            // PATH don't collide.
-            field(
-                label: pair.workspace.allReposInFolder ? "FOLDER" : "PATH",
-                placeholder: pair.workspace.allReposInFolder ? "/path/to/projects" : "/path/to/repo",
-                text: $pair.workspace.path,
-            )
-
-            // Multi-repo toggle + (conditional) home subdir
-            HStack(spacing: 10) {
-                Toggle(isOn: $pair.workspace.allReposInFolder) {
-                    Text("All repos in this folder")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .toggleStyle(.checkbox)
-                Spacer()
-            }
-
-            if pair.workspace.allReposInFolder {
-                field(
-                    label: "HOME",
-                    placeholder: "e.g. memory",
-                    text: $pair.workspace.homeRepo,
-                    helper: "Optional — subdirectory where Claude launches. Put a LEMON.md there with team-specific guidance.",
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Validation chip
-            if let hint = validation.hint, let color = validation.color {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(color)
-                    Text(hint)
-                        .font(.system(size: 10))
-                        .foregroundStyle(color)
-                }
-                .transition(.opacity)
-            }
-        }
-        .padding(14)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .fill(.primary.opacity(hovered ? 0.06 : 0.035))
-                RoundedRectangle(cornerRadius: LD.r10)
-                    .strokeBorder(
-                        validation.color?.opacity(0.30) ?? Color.primary.opacity(0.08),
-                        lineWidth: 0.5,
-                    )
-            },
-        )
-        .onHover { hovered = $0 }
-        .animation(LD.smooth, value: hovered)
-        .animation(LD.smooth, value: pair.workspace.allReposInFolder)
-    }
-
-    /// Editorial form field: eyebrow label, monospace input, optional helper line.
-    private func field(label: String, placeholder: String, text: Binding<String>, helper: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 8, weight: .bold))
-                .kerning(1.4)
-                .foregroundStyle(.tertiary)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .padding(.vertical, 5)
-                .padding(.horizontal, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5),
-                )
-            if let helper {
-                Text(helper)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
-            }
-        }
-    }
-
-    private func syncSource(_ newSource: IssueSource) {
-        pair.source = SourceConfig(
-            id: pair.source.id,
-            source: newSource,
-            displayName: newSource.displayName,
-            linearTeamKeys: newSource == .linear ? [pair.workspace.matchKey] : nil,
-            githubRepos: newSource == .github ? [pair.workspace.matchKey] : nil,
-        )
-    }
-
-    private func syncMatchKey(_ newKey: String) {
-        if pair.source.source == .linear {
-            pair.source = SourceConfig(
-                id: pair.source.id, source: .linear,
-                displayName: "Linear",
-                linearTeamKeys: [newKey], githubRepos: nil,
-            )
-        } else {
-            pair.source = SourceConfig(
-                id: pair.source.id, source: .github,
-                displayName: "GitHub",
-                linearTeamKeys: nil, githubRepos: [newKey],
-            )
-        }
+        .animation(LD.snappy, value: configuration.isOn)
     }
 }

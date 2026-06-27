@@ -16,6 +16,12 @@ enum LD {
     static let linearMark = Color(r: 0.918, g: 0.682, b: 0.227) // #EAAE3A — warmer than lemon, distinct
     static let githubMark = Color(r: 0.420, g: 0.820, b: 0.500) // brightened statusDone for chip glyphs
 
+    // Linear's real brand ink — periwinkle. Source of truth for both the
+    // SourceFavicon Linear mark and the selected-Linear-card tint + ring, so
+    // the favicon and the card wash read as one coherent hue. (linearMark above
+    // stays amber — it's the typographic SourceGlyph/IssueSource.accent, separate.)
+    static let linearInk = Color(r: 157 / 255, g: 164 / 255, b: 245 / 255) // #9DA4F5
+
     // Status palette
     static let statusPlanning = Color(r: 0.38, g: 0.59, b: 0.98)
     static let statusExecuting = lemon
@@ -42,6 +48,64 @@ enum LD {
     static let snappy = Animation.spring(duration: 0.28, bounce: 0.15)
     static let smooth = Animation.easeInOut(duration: 0.22)
     static let slide = Animation.easeInOut(duration: 0.30)
+
+    // MARK: Glass material fills
+    //
+    // Warm-dark glass at four thicknesses (see design/ui_kits/lemon/materials.html).
+    // Each is a baked Color carried at the design's opacity; the SwiftUI Material
+    // substrate underneath supplies the actual backdrop blur where applicable.
+    static let glassThinFill = Color(r: 34 / 255, g: 28 / 255, b: 18 / 255, a: 0.50) // resting rows, chips
+    static let glassRegularFill = Color(r: 46 / 255, g: 38 / 255, b: 24 / 255, a: 0.72) // hover, focus, selected
+    static let glassThickFill = Color(r: 33 / 255, g: 27 / 255, b: 17 / 255, a: 0.64) // popover root, panels
+    static let glassOpaqueFill = consoleBackground // console / terminal — solid, no blur
+
+    // MARK: Hairlines
+    //
+    // Half-pixel catches of light, never a 1px border. Brighten thin → regular as
+    // a surface advances. Dividers are a warm near-white at low alpha.
+    static let hairlineThin = Color.white.opacity(0.07)
+    static let hairlineRegular = Color.white.opacity(0.12)
+    static let hairlineThick = Color.white.opacity(0.10)
+    static let hairlineOpaque = Color.white.opacity(0.05)
+    static let hairlineDivider = Color(r: 236 / 255, g: 230 / 255, b: 216 / 255, a: 0.12)
+    static let hairlineWidth: CGFloat = 0.5
+
+    // MARK: Popover shadow (the only shadow — cast by the window, not its parts)
+    static let popoverShadowColor = Color.black.opacity(0.55)
+    static let popoverShadowRadius: CGFloat = 28
+    static let popoverShadowY: CGFloat = 22
+
+    // MARK: Source-tint washes + selected-ring overrides
+    //
+    // Saturation only ever appears at wash scale on a selected surface. The ring
+    // override lifts the selected hairline to the source hue at low alpha.
+    static let tintLemon = lemon.opacity(0.04)
+    static let tintLinear = linearInk.opacity(0.036)
+    static let tintGithub = Color(r: 107 / 255, g: 209 / 255, b: 128 / 255, a: 0.03)
+    static let tintCoral = coral.opacity(0.04)
+    static let tintLinearRing = linearInk.opacity(0.35)
+    static let tintGithubRing = Color(r: 107 / 255, g: 209 / 255, b: 128 / 255, a: 0.35)
+    static let tintCoralRing = coral.opacity(0.35)
+
+    // MARK: Warm text ramp (one hue, stepped down in opacity — never a new color)
+    static let textPrimary = Color(r: 236 / 255, g: 230 / 255, b: 216 / 255) // #ECE6D8
+    static let textSecondary = textPrimary.opacity(0.66)
+    static let textTertiary = textPrimary.opacity(0.50)
+    static let textQuaternary = textPrimary.opacity(0.30)
+
+    // MARK: Spacing rhythm (4 · 6/8 · 10–14 · 18–22)
+    static let spaceHairline: CGFloat = 4
+    static let spaceInlineTight: CGFloat = 6
+    static let spaceInline: CGFloat = 8
+    static let spaceBlock: CGFloat = 12
+    static let spaceSection: CGFloat = 20
+
+    // MARK: Motion — entrance + micro-state (see design/ui_kits/lemon/motion.html)
+    static let riseDistance: CGFloat = 7
+    static let riseDuration: Double = 0.52
+    static let riseCurve = Animation.timingCurve(0.2, 0.75, 0.2, 1.0, duration: 0.52)
+    static let staggerStep: Double = 0.06
+    static let chevronSpin = Animation.easeInOut(duration: 0.2)
 }
 
 // MARK: - Color initialiser
@@ -91,40 +155,25 @@ extension SessionStatus {
 
 // MARK: - Reusable components
 
-/// A pill-shaped status badge.
+/// The standalone tinted-capsule status badge (detail header / standalone use).
+/// One tinted capsule per state — color-matched label over a 15% fill with a
+/// 36% hairline ring. No dot: the hue alone reads at a glance, and in a row the
+/// dot+label form carries the signal instead. See status-pill.html.
 struct StatusPill: View {
     let status: SessionStatus
 
     var body: some View {
-        HStack(spacing: 4) {
-            if !status.isTerminal {
-                Circle()
-                    .fill(status.color)
-                    .frame(width: 5, height: 5)
-                    .modifier(PulseModifier(color: status.color))
-            }
-            Text(status.displayLabel)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(status.color)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(status.color.opacity(0.12), in: Capsule())
-    }
-}
-
-private struct PulseModifier: ViewModifier {
-    let color: Color
-    @State private var pulsing = false
-
-    func body(content: Content) -> some View {
-        content
-            .shadow(color: color.opacity(pulsing ? 0.8 : 0.2), radius: pulsing ? 4 : 1)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                    pulsing = true
-                }
-            }
+        Text(status.displayLabel)
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(-0.1)
+            .foregroundStyle(status.color)
+            .frame(height: 21)
+            .padding(.horizontal, 11)
+            .background(status.color.opacity(0.15), in: Capsule())
+            .overlay(
+                Capsule().strokeBorder(status.color.opacity(0.36),
+                                       lineWidth: LD.hairlineWidth),
+            )
     }
 }
 
@@ -149,17 +198,161 @@ struct LemonButtonStyle: ButtonStyle {
     }
 }
 
-/// Ghosted secondary button.
+/// Ghosted secondary button. Warm-ramp label over a warm neutral fill — never
+/// the cool system gray.
 struct GhostButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(LD.textSecondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(.primary.opacity(configuration.isPressed ? 0.08 : 0.05),
+            .background(LD.textPrimary.opacity(configuration.isPressed ? 0.08 : 0.05),
                         in: RoundedRectangle(cornerRadius: LD.r6))
             .animation(LD.snappy, value: configuration.isPressed)
+    }
+}
+
+// MARK: - Glass material
+
+/// The four glass thicknesses. Hierarchy is blur + fill opacity — a surface
+/// advances by thickening, not by gaining a border or a shadow. Only `.thick`
+/// (the popover root) casts a shadow; `.opaque` is the solid machine surface.
+enum GlassElevation {
+    case thin, regular, thick, opaque
+
+    /// Baked warm fill carried over the material substrate (or alone, for opaque).
+    var fill: Color {
+        switch self {
+        case .thin: LD.glassThinFill
+        case .regular: LD.glassRegularFill
+        case .thick: LD.glassThickFill
+        case .opaque: LD.glassOpaqueFill
+        }
+    }
+
+    /// Half-pixel hairline ring colour for this tier.
+    var hairline: Color {
+        switch self {
+        case .thin: LD.hairlineThin
+        case .regular: LD.hairlineRegular
+        case .thick: LD.hairlineThick
+        case .opaque: LD.hairlineOpaque
+        }
+    }
+
+    /// Only the popover root drops a shadow.
+    var hasShadow: Bool { self == .thick }
+
+    /// The opaque console surface does not blur the desktop behind it.
+    var blursBackdrop: Bool { self != .opaque }
+
+    /// SwiftUI material substrate for the blurred tiers.
+    var material: Material {
+        switch self {
+        case .thin: .ultraThinMaterial
+        case .regular, .thick: .regularMaterial
+        case .opaque: .regularMaterial // unused — blursBackdrop is false
+        }
+    }
+}
+
+/// Applies a Lemon glass surface: material substrate → warm fill → optional tint
+/// wash → half-pixel hairline ring on top → continuous-corner clip → popover
+/// shadow (thick only). Use `.lemonGlass(_:)` rather than this type directly.
+struct LemonGlass: ViewModifier {
+    let elevation: GlassElevation
+    var tint: Color? = nil
+    var cornerRadius: CGFloat = LD.r10
+    var ringOverride: Color? = nil
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return content
+            .background {
+                shape
+                    .fill(elevation.fill)
+                    .background {
+                        // Material substrate sits *under* the warm fill so the
+                        // blur reads through it. Opaque skips it entirely.
+                        if elevation.blursBackdrop {
+                            shape.fill(elevation.material)
+                        }
+                    }
+                    .overlay {
+                        // Source-tint wash over the fill, under the ring.
+                        if let tint {
+                            shape.fill(tint)
+                        }
+                    }
+                    .overlay {
+                        // Hairline ring is the topmost layer — strokeBorder insets
+                        // the 0.5pt line inside the bounds so it never clips.
+                        shape.strokeBorder(ringOverride ?? elevation.hairline,
+                                           lineWidth: LD.hairlineWidth)
+                    }
+                    .clipShape(shape)
+                    .modifier(PopoverShadow(active: elevation.hasShadow))
+            }
+    }
+}
+
+/// Conditionally attaches the popover shadow — applying a zero-radius shadow
+/// would still cost a layer, so non-thick tiers get nothing at all.
+private struct PopoverShadow: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active {
+            content.shadow(color: LD.popoverShadowColor,
+                           radius: LD.popoverShadowRadius, x: 0, y: LD.popoverShadowY)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Wrap a view in a Lemon glass surface at the given elevation.
+    func lemonGlass(_ elevation: GlassElevation,
+                    tint: Color? = nil,
+                    cornerRadius: CGFloat = LD.r10,
+                    ring: Color? = nil) -> some View {
+        modifier(LemonGlass(elevation: elevation, tint: tint,
+                            cornerRadius: cornerRadius, ringOverride: ring))
+    }
+}
+
+// MARK: - Rise (staggered entrance)
+
+/// The popover's one entrance: a short, staggered rise (translateY 7 → 0,
+/// opacity 0 → 1) on `LD.riseCurve`, children delayed by `index * staggerStep`.
+/// The visible end-state IS the base style, so reduced-motion and smoke
+/// screenshots render settled — never stuck at opacity 0.
+struct Rise: ViewModifier {
+    let index: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        // Smoke screenshots and reduced-motion both want the settled end-state
+        // immediately, with no animation in flight.
+        let animate = !reduceMotion && !KeychainStore.isSmokeTesting
+        return content
+            .opacity(animate ? (shown ? 1 : 0) : 1)
+            .offset(y: animate ? (shown ? 0 : LD.riseDistance) : 0)
+            .onAppear {
+                guard animate else { return }
+                withAnimation(LD.riseCurve.delay(Double(index) * LD.staggerStep)) {
+                    shown = true
+                }
+            }
+    }
+}
+
+extension View {
+    /// Staggered entrance rise; `index` orders the stagger top-to-bottom.
+    func rise(_ index: Int) -> some View {
+        modifier(Rise(index: index))
     }
 }
 
@@ -196,7 +389,113 @@ extension IssueSource {
     }
 }
 
-/// Tiny typographic source marker. Width-stable across Linear / GitHub.
+/// Favicon-style provider tile: a rounded square with a source-tinted fill,
+/// a 0.5pt ring, and the provider's geometric mark inset to ~68% of the tile.
+/// Width-stable across Linear / GitHub. See design/ui_kits/lemon/source-glyph.html.
+struct SourceFavicon: View {
+    let source: IssueSource
+    var size: CGFloat = 16
+
+    var body: some View {
+        let radius = min(6, max(5, size * 0.30)) // 16 → 5, 22 → 6 (matches the kit)
+        let inner = size * 0.68
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        shape
+            .fill(tileBackground)
+            .overlay {
+                mark
+                    .frame(width: inner, height: inner)
+            }
+            .overlay {
+                shape.strokeBorder(tileRing, lineWidth: 0.5)
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var mark: some View {
+        switch source {
+        case .linear: LinearMark()
+        case .github:
+            GitHubCatMark()
+                .fill(SourceFavicon.githubInk)
+        }
+    }
+
+    // Linear: light-purple family tile (#5E6AD2 @ .22) + brighter ring.
+    // GitHub: cool-grey tile + faint near-white ring.
+    private var tileBackground: Color {
+        switch source {
+        case .linear: Color(r: 94 / 255, g: 106 / 255, b: 210 / 255, a: 0.22)
+        case .github: Color(r: 150 / 255, g: 152 / 255, b: 168 / 255, a: 0.22)
+        }
+    }
+
+    private var tileRing: Color {
+        switch source {
+        case .linear: Color(r: 124 / 255, g: 134 / 255, b: 232 / 255, a: 0.48)
+        case .github: Color(r: 214 / 255, g: 216 / 255, b: 228 / 255, a: 0.30)
+        }
+    }
+
+    static let linearInk = LD.linearInk // #9DA4F5 — single source of truth in LD
+    static let githubInk = Color(r: 242 / 255, g: 239 / 255, b: 233 / 255) // #F2EFE9
+}
+
+/// Linear's three diagonal bars. Each is a rounded bar from the 12-unit viewBox
+/// (x 0.6→11.4, height 1.5, rx .75) rotated 45° about centre (6,6) — exactly the
+/// SVG in source-glyph.html, ported to a ZStack of `RoundedRectangle`s.
+private struct LinearMark: View {
+    var body: some View {
+        GeometryReader { geo in
+            let scale = geo.size.width / 12 // square frame
+            ZStack {
+                ForEach(0 ..< 3, id: \.self) { i in
+                    // Bar centres post-rotation, as offsets from viewBox centre (6,6):
+                    // (+1.662,-1.662), (0,0), (-1.662,+1.662) — see derivation in PR notes.
+                    let off: CGFloat = (CGFloat(i) - 1) * -1.662
+                    RoundedRectangle(cornerRadius: 0.75 * scale, style: .continuous)
+                        .fill(SourceFavicon.linearInk)
+                        .frame(width: 10.8 * scale, height: 1.5 * scale)
+                        .rotationEffect(.degrees(45))
+                        .offset(x: off * scale, y: -off * scale)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+/// GitHub's cat silhouette, ported from the `<path d=…>` in source-glyph.html on
+/// a 16-unit viewBox. The bottom SVG arc (rx 5.5, ry 5.2) is approximated with
+/// two quarter-ellipse cubics (k = 0.5523) for a faithful rounded chin.
+private struct GitHubCatMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        let s = min(rect.width, rect.height) / 16
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * s, y: rect.minY + y * s)
+        }
+        var path = Path()
+        path.move(to: p(3.7, 5.4))
+        path.addLine(to: p(5.5, 2.4)) // left ear
+        path.addLine(to: p(7.1, 4.6))
+        path.addCurve(to: p(8.9, 4.6), control1: p(7.7, 4.5), control2: p(8.3, 4.5))
+        path.addLine(to: p(10.5, 2.4)) // right ear
+        path.addLine(to: p(12.3, 5.4))
+        path.addCurve(to: p(13.5, 9), control1: p(13.2, 6.7), control2: p(13.5, 7.9))
+        // Bottom arc (13.5,9) → (8,14.2) → (2.5,9), two 90° cubics:
+        path.addCurve(to: p(8, 14.2), control1: p(13.5, 11.872), control2: p(11.038, 14.2))
+        path.addCurve(to: p(2.5, 9), control1: p(4.962, 14.2), control2: p(2.5, 11.872))
+        path.addCurve(to: p(3.7, 5.4), control1: p(2.5, 7.9), control2: p(2.8, 6.7))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Source marker. Renders a `SourceFavicon` (real provider vector mark) at a
+/// tile scaled from `size`, with an optional matchKey-style sublabel. The outer
+/// API is unchanged so existing call sites are untouched.
 struct SourceGlyph: View {
     let source: IssueSource
     var size: CGFloat = 9
@@ -204,20 +503,9 @@ struct SourceGlyph: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(source.glyph)
-                .font(.system(size: size, weight: .bold, design: .monospaced))
-                .kerning(0.4)
-                .foregroundStyle(source.accent)
-                .frame(minWidth: 14)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(
-                    Capsule()
-                        .fill(source.accent.opacity(0.10)),
-                )
-                .overlay(
-                    Capsule().strokeBorder(source.accent.opacity(0.25), lineWidth: 0.5),
-                )
+            // The legacy `size` was a font point size (~8–11); doubling lands the
+            // favicon tile in the design's 16–22 range (8→16, 9→18, 11→22).
+            SourceFavicon(source: source, size: size * 2)
             if let label {
                 Text(label)
                     .font(.system(size: size + 1, weight: .semibold, design: .monospaced))
