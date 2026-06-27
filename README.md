@@ -1,11 +1,14 @@
 <div align="center">
 
-# 🍋 Lemon
-
-A personal workflow orchestrator for Claude Code and your issue tracker — Linear or GitHub — supervised by Gemma 4 on device.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/readme-hero-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/img/readme-hero-light.png">
+  <img alt="Lemon — Claude Code, no cruft. Tag an issue with 🍋; Lemon spins the worktree, runs your own claude, and ships the PR." src="docs/img/readme-hero-dark.png" width="900">
+</picture>
 
 <sub><i>Made for the Mac mini sitting on your desk.</i></sub>
 
+<br/>
 <br/>
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F7C842?style=flat-square&labelColor=1a1714)](LICENSE)
