@@ -30,7 +30,7 @@ I already have Claude Code, and I already do the interesting parts: answering Cl
 
 <div align="center">
 <kbd>
-<img src="docs/img/live-list.png" alt="The Lemon popover with one active session" width="540">
+<img src="docs/img/live-list.png" alt="The Lemon popover — active sessions with status, source, and live terminal" width="540">
 </kbd>
 </div>
 
@@ -44,7 +44,7 @@ You stay in the loop through Claude's remote control — or by joining the runni
 > Lemon isn't an AI agent product. The intelligence is Claude Code; the judgment is yours. Lemon handles the workflow around your session so you stay focused on the parts that need a person. It is not an assignee-style agent meant to stand in for a developer on your team.
 
 <div align="center">
-<img src="docs/img/lemon-mini.png" alt="A lemon perched on a Mac mini" width="300">
+<img src="docs/img/lemon-mini.png" alt="The Lemon status item in the menu bar — 2 sessions running" width="440">
 </div>
 
 <br/>
@@ -83,9 +83,9 @@ Build the **Lemon** target in Xcode.
 ## Workflow
 
 <div align="center">
-<img src="docs/img/lemon-linear.png" alt="Lemon loves Linear" width="240">
+<img src="docs/img/lemon-linear.png" alt="Lemon watching a Linear team and a GitHub repo in one queue" width="340">
 <br/>
-<sub><i>For Linear, who already knows what work needs doing.</i></sub>
+<sub><i>One queue — Linear teams and GitHub repos, watched together.</i></sub>
 </div>
 
 <br/>
