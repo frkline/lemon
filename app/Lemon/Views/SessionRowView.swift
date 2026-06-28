@@ -19,15 +19,17 @@ struct SessionRowView: View {
                     .foregroundStyle(LD.textPrimary)
                     .lineLimit(1)
 
-                if let pr = session.prUrl {
+                if let pr = session.prUrl, let url = URL(string: pr) {
                     // PR link is NOT lemon — yellow is spent once per screen on
-                    // the primary action only. Neutral warm secondary, monospace.
-                    Text(pr)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LD.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .padding(.top, 4)
+                    // the primary action only (and each list row can carry a PR).
+                    // Neutral warm secondary, matching the detail-footer PR link.
+                    Link(destination: url) {
+                        Label("Open PR", systemImage: "arrow.up.right.square")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(LD.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
             }
             .padding(EdgeInsets(top: 11, leading: 14, bottom: 12, trailing: 0))
