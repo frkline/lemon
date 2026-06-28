@@ -395,13 +395,15 @@ untrusted issue/comment content is an injection surface — acute on public GitH
 repos. Mitigations (per-workspace `Workspace.lockdown`, toggled in onboarding +
 Settings; default on for GitHub, off for Linear):
 
-- **Triggers (M1/M2/lockdown):** GitHub queue is server-side `assignee:LOGIN` (no
-  `no:assignee`), so Lemon only sees issues assigned to you. In lockdown,
-  `Orchestrator` additionally requires the **🍋 labeler** to be trusted
-  (`triggerLabelActor` via the GitHub events API; M2) — falling back to the issue
-  author when the labeler is undeterminable (`isKnownOutsider`, fail-open on
-  unknown). Net effect today: **assigned-to-you AND 🍋 AND labeled-by-you**. Making
-  labeler-trust the *core* model (drop the assignee scoping) is tracked in **#31**.
+- **Triggers (M1/M2, belt-and-suspenders #31):** GitHub queue is server-side
+  `assignee:LOGIN` (no `no:assignee`), so Lemon only sees issues assigned to you.
+  `Orchestrator` then requires the **🍋 labeler** to be trusted
+  (`triggerLabelActor` via the GitHub events API; M2) — **always-on now, not
+  gated by lockdown** (#31). Net effect on GitHub: **assigned-to-you AND 🍋 AND
+  labeled-by-you**, both signals required. Linear can't cheaply query the labeler
+  (`triggerLabelActor` → nil), so it **fails open** — the `assignee`/`userId`
+  queue stays the gate; in lockdown a labeler-undeterminable source adds the
+  author-trust fallback (`isKnownOutsider`).
 - **Re-trigger (M3):** in lockdown, only a comment **authored by the user** after
   the marker re-triggers (`hasTrustedReply`) — an outsider commenting on a public
   🍋 Complete issue can't drive a run.
@@ -411,15 +413,17 @@ Settings; default on for GitHub, off for Linear):
   comments are dropped entirely.
 - Author plumbing: `IssueRef.authorLogin` + `IssueComment.author`, populated by
   GitHubClient (`user.login`) and LinearClient (`user.displayName`). Validated by
-  `scripts/sandbox-lockdown.sh` (fixture `author` field; `LEMON_SANDBOX_LOCKDOWN=1`).
+  `scripts/sandbox-lockdown.sh` (fixture `author`/`labeledBy`/`assignee` fields;
+  `LEMON_SANDBOX_LOCKDOWN=1` for the lockdown extras) — Part A proves the always-on
+  labeler + assignee gate stand alone with lockdown OFF.
 
 **Sandbox guarantees of `--permission-mode auto` (M5):** it is *not* unrestricted.
 Bash inside the `/tmp/lemon-{slug}` worktree is auto-accepted; reads outside it
 (`~/.ssh`, `~/.aws`, `~/Library`) still prompt. **Network egress inside the worktree
 is auto-accepted today** — the residual exfil risk if injection succeeds; network
 isolation belongs to the container work (#15, low-trust → containerized). Webhook
-signature verification is a hard requirement of #4. The core trigger model (labeler-
-trust vs assignee scoping) is **#31**.
+signature verification is a hard requirement of #4. The belt-and-suspenders trigger
+model (assignee AND labeler, always-on) shipped in **#31**.
 
 **Launch hygiene:** `WorktreeRunner.pretrustWorktree` writes `hasTrustDialogAccepted`
 into `~/.claude.json` for the worktree before launch, so real `claude` skips the

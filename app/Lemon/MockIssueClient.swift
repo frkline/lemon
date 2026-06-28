@@ -65,6 +65,7 @@ private struct SandboxIssueFixture: Codable {
     var commentSeq: Int = 0
     var author: String? = nil // issue opener (defaults to the sandbox user)
     var labeledBy: String? = nil // who applied 🍋 (defaults to the author)
+    var assignee: String? = nil // who it's assigned to (defaults to the sandbox user)
 }
 
 private struct SandboxCommentFixture: Codable {
@@ -157,7 +158,16 @@ final class MockIssueClient: IssueSourceClient, @unchecked Sendable {
     // MARK: - IssueSourceClient
 
     func fetchTriggerQueue(config _: SourceConfig, auth _: SourceAuth) async throws -> [IssueRef] {
-        withLock { loadAll().filter { $0.labelNames.contains(LemonState.trigger.labelName) }.map(ref) }
+        // Model the real assignee gate (#31): GitHub's queue is `assignee:LOGIN`,
+        // so only return 🍋 issues assigned to the sandbox user. A missing
+        // `assignee` defaults to the sandbox user so legacy fixtures still trigger.
+        let me = SandboxFixtures.identity.handle.lowercased()
+        return withLock {
+            loadAll()
+                .filter { $0.labelNames.contains(LemonState.trigger.labelName) }
+                .filter { ($0.assignee ?? SandboxFixtures.identity.handle).lowercased() == me }
+                .map(ref)
+        }
     }
 
     func fetchCompleteQueue(config _: SourceConfig, auth _: SourceAuth) async throws -> [IssueRef] {
