@@ -36,9 +36,13 @@ Settled decisions (do not re-litigate without a reason):
 (`/tmp/lemon-plan-{slug}.md`, written by the hook or fake-claude), posts the plan to the
 issue, parks at `.planReview`; `Orchestrator.resolveGate` (popover or `approve_gate` MCP)
 send-keys "1" + writes `/tmp/lemon-gate-{slug}`; the same session continues into the build.
-`make sandbox-test` asserts the whole lifecycle (6/6). **Still pending:** real-claude
-validation (folder pre-trust spike #8, live hook), result gate (`.resultReview` UI exists
-but no orchestration), #11 issue-triage + confirm-screen phases, autopilot opt-out.
+**Both gates** are wired: the result gate is opt-in via `/tmp/lemon-result-{slug}.md` — if
+the build writes it (instead of opening the PR), Lemon parks at `.resultReview` until
+approval, then the same session opens the PR; absent it, the existing 🍋 Complete path runs
+unchanged (autopilot/retriggers). `make sandbox-test` asserts the full two-gate lifecycle
+(8/8). **Still pending:** real-claude end-to-end validation (folder pre-trust spike #8, live
+hook — blocked on a fresh Claude session limit), #11 issue-triage + confirm-screen phases,
+autopilot opt-out, the request-changes feedback loop (stubbed: sends "4"/revise, re-plans).
 
 **Why:** Frank's "the key workflow to get right" — the whole point of Lemon.
 **How to apply:** Phase 1 (plan gate, desk popover channel) is the keystone. Watch the

@@ -803,9 +803,33 @@ final class Orchestrator {
                 planGate.appendLog(line)
             }
 
+            // Result gate — build done, awaiting approval to open the PR.
+            let resultGate = Session(issue: IssueRef(
+                id: "mock-6", identifier: "sandbox/demo#3",
+                title: "Cache avatar images on the profile page",
+                description: "Avatars re-fetch on every render.",
+                labelNames: ["🍋 Waiting"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 3),
+            ), startedAt: now.addingTimeInterval(-300))
+            resultGate.status = .resultReview
+            resultGate.aiSummary = "Built — 3 files changed, tests green. Ready to open the PR."
+            resultGate.cleanupInfo = WorktreeCleanupInfo(
+                sessionPath: "/tmp/lemon-sandbox-demo-3", isMultiRepo: false,
+                repos: [.init(name: "demo", repoPath: "/tmp/lemon-sandbox/workspace")],
+                slug: "sandbox-demo-3",
+            )
+            for line in [
+                "[lemon] plan approved — building",
+                "[gemma] implementing avatar cache",
+                "✓ tests passed",
+                "[lemon] build ready for review — awaiting approval to open PR",
+            ] {
+                resultGate.appendLog(line)
+            }
+
             sessions.add(active1)
             sessions.add(active2)
             sessions.add(planGate)
+            sessions.add(resultGate)
             sessions.add(reviewing)
             sessions.finish(recent)
 
