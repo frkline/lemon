@@ -368,7 +368,7 @@ struct SessionDetailView: View {
         // at a confusing "Copied!" with no window (and no window at all now that
         // sessions launch headless).
         let cmdPath = "/tmp/lemon-join-\(session.issue.pathSlug).command"
-        let script = "#!/bin/bash\nexec tmux attach -t \(name)\n"
+        let script = "#!/bin/bash\nexec \(WorktreeRunner.tmuxBase) attach -t \(name)\n"
         if (try? script.write(toFile: cmdPath, atomically: true, encoding: .utf8)) != nil {
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o755], ofItemAtPath: cmdPath,
@@ -380,7 +380,7 @@ struct SessionDetailView: View {
         }
         // Last resort — copy the attach command so the user can paste it.
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("tmux attach -t \(name)", forType: .string)
+        NSPasteboard.general.setString("\(WorktreeRunner.tmuxBase) attach -t \(name)", forType: .string)
         joinCopied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { joinCopied = false }
     }

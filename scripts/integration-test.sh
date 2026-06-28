@@ -136,10 +136,10 @@ fi
 echo ""
 echo "── session naming ────────────────────────────────"
 
-# 9. Verify the tmux attach command format (lowercased identifier)
+# 9. Verify the tmux attach command format (lowercased identifier, -L lemon socket)
 IDENTIFIER="HRP-42"
-EXPECTED_CMD="tmux attach -t lemon-hrp-42"
-if [ "$EXPECTED_CMD" = "tmux attach -t lemon-$(echo "$IDENTIFIER" | tr '[:upper:]' '[:lower:]')" ]; then
+EXPECTED_CMD="tmux -L lemon attach -t lemon-hrp-42"
+if [ "$EXPECTED_CMD" = "tmux -L lemon attach -t lemon-$(echo "$IDENTIFIER" | tr '[:upper:]' '[:lower:]')" ]; then
   ok "clipboard join command format: '$EXPECTED_CMD'"
 else
   fail "clipboard join command format mismatch: got '$EXPECTED_CMD'"

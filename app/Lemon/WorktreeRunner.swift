@@ -166,22 +166,26 @@ final class WorktreeRunner: @unchecked Sendable {
         let sessionLabel = WorktreeRunner.remoteControlName(
             identifier: identifier, title: ref.title,
         )
-        guard launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
-                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
-                         planMode: planMode)
-        else {
+        if let failure = launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
+                                    sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
+                                    planMode: planMode)
+        {
             log("[lemon] tmux launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
             try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
-            _ = try? await client.postComment(
-                ref: ref,
-                body: "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry.",
-                auth: auth,
-            )
+            let body = switch failure {
+            case .tmuxMissing:
+                "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry."
+            case let .claudeMissing(bin):
+                "🍋 Couldn't find the `\(bin)` binary on PATH. Install the Claude CLI (or fix your PATH) and re-add the 🍋 label to retry."
+            case let .launchError(detail):
+                "🍋 Failed to launch tmux session: \(detail). Re-add the 🍋 label to retry."
+            }
+            _ = try? await client.postComment(ref: ref, body: body, auth: auth)
             onStatusChange?(.failed)
             return
         }
-        log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(slug: slug))")
+        log("[lemon] tmux session started — join: \(Self.tmuxBase) attach -t \(tmuxSessionName(slug: slug))")
 
         // Plan gate: surface the plan, wait for human approval, then continue
         // into the build in the SAME session. Returns false if abandoned/failed.
@@ -443,7 +447,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // Kill tmux session and remove all per-session artefacts in /tmp so
         // repeated runs don't leak launcher scripts, sentinel files, merged
         // MCP configs, or pane logs.
-        runSync("tmux kill-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null || true")
+        runSync("\(Self.tmuxBase) kill-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null || true")
         let leftovers = [
             logPath(slug: slug),
             "/tmp/lemon-launch-\(slug).sh",
@@ -575,6 +579,16 @@ final class WorktreeRunner: @unchecked Sendable {
         content += "- **Reserved dev-server port:** `\(devPort)` — use this if you launch a dev server so concurrent Lemon sessions don't collide.\n"
         content += "- **Worktree:** you're in a fresh git worktree on branch `\(ref.identifier.hasPrefix("lemon/") ? ref.identifier : "lemon/\(ref.pathSlug)")`. Don't switch branches.\n\n"
 
+        // Self-isolation guard (#40). This worktree may be a checkout of Lemon
+        // itself, which ships dev/test scripts that tear down Lemon + tmux. Run
+        // from inside this Lemon-managed session, they kill the session you're in.
+        content += "### ⚠️ You are inside a Lemon-managed tmux session\n"
+        content += "This worktree runs inside a detached tmux session that Lemon owns and monitors. "
+        content += "Do NOT run Lemon teardown — it kills the session you're running in:\n"
+        content += "- No `make sandbox*` / `scripts/sandbox*.sh`\n"
+        content += "- No `tmux kill-server` / `tmux kill-session` / `pkill -f Lemon`\n"
+        content += "To validate, use plain `xcodebuild`, `make test`, or `make build-ui` instead.\n\n"
+
         // Source-specific completion instructions. The label set is identical
         // (🍋 / 🍋 In Progress / 🍋 Waiting / 🍋 Complete); the verb differs.
         let completeInstruction = switch ref.source {
@@ -627,13 +641,21 @@ final class WorktreeRunner: @unchecked Sendable {
     // break shell quoting + filesystem paths. Slug is already
     // lowercased + slash-flattened ("acme-widgets-7").
 
+    // Lemon runs its tmux on a DEDICATED socket so sessions never attach to a
+    // manual/sandbox-era default-socket server and inherit its global env (the
+    // `LEMON_CLAUDE_BIN` → deleted-fake-claude → exit-127 leak, #40). Every
+    // Lemon-owned tmux invocation — here, in LemonMCPTools, Orchestrator, and
+    // the user-facing Join command in SessionDetailView — must use `tmuxBase`.
+    static let tmuxSocket = "lemon"
+    static let tmuxBase = "tmux -L \(tmuxSocket)"
+
     func tmuxSessionName(slug: String) -> String {
         "lemon-\(slug)"
     }
 
     /// One `tmux has-session` probe. True if the detached session is alive.
     func tmuxSessionAlive(slug: String) -> Bool {
-        runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
+        runSync("\(Self.tmuxBase) has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
     }
 
     /// Debounced death check. A *single* `tmux has-session` miss is not proof a
@@ -912,15 +934,25 @@ final class WorktreeRunner: @unchecked Sendable {
     /// Headless — no terminal window is auto-opened (use Join to attach on demand).
     /// The launcher script writes sentinelPath when claude exits so pollUntilDone
     /// can detect early exits without waiting for the 8h deadline.
-    @discardableResult
+    /// Why a launch couldn't start. `nil` from `launchTmux` means success; a
+    /// non-nil value carries enough for the caller to post a specific issue
+    /// comment instead of a generic failure (so a missing `claude` binary or a
+    /// dead tmux server reads as a clear, actionable message — not a silent
+    /// exit-127 pane death, #40).
+    enum LaunchFailure {
+        case tmuxMissing
+        case claudeMissing(String)
+        case launchError(String)
+    }
+
     private func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
                             sentinelPath: String, mcpConfigPath: String? = nil,
-                            planMode: Bool = false) -> Bool
+                            planMode: Bool = false) -> LaunchFailure?
     {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
             log("[lemon] tmux not found — install with: brew install tmux", level: .error)
-            return false
+            return .tmuxMissing
         }
 
         let sessionName = tmuxSessionName(slug: slug)
@@ -952,26 +984,46 @@ final class WorktreeRunner: @unchecked Sendable {
             ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise produce a concise implementation plan and present it for approval via ExitPlanMode (do not edit files yet). Once approved you continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
             : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
+        // Resolve the claude binary. SANDBOX runs honour `LEMON_CLAUDE_BIN`
+        // (that's how fake-claude.sh is selected). REAL runs deliberately ignore
+        // any inherited `LEMON_CLAUDE_BIN`: a leftover sandbox-era tmux server can
+        // carry it (pointing at a now-deleted fake-claude) in its GLOBAL env, and a
+        // pane that inherits it dies with a silent exit 127 (#40). Real runs bake
+        // the literal `claude` and the launcher unsets the leak vars (below), so an
+        // attached pre-existing server's globals can't poison the launch. The
+        // dedicated `-L lemon` socket reinforces this — Lemon never shares a server
+        // with a manual/sandbox session.
+        let isSandbox = KeychainStore.isSandbox
+        let claudeBin = isSandbox
+            ? (ProcessInfo.processInfo.environment["LEMON_CLAUDE_BIN"] ?? "claude")
+            : "claude"
+
+        // Preflight: confirm the resolved binary actually resolves under the SAME
+        // login-shell PATH the launcher gets (runSync uses `zsh -l -c`, sourcing the
+        // same profiles). Fail loudly here — a missing binary becomes a clear issue
+        // comment instead of a tmux pane that boots and instantly exits 127.
+        guard runSync("command -v '\(claudeBin)' >/dev/null 2>&1") else {
+            log("[lemon] claude binary '\(claudeBin)' not found on PATH", level: .error)
+            return .claudeMissing(claudeBin)
+        }
+
         // Source common shell profiles so PATH includes Homebrew, npm-global,
         // pyenv shims, etc. Same root cause as the runSync(zsh -l -c) fix:
         // `claude` is typically installed via brew or npm -g, which puts it
         // somewhere non-default-bash PATH won't find. Without this the launch
         // dies immediately with "claude: command not found" the moment tmux
         // boots the launcher.
-        // Bake the resolved claude binary into the launcher so it doesn't depend
-        // on `LEMON_CLAUDE_BIN` being inherited into the tmux pane. When
-        // `tmux new-session` attaches to a PRE-EXISTING server (e.g. the caller is
-        // itself inside tmux), the pane gets that server's global environment —
-        // which may lack the var — and would silently fall back to real `claude`
-        // (a sandbox stall, diagnosed on the #31 run). We still honour a
-        // pane-level override if one is present, but default to what Lemon saw.
-        let claudeBin = ProcessInfo.processInfo.environment["LEMON_CLAUDE_BIN"] ?? "claude"
+        // Real runs `unset` the LEMON_* leak vars at the very top and invoke the
+        // baked binary directly (no `${LEMON_CLAUDE_BIN:-…}` fallback to inherit).
+        // Sandbox keeps the fallback so the fake-claude selection still works.
+        let prelude = isSandbox ? "" : "unset LEMON_CLAUDE_BIN LEMON_SANDBOX LEMON_ENABLE_MCP\n"
+        let binInvocation = isSandbox ? "\"${LEMON_CLAUDE_BIN:-\(claudeBin)}\"" : "\"\(claudeBin)\""
         let launcher = """
         #!/bin/bash
-        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
+        \(prelude)[ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-\(claudeBin)}" \(mcpFlag) --permission-mode \(permissionMode) --remote-control '\(sessionLabel)' -- '\(kickoffPrompt)'
+        cd '\(sessionPath)' && \(binInvocation) \(mcpFlag) --permission-mode \(permissionMode) --remote-control '\(sessionLabel)' -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
@@ -979,20 +1031,20 @@ final class WorktreeRunner: @unchecked Sendable {
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcherPath)
         } catch {
             Logger.worktree.error("Failed to write launcher: \(error)")
-            return false
+            return .launchError("couldn't write launcher script")
         }
 
         // Kill any leftover session from a prior run.
-        runSync("tmux kill-session -t '\(sessionName)' 2>/dev/null || true")
+        runSync("\(Self.tmuxBase) kill-session -t '\(sessionName)' 2>/dev/null || true")
 
         // Create detached tmux session.
-        guard runSync("tmux new-session -d -s '\(sessionName)' -x 220 -y 50 '\(launcherPath)'") else {
+        guard runSync("\(Self.tmuxBase) new-session -d -s '\(sessionName)' -x 220 -y 50 '\(launcherPath)'") else {
             log("[lemon] Failed to create tmux session '\(sessionName)'", level: .error)
-            return false
+            return .launchError("tmux new-session failed for '\(sessionName)'")
         }
 
         // Pipe all pane output to the log file for Gemma to read.
-        runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
+        runSync("\(Self.tmuxBase) pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
 
         // Headless by design. The tmux session is detached and the pane is piped
         // to the log for Gemma; we do NOT auto-open a terminal window. With the
@@ -1002,7 +1054,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // Auto-popping a window per session was stale friction (sandbox was
         // already headless to avoid piling up scenario windows).
         log("[lemon] tmux session ready — headless; use Join to attach")
-        return true
+        return nil
     }
 
     // MARK: - Gemma orchestration
@@ -1060,10 +1112,10 @@ final class WorktreeRunner: @unchecked Sendable {
             // Letter keys still get an auto-Enter suffix to confirm.
             let cmd: String
             if WorktreeRunner.specialKeys.contains(trimmed) {
-                cmd = "tmux send-keys -t '\(tmuxSessionName(slug: slug))' \(trimmed)"
+                cmd = "\(Self.tmuxBase) send-keys -t '\(tmuxSessionName(slug: slug))' \(trimmed)"
             } else {
                 let escaped = trimmed.replacingOccurrences(of: "'", with: "'\\''")
-                cmd = "tmux send-keys -t '\(tmuxSessionName(slug: slug))' '\(escaped)' Enter"
+                cmd = "\(Self.tmuxBase) send-keys -t '\(tmuxSessionName(slug: slug))' '\(escaped)' Enter"
             }
             runSync(cmd)
             log("[gemma] resolved: \(reason) (sent: \(trimmed.isEmpty ? "Enter" : trimmed))")
