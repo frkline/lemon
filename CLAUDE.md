@@ -197,8 +197,8 @@ curl -sS -X POST http://127.0.0.1:8765/mcp \
 ## Known gaps (deferred — don't re-discover)
 
 - **MCP enable env var, alone, can miss its window.** `LEMON_ENABLE_MCP=1` is read inside the `@State` initializer's `Task { @MainActor in ... }` block in `LemonApp.swift`. In some launch paths the Task fires before the View loads or after a UserDefault has clamped the toggle. UserDefault `lemon-mcp-enabled = true` is reliable; env var alone isn't. Workaround: set both.
-- **Re-trigger fires on already-shipped revisions.** `hasNewComment(afterMarker)` returns true for *any* comment posted after the Lemon Report — including one Lemon itself already addressed in an earlier re-run. Right fix: post a *new* Lemon Report comment after each re-trigger completes so the marker advances. Until then, manually setting `🍋 Complete` and removing the trigger label after a re-run is required to stop the loop.
-- **SwiftLM prompt cache full-hit returns empty content.** Identical input to `LocalLLM.classify()` produces zero output tokens, which decodes as `LocalLLMError.invalidResponse`. The error now has a descriptive `errorDescription`, but the structural fix is to cache-bust the user message (e.g. append a short timestamp suffix) when the caller wants a fresh verdict.
+- **~~Re-trigger fires on already-shipped revisions~~ (FIXED, #9).** `handleComplete` now posts a fresh marker-bearing Lemon Report on re-trigger completion too, so `findLatest()` advances past addressed comments and they stop re-firing.
+- **~~SwiftLM prompt cache full-hit returns empty content~~ (FIXED, #8).** `LocalLLM.classify()` appends a short UUID nonce to the user message, so identical inputs no longer full-hit the prompt cache (which returned zero tokens → `invalidResponse`).
 
 ## Build
 
