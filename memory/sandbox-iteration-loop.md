@@ -46,6 +46,21 @@ Components (build order = priority):
 6. **Real-claude-against-fixtures mode** (`LEMON_SANDBOX_REAL_CLAUDE=1`) — same fixture
    workspace, real CLI, opt-in, for periodic truth-checks of orchestration assumptions.
 
+**Scenarios + verification patterns that have paid off:**
+- `make sandbox-test` (`sandbox-scenario.sh`) — asserts the two-gate lifecycle (8/8).
+- `sandbox-retrigger.sh` — validates #9 end-to-end (reply re-triggers once → 2nd report
+  advances the marker → relaunch does NOT re-fire). Gotcha: it must `rm` the
+  `.reviewing` worktree before relaunch (the real flow's "Cleanup worktree" step) or the
+  leftover blocks the re-trigger's `git worktree add`.
+- **Unit-test the tracker layer to isolate sandbox failures.** When a sandbox scenario
+  missed re-trigger, `MockIssueClientTests` proved detection (findLemonMarker +
+  hasNewComment) was correct — so the miss was orchestration/worktree, not the marker
+  logic. Watch out: `MockIssueClient.loadAll()` reads ALL fixtures in the shared dir, so
+  select your issue by identifier, not `.first`.
+- **Menu-bar glyph can't be smoke-screenshotted** (it's the system `MenuBarExtra`, not the
+  popover). Verify via a white-on-dark SVG montage (`qlmanage -t` rasterizes SVG incl.
+  masks — no brew rasterizer needed) + unit tests of `MenuBarGlyph.aggregate`.
+
 **Why:** the workflow involves real `claude` sessions + tracker mutations; iterating
 against those is slow, costly (Max limits), and has side effects on a public repo.
 **How to apply:** build the sandbox FIRST, then implement plan-gate Phase 1 inside it.

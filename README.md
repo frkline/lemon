@@ -136,9 +136,9 @@ flowchart LR
 
 1. You label an issue — Linear or GitHub — with 🍋.
 2. The orchestrator picks it up on the next poll, adds a git worktree at `/tmp/lemon-{slug}`, and writes `LEMON_CONTEXT.md` with the issue body, your team's `LEMON.md`, and a completion checklist.
-3. A terminal window opens running `claude --permission-mode auto --remote-control` (iTerm2 if present, Terminal.app otherwise).
-4. Gemma 4 runs locally through SwiftLM + MLX. After two minutes of pane silence it reads the log tail and decides: auto-accept a confirmation (`y` / `n` / `Enter` / `Escape` / `1`–`9`, through a hard allowlist), or raise `🍋 Waiting` if it's ambiguous.
-5. When Claude sets `🍋 Complete`, Lemon posts the PR link and a summary back to the originating issue, then cleans up the worktree.
+3. A terminal window opens running `claude --permission-mode plan --remote-control` (iTerm2 if present, Terminal.app otherwise). Claude proposes a **plan** first — Lemon posts it to the issue and parks at the **plan gate**.
+4. You **approve the plan** (in Lemon's popover, by replying on the issue, or from your phone) and the same session continues into the build in auto mode. Gemma 4 (local, SwiftLM + MLX) auto-accepts routine confirmations through a hard allowlist and raises `🍋 Waiting` only when something genuinely needs you.
+5. When the build is done it pauses at the **result gate** for your go; then Claude opens the PR, Lemon posts the report back to the issue and cleans up the worktree. The menu-bar lemon reflects the live state — idle, working, waiting, done, error.
 
 Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch. Same behavior on either source.
 
