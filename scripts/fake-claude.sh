@@ -28,27 +28,46 @@ echo "[fake-claude] launched (mode=$MODE) worktree=$(pwd) issue=#${num:-unknown}
 PLAN_MODE=0
 
 # --- Plan gate ---------------------------------------------------------------
+# Loop on the approval picker: "1" approves; anything else (e.g. "4", the
+# "tell Claude what to change" option Lemon send-keys for request-changes) means
+# revise — write a fresh plan and wait again. This exercises the re-plan loop.
 if [[ "$ARGS" == *"--permission-mode plan"* ]]; then
   PLAN_MODE=1
-  echo "[fake-claude] plan mode — drafting plan for sandbox/demo#$num"
-  sleep 2
-  cat > "/tmp/lemon-plan-$slug.md" <<PLAN
+  attempt=1
+  while true; do
+    sleep 2
+    if [ "$attempt" = 1 ]; then
+      cat > "/tmp/lemon-plan-$slug.md" <<PLAN
 # Plan: sandbox/demo#$num
 
 ## Context
-A sandbox task. This plan is produced by fake-claude to exercise the plan gate.
+A sandbox task. fake-claude produced this to exercise the plan gate.
 
 ## Changes
 1. Implement the change described in the issue.
 2. Add a test covering it.
-
-## Verification
-- Run the test suite; confirm green.
 PLAN
-  echo "[fake-claude] plan ready — parked at approval picker (send 1 to approve)"
-  # Block until Lemon send-keys the approval ("1") into the pane.
-  read -r answer || true
-  echo "[fake-claude] approval received ('$answer') — entering auto mode, building"
+    else
+      cat > "/tmp/lemon-plan-$slug.md" <<PLAN
+# Plan (revision $attempt): sandbox/demo#$num
+
+## Context
+Revised per the requested changes.
+
+## Changes
+1. Implement the change, addressing the reviewer feedback.
+2. Add a test covering it AND the edge case raised in review.
+PLAN
+    fi
+    echo "[fake-claude] plan v$attempt ready — parked at approval picker (1=approve, else=revise)"
+    read -r answer || true
+    if [ "$answer" = "1" ]; then
+      echo "[fake-claude] approved — entering auto mode, building"
+      break
+    fi
+    echo "[fake-claude] changes requested ('$answer') — re-planning (v$((attempt + 1)))"
+    attempt=$((attempt + 1))
+  done
 fi
 
 # --- Build phase -------------------------------------------------------------
