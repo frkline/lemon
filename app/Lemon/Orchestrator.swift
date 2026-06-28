@@ -656,8 +656,38 @@ final class Orchestrator {
             recent.endedAt = now.addingTimeInterval(-3600)
             recent.aiSummary = "Migration complete — backfill ran in 4m, all FK constraints updated"
 
+            // Reviewing — the tall detail state: ready-for-review card + AI
+            // summary + console + footer all present at once. This is the layout
+            // that clipped its footer before the console was made flexible.
+            let reviewing = Session(issue: IssueRef(
+                id: "mock-4", identifier: "sandbox/demo#1",
+                title: "Add a hello function with a test",
+                description: "Add hello(name) and a test.",
+                labelNames: ["🍋 Complete"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 1),
+            ), startedAt: now.addingTimeInterval(-900))
+            reviewing.status = .reviewing
+            reviewing.prUrl = "https://github.com/sandbox/demo/pull/1"
+            reviewing.aiSummary = "Starting work on sandbox/demo#1"
+            reviewing.cleanupInfo = WorktreeCleanupInfo(
+                sessionPath: "/tmp/lemon-sandbox-demo-1",
+                isMultiRepo: false,
+                repos: [.init(name: "demo", repoPath: "/tmp/lemon-sandbox/workspace")],
+                slug: "sandbox-demo-1",
+            )
+            for line in [
+                "[lemon] starting session for sandbox/demo#1",
+                "[lemon] tmux session started — join: tmux attach -t lemon-sandbox-demo-1",
+                "[lemon] 🍋 Complete detected for sandbox/demo#1",
+                "[gemma] Starting work on sandbox/demo#1",
+                "[lemon] posted Lemon comment c1",
+                "[lemon] ready for review — worktree at /tmp/lemon-sandbox-demo-1. Click Cleanup to tear down.",
+            ] {
+                reviewing.appendLog(line)
+            }
+
             sessions.add(active1)
             sessions.add(active2)
+            sessions.add(reviewing)
             sessions.finish(recent)
 
             // Seed pairs + per-pair statuses so Settings renders a mixed-source

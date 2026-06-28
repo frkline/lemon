@@ -158,7 +158,11 @@ struct SessionDetailView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: 230)
+            // Flexible filler with a bounded max: the console prefers up to 360
+            // (so short sessions stay compact, not a giant void) but shrinks down
+            // to minHeight when a tall session (reviewing card + summary + console
+            // + footer) would otherwise overflow the 620 cap and clip the footer.
+            .frame(minHeight: 160, maxHeight: 360)
             .frame(maxWidth: .infinity)
             // Solid, no blur — the machine surface needs visual gravity. r6 box
             // with a faint inset hairline, clipped so output respects the corner.

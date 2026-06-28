@@ -55,8 +55,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 .environment(state.nav)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
 
+            // Match the real MenuBarExtra popover envelope (340pt column, content
+            // capped at 620 + header) so smoke screenshots catch popover-height
+            // clipping — a too-tall window would hide exactly the bug we screenshot for.
             let hosting = NSHostingView(rootView: content)
-            let size = NSSize(width: 480, height: 560)
+            let size = NSSize(width: 360, height: 700)
             hosting.frame = NSRect(origin: .zero, size: size)
 
             let window = NSWindow(
