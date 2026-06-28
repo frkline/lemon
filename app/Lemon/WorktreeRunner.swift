@@ -1059,12 +1059,29 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Gemma orchestration
 
+    /// Signature of the last classified pane tail. Skips re-classifying an
+    /// unchanged (stuck) pane so a wedged session can't drive Gemma in a loop
+    /// (defense-in-depth for the #44 CPU spin, alongside the input bounding).
+    private var lastClassifySig: Int?
+
     private func invokeGemma(ref: IssueRef) async {
         guard LocalLLM.shared.isReady() else {
             Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(ref.identifier)")
             return
         }
         let lines = tailLog(slug: ref.pathSlug, last: 100)
+        // Pane-change gate: if the cleaned tail is identical to what we last
+        // classified, there's nothing new to decide — skip the inference.
+        var hasher = Hasher()
+        for line in lines {
+            hasher.combine(line)
+        }
+        let sig = hasher.finalize()
+        if sig == lastClassifySig {
+            Logger.worktree.info("[gemma] pane unchanged since last classify — skipping \(ref.identifier)")
+            return
+        }
+        lastClassifySig = sig
         Logger.worktree.info("[gemma] classifying \(ref.identifier) with \(lines.count) log lines")
         do {
             let response = try await LocalLLM.shared.classify(issue: ref, logLines: lines)
@@ -1153,8 +1170,48 @@ final class WorktreeRunner: @unchecked Sendable {
         guard let content = try? String(contentsOfFile: logPath(slug: slug), encoding: .utf8) else {
             return []
         }
-        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
-        return lines.count <= n ? lines : Array(lines[(lines.count - n)...])
+        return WorktreeRunner.tailLines(from: content, last: n)
+    }
+
+    /// Bounds the Gemma classify input. The pane log is dense with ANSI
+    /// cursor-redraw escapes and uses bare CRs (not LFs) for in-place repaints,
+    /// so a naive "split on \n, take last N" can return a single multi-hundred-KB
+    /// blob — which became a 600K-token prompt that wedged SwiftLM at prefill
+    /// (#44). Strip ANSI, split on CR *and* LF, drop blanks, take the last N
+    /// lines, then hard-cap total characters as a belt-and-suspenders ceiling.
+    /// Pure + static so it's unit-testable.
+    static func tailLines(from content: String, last n: Int, maxChars: Int = 6000) -> [String] {
+        let cleaned = stripANSI(content)
+        let lines = cleaned
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var tail = lines.count <= n ? lines : Array(lines[(lines.count - n)...])
+        // Char ceiling: drop oldest lines until under budget (keep most recent).
+        var total = tail.reduce(0) { $0 + $1.count }
+        while total > maxChars, tail.count > 1 {
+            total -= tail.removeFirst().count
+        }
+        // A single surviving line still over budget → truncate to its tail.
+        if tail.count == 1, let only = tail.first, only.count > maxChars {
+            tail[0] = String(only.suffix(maxChars))
+        }
+        return tail
+    }
+
+    /// Removes the common ANSI escape sequences (CSI + OSC) Claude's TUI emits,
+    /// so the cleaned text is line-splittable and compact. Not a full terminal
+    /// emulator — just enough to keep the classify prompt bounded and readable.
+    static func stripANSI(_ s: String) -> String {
+        var out = s
+        let patterns = [
+            "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", // CSI … final byte
+            "\u{1B}\\][^\u{07}\u{1B}]*(?:\u{07}|\u{1B}\\\\)", // OSC … BEL/ST
+        ]
+        for p in patterns {
+            out = out.replacingOccurrences(of: p, with: "", options: .regularExpression)
+        }
+        return out
     }
 
     // MARK: - Synchronous shell helper (used for setup/teardown, not in async hot paths)

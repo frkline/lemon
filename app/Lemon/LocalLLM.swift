@@ -303,7 +303,12 @@ final class LocalLLM: @unchecked Sendable {
 
         let issueCtx = "Issue: \(issue.identifier) — \(issue.title)\n" +
             (issue.description.map { String($0.prefix(400)) } ?? "")
-        let terminal = logLines.isEmpty ? "(no output yet)" : logLines.joined(separator: "\n")
+        // Hard input ceiling (#44): even if a caller passes huge/uncleaned
+        // lines, never let the prompt balloon — a 600K-token pane log once
+        // wedged SwiftLM at prefill and pinned the CPU. WorktreeRunner.tailLines
+        // is the primary bound; this is the last line of defense at the API edge.
+        let joined = logLines.isEmpty ? "(no output yet)" : logLines.joined(separator: "\n")
+        let terminal = joined.count > 8000 ? String(joined.suffix(8000)) : joined
         // #8: cache-bust the user message. Two identical inputs full-hit SwiftLM's
         // prompt cache (4810/4810 tokens reused), which returns zero generated
         // tokens → empty content → GemmaResponse.parse fails as invalidResponse.
