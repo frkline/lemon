@@ -12,6 +12,9 @@ final class WorktreeRunner: @unchecked Sendable {
     var onStatusChange: ((SessionStatus) -> Void)?
     var onLogLine: ((String) -> Void)?
     var onPRUrl: ((String) -> Void)?
+    /// Fired when the plan-mode session writes its plan (via the ExitPlanMode
+    /// hook → plan sentinel). Carries the plan markdown for the .planReview card.
+    var onPlanReady: ((String) -> Void)?
     var onAiSummary: ((String) -> Void)?
     var onPendingAction: ((String?) -> Void)?
     /// Fired from handleComplete once the Lemon Report is posted and
@@ -133,8 +136,17 @@ final class WorktreeRunner: @unchecked Sendable {
                                              isMultiRepo: workspace.allReposInFolder,
                                              slug: slug)
 
+        // Fresh sessions go through the plan gate (plan mode → human approval →
+        // auto). Retriggers are revisions to already-approved work, so they skip
+        // the gate and go straight to auto.
+        let planMode = retrigger == nil
+        try? FileManager.default.removeItem(atPath: planReadyPath(slug: slug))
+        try? FileManager.default.removeItem(atPath: gateSentinelPath(slug: slug))
+        if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
+
         guard launchTmux(sessionPath: launchPath, slug: slug,
-                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath)
+                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
+                         planMode: planMode)
         else {
             log("[lemon] tmux launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
@@ -147,8 +159,17 @@ final class WorktreeRunner: @unchecked Sendable {
             onStatusChange?(.failed)
             return
         }
-        onStatusChange?(.executing)
         log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(slug: slug))")
+
+        // Plan gate: surface the plan, wait for human approval, then continue
+        // into the build in the SAME session. Returns false if abandoned/failed.
+        if planMode {
+            let proceed = await planGatePhase(ref: ref, client: client, auth: auth,
+                                              slug: slug, sentinelPath: sentinelPath)
+            guard proceed else { return }
+        }
+
+        onStatusChange?(.executing)
 
         await pollUntilDone(
             ref: ref,
@@ -465,6 +486,130 @@ final class WorktreeRunner: @unchecked Sendable {
         "/tmp/lemon-log-\(slug).txt"
     }
 
+    // MARK: - Plan-gate paths (the contract between the claude side and Lemon)
+
+    /// Written by the ExitPlanMode hook (real claude) or fake-claude (sandbox)
+    /// when a plan is ready. Contains the plan markdown; its presence is the
+    /// signal that the session has reached the plan gate.
+    func planReadyPath(slug: String) -> String { "/tmp/lemon-plan-\(slug).md" }
+
+    /// Written by Orchestrator.resolveGate when the human approves/rejects the
+    /// plan ("approve" or "changes"). The plan-gate park loop watches for it.
+    func gateSentinelPath(slug: String) -> String { "/tmp/lemon-gate-\(slug)" }
+
+    // MARK: - Plan-gate hooks (real claude side)
+
+    /// Writes a project-local `.claude/settings.json` into the worktree so REAL
+    /// claude copies its plan to the plan sentinel the moment it calls
+    /// ExitPlanMode (the picker stays up for a human to approve). In the sandbox,
+    /// fake-claude writes the sentinel directly, so this is a no-op for that path
+    /// but harmless to install. See WORKFLOW_DESIGN.md / claude-code-plan-mode.
+    private func writePlanHooks(launchPath: String, slug: String) {
+        let planPath = planReadyPath(slug: slug)
+        // The hook receives the ExitPlanMode tool_input on stdin; copy the plan
+        // file it points at (or the inline plan) to the sentinel.
+        let cmd = "python3 -c \"import json,sys,os; d=json.load(sys.stdin); ti=d.get('tool_input',{}); p=ti.get('planFilePath'); plan=open(p).read() if p and os.path.exists(p) else ti.get('plan',''); open('\(planPath)','w').write(plan)\""
+        let settings: [String: Any] = [
+            "hooks": [
+                "PreToolUse": [[
+                    "matcher": "ExitPlanMode",
+                    "hooks": [["type": "command", "command": cmd]],
+                ]],
+            ],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted]) else { return }
+        let dir = "\(launchPath)/.claude"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings.json"))
+    }
+
+    // MARK: - Plan gate (the human approval before any code is written)
+
+    /// Wait for the plan, surface it for approval, park until the human resolves
+    /// the gate, then continue (approve → build) or abort. Returns true to
+    /// proceed into pollUntilDone. Sentinels decouple this from who runs claude:
+    /// the ExitPlanMode hook / fake-claude writes the plan sentinel; resolveGate
+    /// writes the gate sentinel.
+    private func planGatePhase(ref: IssueRef, client: any IssueSourceClient,
+                               auth: SourceAuth, slug: String, sentinelPath: String) async -> Bool
+    {
+        let planPath = planReadyPath(slug: slug)
+        let gatePath = gateSentinelPath(slug: slug)
+        try? FileManager.default.removeItem(atPath: planPath)
+        try? FileManager.default.removeItem(atPath: gatePath)
+
+        func sessionEnded() -> Bool {
+            FileManager.default.fileExists(atPath: sentinelPath)
+                || !runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
+        }
+
+        // 1. Wait for the plan to be ready (or early exit / timeout).
+        let planDeadline = Date().addingTimeInterval(2 * 3600)
+        var plan: String?
+        while !stopped, Date() < planDeadline {
+            try? await Task.sleep(for: .seconds(3))
+            if stopped { return false }
+            if let p = try? String(contentsOfFile: planPath, encoding: .utf8),
+               !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                plan = p
+                break
+            }
+            if sessionEnded() {
+                log("[lemon] session ended during planning", level: .error)
+                onStatusChange?(.failed)
+                return false
+            }
+        }
+        guard let plan else {
+            log("[lemon] timed out waiting for a plan", level: .error)
+            onStatusChange?(.failed)
+            return false
+        }
+
+        // Surface the plan for approval: card + posted comment + 🍋 Waiting.
+        log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
+        onPlanReady?(plan)
+        onStatusChange?(.planReview)
+        try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+        try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+        _ = try? await client.postComment(
+            ref: ref,
+            body: "## 🍋 Lemon Plan — \(ref.identifier)\n\n\(plan)\n\n---\nReply **approve** to build, or leave feedback to revise.",
+            auth: auth,
+        )
+
+        // 2. Park until the gate is resolved.
+        let gateDeadline = Date().addingTimeInterval(24 * 3600)
+        while !stopped, Date() < gateDeadline {
+            try? await Task.sleep(for: .seconds(2))
+            if stopped { return false }
+            if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
+                let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                try? FileManager.default.removeItem(atPath: gatePath)
+                try? FileManager.default.removeItem(atPath: planPath)
+                if decision == "approve" {
+                    log("[lemon] plan approved for \(ref.identifier) — building")
+                    try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                    try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                    return true
+                }
+                // Changes requested: claude got "4" + re-plans; wait for a new plan.
+                log("[lemon] changes requested for \(ref.identifier) — re-planning")
+                onStatusChange?(.planning)
+                return await planGatePhase(ref: ref, client: client, auth: auth,
+                                           slug: slug, sentinelPath: sentinelPath)
+            }
+            if sessionEnded() {
+                log("[lemon] session ended while awaiting plan approval", level: .error)
+                onStatusChange?(.failed)
+                return false
+            }
+        }
+        onStatusChange?(.failed)
+        return false
+    }
+
     // MARK: - MCP config preparation
 
     /// Merges .mcp.json files from all worktree repos into a single config file.
@@ -512,7 +657,8 @@ final class WorktreeRunner: @unchecked Sendable {
     /// can detect early exits without waiting for the 8h deadline.
     @discardableResult
     private func launchTmux(sessionPath: String, slug: String,
-                            sentinelPath: String, mcpConfigPath: String? = nil) -> Bool
+                            sentinelPath: String, mcpConfigPath: String? = nil,
+                            planMode: Bool = false) -> Bool
     {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
@@ -536,7 +682,15 @@ final class WorktreeRunner: @unchecked Sendable {
         // at an empty REPL with the prompt mis-bound. Live-test caught this
         // on HRP-37 — Gemma classified the resulting silence as state=stuck.
         // Single-quoted in bash, so no apostrophes in the prompt body.
-        let kickoffPrompt = "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
+        // Plan-gate flow: launch in plan mode so Claude proposes a plan and
+        // parks at the ExitPlanMode approval picker. Lemon surfaces the plan for
+        // human approval, then send-keys "1" ("Yes, and use auto mode") to let
+        // the SAME session continue into the build. Retriggers (revisions) skip
+        // the gate and go straight to auto.
+        let permissionMode = planMode ? "plan" : "auto"
+        let kickoffPrompt = planMode
+            ? "Read LEMON_CONTEXT.md in this directory. First produce a concise implementation plan and present it for approval via ExitPlanMode — do not edit files yet. Once the plan is approved you will continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
+            : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
         // Source common shell profiles so PATH includes Homebrew, npm-global,
         // pyenv shims, etc. Same root cause as the runSync(zsh -l -c) fix:
@@ -549,7 +703,7 @@ final class WorktreeRunner: @unchecked Sendable {
         [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-claude}" \(mcpFlag) --permission-mode auto --remote-control -- '\(kickoffPrompt)'
+        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-claude}" \(mcpFlag) --permission-mode \(permissionMode) --remote-control -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {

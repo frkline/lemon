@@ -350,10 +350,19 @@ make sandbox-reset                      # wipe and re-init
 
 `make sandbox-test` (`scripts/sandbox-scenario.sh`) is the **asserting regression check**:
 it kills any running Lemon (waits for the process gone + MCP port free), resets, files an
-issue, and asserts the lifecycle — session created · 🍋 In Progress · 🍋 Complete · Lemon
-Report posted · MCP status Reviewing — with a PASS/FAIL summary and a real exit code. Reset
-also cleans stale `/tmp/lemon-sandbox-demo-*` worktrees/tmux/sentinels (a leftover worktree
-otherwise fails the next `git worktree add`).
+issue, and asserts the **full plan-gate lifecycle** — session created · plan posted to the
+issue (Lemon Plan) · **Plan Review** gate · `approve_gate` · 🍋 Complete · Lemon Report ·
+Reviewing — with a PASS/FAIL summary and a real exit code. Reset also cleans stale
+`/tmp/lemon-sandbox-demo-*` worktrees/tmux/sentinels (a leftover worktree otherwise fails
+the next `git worktree add`).
+
+The **plan gate** is wired (issue #11): fresh sessions launch `--permission-mode plan`;
+the ExitPlanMode hook (real claude) or `fake-claude` (sandbox) writes the plan to
+`/tmp/lemon-plan-{slug}.md`; `WorktreeRunner.planGatePhase` posts the plan to the issue and
+parks at `.planReview`; `Orchestrator.resolveGate` (popover button or `approve_gate` MCP)
+send-keys "1" + writes `/tmp/lemon-gate-{slug}`, and the same session continues into the
+build. Retriggers skip the gate. Real-claude validation (folder pre-trust, live hook) is
+still pending — the sandbox validates the Lemon side.
 
 `scripts/sandbox.sh <init|issue|show|reset>` is the harness; `make` wraps it. The app
 launches with `LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN=scripts/fake-claude.sh`

@@ -1,26 +1,54 @@
 #!/bin/bash
 # Sandbox stand-in for the `claude` CLI, selected via LEMON_CLAUDE_BIN in
 # WorktreeRunner's launcher. Mimics claude's observable surface so the full Lemon
-# lifecycle runs with zero tokens — no real model, no session limit.
+# lifecycle — including the plan gate — runs with zero tokens.
 #
-# Behaviour is set by LEMON_FAKE_CLAUDE_MODE (default: complete):
-#   complete  announce, then flip the triggering issue's fixture to 🍋 Complete
-#             (as real Claude would set the label) so Lemon posts its report + cleans up.
-#   question  announce, then idle (simulates a session paused awaiting input).
-#   exit      announce, then exit immediately (simulates an early claude exit).
+# Plan mode (`--permission-mode plan` in the args): writes a plan to the plan
+# sentinel (as the real ExitPlanMode hook would), then blocks on stdin waiting
+# for the approval keystroke "1" (which Orchestrator.resolveGate send-keys into
+# the pane). After approval it falls through to the build phase.
 #
-# The issue number is read from LEMON_CONTEXT.md in the cwd (the worktree).
-# Args mirror claude's; they're logged, not parsed.
+# Build phase behaviour is set by LEMON_FAKE_CLAUDE_MODE (default: complete):
+#   complete  flip the triggering issue's fixture to 🍋 Complete (Claude sets the
+#             label when the PR is up) so Lemon posts its report + cleans up.
+#   question  idle (simulates a session paused awaiting input).
+#   exit      exit immediately (simulates an early claude exit).
+#
+# Issue number + slug are derived from LEMON_CONTEXT.md / the worktree path.
 set -uo pipefail
 
 MODE="${LEMON_FAKE_CLAUDE_MODE:-complete}"
 ISSUES=/tmp/lemon-sandbox/issues
+ARGS="$*"
 
-echo "[fake-claude] mode=$MODE launched: $*"
-
+slug="$(basename "$(pwd)" | sed 's/^lemon-//')"
 num="$(grep -oE 'sandbox/demo#[0-9]+' LEMON_CONTEXT.md 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)"
-echo "[fake-claude] worktree=$(pwd)  issue=#${num:-unknown}"
+echo "[fake-claude] launched (mode=$MODE) worktree=$(pwd) issue=#${num:-unknown}"
 
+# --- Plan gate ---------------------------------------------------------------
+if [[ "$ARGS" == *"--permission-mode plan"* ]]; then
+  echo "[fake-claude] plan mode — drafting plan for sandbox/demo#$num"
+  sleep 2
+  cat > "/tmp/lemon-plan-$slug.md" <<PLAN
+# Plan: sandbox/demo#$num
+
+## Context
+A sandbox task. This plan is produced by fake-claude to exercise the plan gate.
+
+## Changes
+1. Implement the change described in the issue.
+2. Add a test covering it.
+
+## Verification
+- Run the test suite; confirm green.
+PLAN
+  echo "[fake-claude] plan ready — parked at approval picker (send 1 to approve)"
+  # Block until Lemon send-keys the approval ("1") into the pane.
+  read -r answer || true
+  echo "[fake-claude] approval received ('$answer') — entering auto mode, building"
+fi
+
+# --- Build phase -------------------------------------------------------------
 set_complete() {
   [ -n "$num" ] || { echo "[fake-claude] no issue number; skipping label flip"; return; }
   python3 - "$ISSUES/$num.json" <<'PY'
@@ -35,13 +63,12 @@ PY
 
 case "$MODE" in
   complete)
-    sleep 5
+    sleep 4
     set_complete
-    # Stay alive briefly so Lemon's 10s label poll observes Complete before exit.
-    sleep 30
+    sleep 30  # stay alive so Lemon's 10s label poll observes Complete
     ;;
   question)
-    echo "[fake-claude] paused — would you like me to proceed? (simulated)"
+    echo "[fake-claude] paused — awaiting input (simulated)"
     sleep 600
     ;;
   exit)

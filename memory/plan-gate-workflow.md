@@ -1,7 +1,7 @@
 ---
 title: Plan-gate workflow (plan-first, two human gates)
 type: decision
-status: proposed
+status: active
 date: 2026-06-27
 issue: 11
 related: [[claude-code-plan-mode]], [[../WORKFLOW_DESIGN]]
@@ -29,6 +29,16 @@ Settled decisions (do not re-litigate without a reason):
   defensive halt-for-human classify example. Still auto-answers routine pickers in auto.
 - Two new `SessionStatus` cases (`.planReview`, `.resultReview`) overload 🍋 Waiting.
 - **Worktrees must be pre-trusted** or `claude` hangs on the folder-trust prompt.
+
+**Implemented + sandbox-validated 2026-06-27** (single session, plan mode → gate → auto):
+`WorktreeRunner` launches `--permission-mode plan` for fresh sessions + writes a
+`.claude/settings.json` ExitPlanMode hook; `planGatePhase` waits for the plan sentinel
+(`/tmp/lemon-plan-{slug}.md`, written by the hook or fake-claude), posts the plan to the
+issue, parks at `.planReview`; `Orchestrator.resolveGate` (popover or `approve_gate` MCP)
+send-keys "1" + writes `/tmp/lemon-gate-{slug}`; the same session continues into the build.
+`make sandbox-test` asserts the whole lifecycle (6/6). **Still pending:** real-claude
+validation (folder pre-trust spike #8, live hook), result gate (`.resultReview` UI exists
+but no orchestration), #11 issue-triage + confirm-screen phases, autopilot opt-out.
 
 **Why:** Frank's "the key workflow to get right" — the whole point of Lemon.
 **How to apply:** Phase 1 (plan gate, desk popover channel) is the keystone. Watch the

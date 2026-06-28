@@ -507,6 +507,9 @@ final class Orchestrator {
         runner.onPRUrl = { [weak session] url in
             DispatchQueue.main.async { session?.prUrl = url }
         }
+        runner.onPlanReady = { [weak session] plan in
+            DispatchQueue.main.async { session?.planMarkdown = plan }
+        }
         runner.onAiSummary = { [weak session] summary in
             DispatchQueue.main.async { session?.aiSummary = summary }
         }
@@ -566,14 +569,19 @@ final class Orchestrator {
             return
         }
         let sessionName = "lemon-\(session.issue.pathSlug)"
+        // The runner's planGatePhase parks on this sentinel; it's the cross-task
+        // signal that the human resolved the gate (the keystroke drives claude).
+        let gateSentinel = "/tmp/lemon-gate-\(session.issue.pathSlug)"
         switch (gate, decision) {
         case (.planReview, .approve):
             sendTmuxKeys(to: sessionName, keys: "1") // "Yes, and use auto mode"
+            try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.planMarkdown = nil
             session.aiSummary = "Plan approved — building"
             session.status = .executing
         case (.planReview, .requestChanges):
             sendTmuxKeys(to: sessionName, keys: "4") // "Tell Claude what to change"
+            try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
         case (.resultReview, .approve):
             sendTmuxLine(to: sessionName, text: "Approved — open the PR now.")
             session.status = .reviewing
