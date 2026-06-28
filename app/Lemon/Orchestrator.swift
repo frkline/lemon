@@ -359,6 +359,15 @@ final class Orchestrator {
 
             for ref in newIssues {
                 guard !sessions.isTracking(ref: ref) else { continue }
+                // Lockdown (#13): only the user's own issues trigger. A 🍋 added
+                // by anyone else on a low-trust (e.g. public) workspace is ignored.
+                // Fail-open on unknown authorship — GitHub always populates the
+                // opener, so it's fully enforced there; a source that doesn't
+                // expose it won't silently drop every issue.
+                if workspace.lockdown, isKnownOutsider(ref.authorLogin, identity: identity) {
+                    Logger.orchestrator.info("Lockdown: skip \(ref.identifier) — author \(ref.authorLogin ?? "?") ≠ \(identity.handle)")
+                    continue
+                }
                 guard sessions.active.count < maxConcurrent else {
                     Logger.orchestrator.info("At max concurrent sessions, skipping \(ref.identifier)")
                     break
@@ -399,6 +408,17 @@ final class Orchestrator {
                     Logger.orchestrator.info("Retrigger skip \(ref.identifier): no new comment after marker \(marker.commentId)")
                     continue
                 }
+                // Lockdown (#13, M3): re-trigger only on the USER's own reply.
+                // An outsider commenting on a public 🍋 Complete issue must not
+                // be able to drive a new Claude run.
+                if workspace.lockdown {
+                    let trusted = (try? await hasTrustedReply(ref: ref, after: marker.commentId,
+                                                              identity: identity, client: client, auth: auth)) ?? false
+                    if !trusted {
+                        Logger.orchestrator.info("Lockdown: skip retrigger \(ref.identifier) — newest replies not authored by \(identity.handle)")
+                        continue
+                    }
+                }
                 Logger.orchestrator.info("Re-triggering \(ref.identifier) from reply")
                 await startSession(ref: ref, workspace: workspace, identity: identity,
                                    client: client, auth: auth, retrigger: marker)
@@ -411,6 +431,33 @@ final class Orchestrator {
         }
         status.lastPolledAt = Date()
         workspaceStatuses[workspace.id] = status
+    }
+
+    // MARK: - Lockdown trust helpers (#13)
+
+    /// Case-insensitive match of an author handle against the workspace identity.
+    private func authoredByUser(_ author: String?, identity: Identity) -> Bool {
+        guard let author, !author.isEmpty else { return false }
+        return author.lowercased() == identity.handle.lowercased()
+    }
+
+    /// Author is KNOWN and not the user. Unknown (nil) authorship returns false
+    /// (fail-open) so the trigger filter doesn't silently drop everything from a
+    /// source that doesn't expose the opener.
+    private func isKnownOutsider(_ author: String?, identity: Identity) -> Bool {
+        guard let author, !author.isEmpty else { return false }
+        return author.lowercased() != identity.handle.lowercased()
+    }
+
+    /// True if any comment AFTER the marker was authored by the user — the
+    /// trusted-commenter gate for re-trigger in lockdown (M3).
+    private func hasTrustedReply(ref: IssueRef, after commentId: String, identity: Identity,
+                                 client: any IssueSourceClient, auth: SourceAuth) async throws -> Bool
+    {
+        let comments = try await client.fetchComments(ref: ref, auth: auth)
+        guard let idx = comments.firstIndex(where: { $0.id == commentId }) else { return false }
+        let after = comments[comments.index(after: idx)...]
+        return after.contains { authoredByUser($0.author, identity: identity) }
     }
 
     /// Build the per-call SourceConfig from an identity + the surface the
@@ -551,8 +598,11 @@ final class Orchestrator {
             ),
         )
 
+        let lockdown = workspace.lockdown
+        let trustedAuthor = identity.handle
         Task.detached(priority: .background) {
-            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger)
+            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger,
+                             lockdown: lockdown, trustedAuthor: trustedAuthor)
         }
     }
 

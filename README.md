@@ -142,6 +142,9 @@ flowchart LR
 
 Reply to the Lemon comment on a completed issue to re-trigger a revision pass — Lemon reuses the branch. Same behavior on either source.
 
+> [!IMPORTANT]
+> **Trust & lockdown.** A 🍋 label becomes an auto-mode Claude session, so on a public repo untrusted issue/comment text is an attack surface. Each workspace has a **Lockdown** toggle (default on for GitHub): only issues *you* opened trigger, only *your* replies re-trigger, and anyone else's content is kept out of the AI's context. With lockdown off, outside content is still wrapped in an untrusted-data delimiter so Claude treats it as data, not instructions. And `--permission-mode auto` is not unrestricted — Bash inside the `/tmp/lemon-{slug}` worktree is auto-accepted, but reads outside it (`~/.ssh`, `~/.aws`) still prompt. Network egress inside the worktree is auto-accepted today; treat low-trust repos accordingly.
+
 ## Local AI, by design
 
 <div align="center">

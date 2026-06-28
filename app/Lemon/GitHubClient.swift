@@ -115,6 +115,7 @@ final class GitHubClient: Sendable {
         let labels: [LabelDTO]
         let repository_url: String?
         let html_url: String?
+        let user: UserDTO? // issue opener (trust boundary #13)
 
         struct LabelDTO: Decodable { let name: String }
     }
@@ -128,6 +129,7 @@ final class GitHubClient: Sendable {
         let id: Int
         let body: String?
         let created_at: String
+        let user: UserDTO? // commenter (trust boundary #13)
     }
 
     // MARK: - Search
@@ -169,6 +171,7 @@ final class GitHubClient: Sendable {
                 description: dto.body,
                 labelNames: dto.labels.map { Self.normalizeIncomingLabel($0.name) },
                 scope: .githubRepo(owner: owner, repo: repo, number: dto.number),
+                authorLogin: dto.user?.login,
             )
         }
     }
@@ -337,7 +340,7 @@ final class GitHubClient: Sendable {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return dtos.compactMap { dto in
             guard let date = iso.date(from: dto.created_at) ?? ISO8601DateFormatter().date(from: dto.created_at) else { return nil }
-            return IssueComment(id: String(dto.id), body: dto.body ?? "", createdAt: date)
+            return IssueComment(id: String(dto.id), body: dto.body ?? "", createdAt: date, author: dto.user?.login)
         }
     }
 }

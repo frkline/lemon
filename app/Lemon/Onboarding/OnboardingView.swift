@@ -32,6 +32,7 @@ struct DraftPair: Identifiable, Equatable {
     var path: String = ""
     var allReposInFolder: Bool = false
     var homeRepo: String = ""
+    var lockdown: Bool = false // #13 trust boundary; recommended for public repos
 
     struct VerifiedSnapshot: Equatable {
         let identityId: UUID // ID assigned at verify time so later Add-anothers can route back to it
@@ -248,6 +249,7 @@ struct OnboardingView: View {
                 allReposInFolder: pair.allReposInFolder,
                 homeRepo: pair.homeRepo,
                 routing: Routing(identityId: identityId, surfaceId: pair.surfaceId),
+                lockdown: pair.lockdown,
             )
         }
         k.workspaces = workspaces
@@ -1059,6 +1061,19 @@ private struct TrackersStep: View {
                 }
                 .padding(.leading, 20)
             }
+
+            Toggle(isOn: $draft.lockdown) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Lockdown — trusted author only")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LD.textSecondary)
+                    Text("Only your own issues trigger; others' content stays out of the AI. Recommended for public repos.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(LD.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.checkbox)
         }
         .animation(LD.smooth, value: draft.allReposInFolder)
     }

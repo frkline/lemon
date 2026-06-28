@@ -46,6 +46,7 @@ enum SandboxFixtures {
             allReposInFolder: false,
             homeRepo: "",
             routing: Routing(identityId: identityId, surfaceId: surfaceId),
+            lockdown: ProcessInfo.processInfo.environment["LEMON_SANDBOX_LOCKDOWN"] == "1",
         )
     }
 
@@ -62,12 +63,14 @@ private struct SandboxIssueFixture: Codable {
     var labelNames: [String]
     var comments: [SandboxCommentFixture] = []
     var commentSeq: Int = 0
+    var author: String? = nil // issue opener (defaults to the sandbox user)
 }
 
 private struct SandboxCommentFixture: Codable {
     var id: String
     var body: String
     var createdAt: Double // epoch seconds
+    var author: String? = nil // commenter (defaults to the sandbox user)
 }
 
 final class MockIssueClient: IssueSourceClient, @unchecked Sendable {
@@ -131,6 +134,7 @@ final class MockIssueClient: IssueSourceClient, @unchecked Sendable {
             description: issue.description,
             labelNames: issue.labelNames,
             scope: .githubRepo(owner: "sandbox", repo: "demo", number: issue.number),
+            authorLogin: issue.author ?? SandboxFixtures.identity.handle,
         )
     }
 
@@ -141,7 +145,11 @@ final class MockIssueClient: IssueSourceClient, @unchecked Sendable {
 
     private func comments(for number: Int) -> [IssueComment] {
         (load(number)?.comments ?? []).map {
-            IssueComment(id: $0.id, body: $0.body, createdAt: Date(timeIntervalSince1970: $0.createdAt))
+            IssueComment(
+                id: $0.id, body: $0.body,
+                createdAt: Date(timeIntervalSince1970: $0.createdAt),
+                author: $0.author ?? SandboxFixtures.identity.handle,
+            )
         }
     }
 

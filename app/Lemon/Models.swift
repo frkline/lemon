@@ -53,6 +53,9 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
     let description: String?
     let labelNames: [String]
     let scope: IssueScope
+    /// Issue opener (GitHub login / Linear creator). nil = unknown. Used by
+    /// lockdown (#13) to trigger only on the user's own issues.
+    var authorLogin: String? = nil
 
     var source: IssueSource {
         switch scope {
@@ -100,7 +103,7 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
     }
 
     init(id: String, identifier: String, title: String, description: String?,
-         labelNames: [String], scope: IssueScope)
+         labelNames: [String], scope: IssueScope, authorLogin: String? = nil)
     {
         self.id = id
         self.identifier = identifier
@@ -108,6 +111,7 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
         self.description = description
         self.labelNames = labelNames
         self.scope = scope
+        self.authorLogin = authorLogin
     }
 }
 
@@ -117,6 +121,10 @@ struct IssueComment: Identifiable, Equatable {
     let id: String
     let body: String
     let createdAt: Date
+    /// Commenter identity (GitHub login / Linear user name or id). nil = unknown.
+    /// Used by the trust boundary (#13): in lockdown only the user's own comments
+    /// re-trigger, and non-user content is wrapped/excluded in LEMON_CONTEXT.
+    var author: String? = nil
 }
 
 // MARK: - Identity → Surface → Workspace
@@ -214,6 +222,12 @@ struct Workspace: Codable, Identifiable, Hashable {
     var allReposInFolder: Bool = false
     var homeRepo: String = ""
     var routing: Routing
+    /// Lockdown (the #13 trust boundary). When on, Lemon treats this workspace
+    /// as low-trust: only issues the user authored trigger, only the user's own
+    /// comments re-trigger, and any non-user content in LEMON_CONTEXT is excluded
+    /// (vs. delimiter-wrapped when off). Default on is offered for public GitHub
+    /// repos in onboarding. Decodes false for pre-lockdown configs.
+    var lockdown: Bool = false
 }
 
 // MARK: - Legacy WorkspacePair surface (migration source)

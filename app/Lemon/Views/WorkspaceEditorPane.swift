@@ -12,6 +12,7 @@ struct WorkspaceEditorPane: View {
     @State private var path: String = ""
     @State private var allReposInFolder: Bool = false
     @State private var homeRepo: String = ""
+    @State private var lockdown: Bool = false
     @State private var identityId: UUID? = nil
     @State private var surfaceId: String = ""
     @State private var deleteArmed = false
@@ -516,6 +517,24 @@ struct WorkspaceEditorPane: View {
                     .padding(.leading, 22)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
+
+                Divider().overlay(LD.hairlineDivider)
+
+                // Trust boundary (#13). Recommended for public repos.
+                Toggle(isOn: $lockdown) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lockdown — trusted author only")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(LD.textPrimary)
+                        Text(lockdown
+                            ? "Only issues YOU opened trigger, and only your replies re-trigger. Other people's content is kept out of the AI's context entirely. Recommended for public repos."
+                            : "Anyone's assigned issue can trigger; others' content is shown to the AI but wrapped as untrusted data.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(LD.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.checkbox)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -615,6 +634,9 @@ struct WorkspaceEditorPane: View {
         case .new:
             if let firstIdentity = identities.first {
                 identityId = firstIdentity.id
+                // Default lockdown ON for GitHub (often public/community repos);
+                // OFF for Linear (closed, vetted workspace). User can flip it.
+                lockdown = firstIdentity.kind == .github
             }
         case let .existing(id):
             if let ws = KeychainStore.shared.workspaces.first(where: { $0.id == id }) {
@@ -624,6 +646,7 @@ struct WorkspaceEditorPane: View {
                 homeRepo = ws.homeRepo
                 identityId = ws.routing.identityId
                 surfaceId = ws.routing.surfaceId
+                lockdown = ws.lockdown
             }
         }
     }
@@ -673,6 +696,7 @@ struct WorkspaceEditorPane: View {
         working.allReposInFolder = allReposInFolder
         working.homeRepo = homeRepo.trimmingCharacters(in: .whitespaces)
         working.routing = Routing(identityId: identityId, surfaceId: trimmedSurface)
+        working.lockdown = lockdown
 
         var all = keychain.workspaces
         if let idx = all.firstIndex(where: { $0.id == working.id }) {

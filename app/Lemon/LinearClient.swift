@@ -147,7 +147,7 @@ final class LinearClient: Sendable {
         query IssueComments($id: String!) {
           issue(id: $id) {
             comments(first: 25, orderBy: createdAt) {
-              nodes { id body createdAt }
+              nodes { id body createdAt user { displayName } }
             }
           }
         }
@@ -173,7 +173,8 @@ final class LinearClient: Sendable {
                 let ts = node["createdAt"] as? String,
                 let date = iso.date(from: ts)
             else { return nil }
-            return IssueComment(id: id, body: body, createdAt: date)
+            let author = (node["user"] as? [String: Any])?["displayName"] as? String
+            return IssueComment(id: id, body: body, createdAt: date, author: author)
         }
         // Normalize to chronological order (oldest first). Linear returns
         // newest-first by default — every downstream consumer
