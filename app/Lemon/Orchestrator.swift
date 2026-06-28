@@ -210,7 +210,8 @@ final class Orchestrator {
                                    client: cli, auth: auth)
                 restoredSlugs.insert(p.slug)
                 // Heal any straggler labels left by the crash (the #31 trifecta).
-                await reconcileLabels(ref: p.issue, client: cli, auth: auth)
+                await reconcileLabels(ref: p.issue, building: p.status == .executing,
+                                      client: cli, auth: auth)
             } else if p.status == .reviewing, worktreeExists {
                 // Completed pre-crash, awaiting the user's Cleanup click.
                 let info = p.cleanupInfo ?? makeCleanupInfo(slug: p.slug, sessionPath: sessionPath, workspace: ws)
@@ -558,7 +559,25 @@ final class Orchestrator {
             // Progress + 🍋 Waiting + 🍋 Complete all set at once. Lemon is the
             // sole writer of state labels, so we converge them every poll (#35).
             for session in sessions.active where session.workspaceId == workspace.id {
-                await reconcileLabels(ref: session.issue, client: client, auth: auth)
+                await reconcileLabels(ref: session.issue, building: session.status == .executing,
+                                      client: client, auth: auth)
+            }
+
+            // 4. Surface merged PRs on reviewing sessions (#54). The runner has
+            // already returned by .reviewing, so the poll loop is what notices the
+            // PR landed. Confirm-first: flag it for the card; the user still clicks
+            // Cleanup to tear down (we never auto-delete the worktree).
+            for session in sessions.active
+                where session.workspaceId == workspace.id
+                && session.status == .reviewing && !session.prMerged
+            {
+                guard let url = session.prUrl else { continue }
+                let runner = runnerOrThrowaway(sessionId: session.id)
+                if await runner.isPRMerged(prUrl: url, cwd: session.worktreePath) {
+                    session.prMerged = true
+                    session.aiSummary = "PR merged — ready to clean up"
+                    Logger.orchestrator.info("reviewing \(session.issue.identifier): PR merged — ready to clean up")
+                }
             }
             status.error = nil
         } catch {
@@ -579,10 +598,15 @@ final class Orchestrator {
     ///   1. 🍋 Complete present → the work is done, so 🍋 (trigger) / In Progress /
     ///      Waiting are necessarily stale; clear them.
     ///   2. In Progress AND Waiting both present → a session can't be building and
-    ///      parked at once; keep Waiting (attention wins) and clear In Progress.
+    ///      parked at once. Which one wins depends on what the session is actually
+    ///      doing: a just-approved gate is BUILDING, so In Progress wins and the
+    ///      stale 🍋 Waiting is cleared (#51 — otherwise this janitor kept clearing
+    ///      In Progress every poll and pinned a building session to "Waiting").
+    ///      Otherwise the session is genuinely parked, so Waiting (attention) wins.
     /// Idempotent: a no-op when labels are already consistent.
     @MainActor
-    private func reconcileLabels(ref: IssueRef, client: any IssueSourceClient,
+    private func reconcileLabels(ref: IssueRef, building: Bool = false,
+                                 client: any IssueSourceClient,
                                  auth: SourceAuth) async
     {
         guard let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth) else { return }
@@ -600,7 +624,11 @@ final class Orchestrator {
             if has(.inProgress) { await clear(.inProgress, "stale alongside 🍋 Complete") }
             if has(.waiting) { await clear(.waiting, "stale alongside 🍋 Complete") }
         } else if has(.inProgress), has(.waiting) {
-            await clear(.inProgress, "can't build and wait at once — keeping 🍋 Waiting")
+            if building {
+                await clear(.waiting, "session is building (gate approved) — keeping 🍋 In Progress")
+            } else {
+                await clear(.inProgress, "can't build and wait at once — keeping 🍋 Waiting")
+            }
         }
     }
 
@@ -776,6 +804,12 @@ final class Orchestrator {
                 self?.sessions.persist()
             }
         }
+        runner.onGemmaTiming = { [weak session] lastActivityAt, lastGemmaAt in
+            DispatchQueue.main.async {
+                session?.lastPaneActivityAt = lastActivityAt
+                session?.lastGemmaClassifyAt = lastGemmaAt
+            }
+        }
     }
 
     /// Build the WorkspacePair the runner consumes from a workspace + identity.
@@ -946,6 +980,8 @@ final class Orchestrator {
             ), startedAt: now.addingTimeInterval(-180))
             active1.status = .executing
             active1.aiSummary = "Updating ColorScheme tokens in CardView and running snapshot tests"
+            // Pane quiet ~95s → the Gemma idle countdown shows "checks in 0:25" (#50).
+            active1.lastPaneActivityAt = now.addingTimeInterval(-95)
             for line in [
                 "[lemon] Starting session for DEMO-42",
                 "[lemon] Worktree ready at /tmp/lemon-demo-42",

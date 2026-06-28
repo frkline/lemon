@@ -410,6 +410,15 @@ final class Session: Identifiable {
     /// "Cleanup worktree" in the detail view, which fires
     /// `Orchestrator.cleanupSession`.
     var cleanupInfo: WorktreeCleanupInfo?
+    /// Set once the PR for a `.reviewing` session is detected as merged (#54).
+    /// Surfaces "✅ Merged — ready to clean up" on the review card; teardown
+    /// stays a confirm-first click (Orchestrator.cleanupSession).
+    var prMerged: Bool = false
+    /// Silence-detector timing for the Gemma idle countdown (#50): when the pane
+    /// last produced output, and when Gemma last classified. The view derives
+    /// "Gemma checks in 0:48" / "Listening" / "Looked just now" from these.
+    var lastPaneActivityAt: Date?
+    var lastGemmaClassifyAt: Date?
 
     init(issue: IssueRef) {
         self.issue = issue
