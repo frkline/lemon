@@ -15,7 +15,7 @@ ok(){ echo "  ✓ $1"; PASS=$((PASS+1)); }; bad(){ echo "  ✗ $1 ${2:+— $2}";
 assert(){ if [ "$2" = "1" ]; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 APP_PID=""; teardown(){ [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null; }; trap teardown EXIT
 
-stop_app(){ pkill -f 'Lemon.app/Contents/MacOS/Lemon' 2>/dev/null||true; for _ in $(seq 1 20); do pgrep -f 'Lemon.app/Contents/MacOS/Lemon'>/dev/null||break; sleep 0.5; done; for _ in $(seq 1 20); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null&&sleep 0.5||break; done; }
+stop_app(){ pkill -f "$APP" 2>/dev/null||true; for _ in $(seq 1 20); do pgrep -f "$APP">/dev/null||break; sleep 0.5; done; for _ in $(seq 1 20); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null&&sleep 0.5||break; done; }
 start_app(){ # $1 = extra env (e.g. LEMON_SANDBOX_LOCKDOWN=1)
   env LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN="$(pwd)/scripts/fake-claude.sh" ${1:-} "$APP" >"$ROOT/app.log" 2>&1 & APP_PID=$!
   for _ in $(seq 1 30); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null&&break; sleep 1; done; }

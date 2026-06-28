@@ -27,8 +27,8 @@ wait_planN(){ for _ in $(seq 1 "$2"); do [ "$(plan_count)" -ge "$1" ] && { echo 
 
 echo "── sandbox request-changes scenario ────────────────────────────"
 [ -x "$APP" ] || { echo "no built app — run make build-ui"; exit 2; }
-pkill -f 'Lemon.app/Contents/MacOS/Lemon' 2>/dev/null||true
-for _ in $(seq 1 20); do pgrep -f 'Lemon.app/Contents/MacOS/Lemon'>/dev/null||break; sleep 0.5; done
+pkill -f "$APP" 2>/dev/null||true
+for _ in $(seq 1 20); do pgrep -f "$APP">/dev/null||break; sleep 0.5; done
 for _ in $(seq 1 20); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null&&sleep 0.5||break; done
 scripts/sandbox.sh reset >/dev/null
 scripts/sandbox.sh issue "Greeting helper" "Add hello(name)." >/dev/null
