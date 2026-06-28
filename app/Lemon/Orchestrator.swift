@@ -435,18 +435,12 @@ final class Orchestrator {
 
     // MARK: - Lockdown trust helpers (#13)
 
-    /// Case-insensitive match of an author handle against the workspace identity.
     private func authoredByUser(_ author: String?, identity: Identity) -> Bool {
-        guard let author, !author.isEmpty else { return false }
-        return author.lowercased() == identity.handle.lowercased()
+        TrustPolicy.isTrusted(author: author, trustedAuthor: identity.handle)
     }
 
-    /// Author is KNOWN and not the user. Unknown (nil) authorship returns false
-    /// (fail-open) so the trigger filter doesn't silently drop everything from a
-    /// source that doesn't expose the opener.
     private func isKnownOutsider(_ author: String?, identity: Identity) -> Bool {
-        guard let author, !author.isEmpty else { return false }
-        return author.lowercased() != identity.handle.lowercased()
+        TrustPolicy.isKnownOutsider(author: author, me: identity.handle)
     }
 
     /// True if any comment AFTER the marker was authored by the user — the
