@@ -157,7 +157,7 @@ final class Orchestrator {
         guard pollTask == nil else { return }
         Task { await LocalLLM.shared.start() }
         Task { @MainActor [weak self] in
-            self?.reconstructDanglingSessions()
+            await self?.restoreSessions()
         }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -169,36 +169,147 @@ final class Orchestrator {
         }
     }
 
-    /// On launch, scan `/tmp/lemon-*` for worktrees Lemon left behind in
-    /// a previous process. Match each by slug-shape against the
-    /// configured workspaces, then synthesize a Session in `.reviewing`
-    /// with `cleanupInfo` populated. The user sees the stuck session in
-    /// the active list with a "Cleanup worktree" affordance ready to
-    /// fire — no manual `git worktree remove` required.
+    /// On launch, reconcile in-flight sessions against reality (issue #35).
+    /// First the persisted index (the authoritative record): each entry's tmux
+    /// session is liveness-checked (debounced), and
+    ///   • alive            → reattach (resume the lifecycle, no relaunch),
+    ///   • dead + reviewing → restore the cleanup-ready card (pending review),
+    ///   • dead otherwise   → GC the worktree (died mid-run; drop the entry).
+    /// Then a fallback `/tmp/lemon-*` scan picks up pre-upgrade orphans that
+    /// predate the index. Finally the index is rewritten to match what survived.
     @MainActor
-    private func reconstructDanglingSessions() {
-        let fm = FileManager.default
-        guard let tmpEntries = try? fm.contentsOfDirectory(atPath: "/tmp") else { return }
-        let lemonDirs = tmpEntries.filter { $0.hasPrefix("lemon-") }
-        guard !lemonDirs.isEmpty else { return }
-
+    private func restoreSessions() async {
         let keychain = KeychainStore.shared
         let workspaces = keychain.workspaces
+        let byId = Dictionary(workspaces.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let probe = WorktreeRunner() // tmux liveness helpers only — never run()
+        var restoredSlugs = Set<String>()
+
+        for p in keychain.sessionIndex {
+            // Already tracking this issue this process (shouldn't happen on a
+            // fresh launch, but guards a double-restore).
+            if sessions.isTracking(ref: p.issue) { restoredSlugs.insert(p.slug); continue }
+
+            // Workspace or credentials gone → can't manage it; leave the worktree
+            // for the GC sweep and drop the entry (it won't be re-persisted).
+            guard let ws = byId[p.workspaceId],
+                  let identity = keychain.identity(for: ws),
+                  let auth = keychain.authFor(identity: identity)
+            else {
+                Logger.orchestrator.info("restore: workspace/credentials gone for \(p.issue.identifier) — dropping")
+                continue
+            }
+
+            let cli = client(for: identity)
+            let alive = !(await probe.tmuxSessionDead(slug: p.slug))
+            let sessionPath = "/tmp/lemon-\(p.slug)"
+            let worktreeExists = isDirectory(sessionPath)
+
+            if alive {
+                restoreLiveSession(persisted: p, workspace: ws, identity: identity,
+                                   client: cli, auth: auth)
+                restoredSlugs.insert(p.slug)
+                // Heal any straggler labels left by the crash (the #31 trifecta).
+                await reconcileLabels(ref: p.issue, client: cli, auth: auth)
+            } else if p.status == .reviewing, worktreeExists {
+                // Completed pre-crash, awaiting the user's Cleanup click.
+                let info = p.cleanupInfo ?? makeCleanupInfo(slug: p.slug, sessionPath: sessionPath, workspace: ws)
+                let session = Session(issue: p.issue)
+                session.status = .reviewing
+                session.workspaceId = ws.id
+                session.worktreePath = sessionPath
+                session.cleanupInfo = info
+                session.appendLog("[lemon] restored ready-for-review session — worktree at \(sessionPath)")
+                sessions.add(session)
+                restoredSlugs.insert(p.slug)
+                await reconcileLabels(ref: p.issue, client: cli, auth: auth)
+                Logger.orchestrator.info("restore: \(p.issue.identifier) ready for review (tmux dead)")
+            } else if worktreeExists {
+                // Died mid-run (tmux gone before 🍋 Complete). GC the worktree so
+                // a retry's `git worktree add` succeeds; user re-adds 🍋 to retry.
+                Logger.orchestrator.info("restore: \(p.issue.identifier) died mid-run — GC'ing worktree")
+                await gcWorktree(slug: p.slug, sessionPath: sessionPath, workspace: ws, probe: probe)
+            }
+            // dead + no worktree → nothing to restore or GC; entry simply drops.
+        }
+
+        // Fallback: pre-upgrade orphans with no index entry.
+        await reconstructUnindexedWorktrees(workspaces: workspaces, probe: probe,
+                                            skip: restoredSlugs)
+
+        // Rewrite the index to reflect exactly what we restored into `active`.
+        sessions.persist()
+    }
+
+    /// Restore a still-alive session: rebuild its pair, wire the same callbacks
+    /// `startSession` uses, and reattach (no worktree setup, no relaunch).
+    @MainActor
+    private func restoreLiveSession(persisted p: PersistedSession, workspace: Workspace,
+                                    identity: Identity, client: any IssueSourceClient,
+                                    auth: SourceAuth)
+    {
+        let session = Session(issue: p.issue)
+        session.workspaceId = workspace.id
+        session.branch = p.branch
+        session.retrigger = p.retrigger
+        session.status = p.status
+        session.worktreePath = "/tmp/lemon-\(p.slug)"
+        session.terminalWindowName = "Lemon · \(p.issue.identifier)"
+        session.cleanupInfo = p.cleanupInfo
+        session.appendLog("[lemon] reattached on launch (\(p.status.displayLabel))")
+        sessions.add(session)
+
+        let runner = WorktreeRunner()
+        runners[session.id] = runner
+        wire(runner, to: session)
+
+        let pair = makePair(workspace: workspace, identity: identity)
+        Task.detached(priority: .background) {
+            await runner.reattach(persisted: p, pair: pair, client: client, auth: auth)
+        }
+        Logger.orchestrator.info("restore: reattached \(p.issue.identifier) at \(p.status.displayLabel)")
+    }
+
+    /// Best-effort GC of one dead worktree + its tmux/sentinels. Uses the
+    /// workspace to drive a clean `git worktree remove` (proper repoPath).
+    @MainActor
+    private func gcWorktree(slug: String, sessionPath: String, workspace: Workspace,
+                            probe: WorktreeRunner) async
+    {
+        let info = makeCleanupInfo(slug: slug, sessionPath: sessionPath, workspace: workspace)
+        await probe.cleanupWorktrees(
+            repos: info.repos.map { (name: $0.name, repoPath: $0.repoPath) },
+            sessionPath: sessionPath, isMultiRepo: info.isMultiRepo, slug: slug,
+        )
+    }
+
+    /// Fallback `/tmp/lemon-*` scan for worktrees with no index entry (pre-upgrade
+    /// orphans). Live ones are LEFT ALONE — we have no IssueRef to manage them and
+    /// must never synthesize a cleanup card for a live session (the footgun this
+    /// issue fixes). Dead ones that match a workspace become cleanup-ready cards.
+    @MainActor
+    private func reconstructUnindexedWorktrees(workspaces: [Workspace],
+                                               probe: WorktreeRunner,
+                                               skip: Set<String>) async
+    {
         guard !workspaces.isEmpty else { return }
+        let fm = FileManager.default
+        guard let tmpEntries = try? fm.contentsOfDirectory(atPath: "/tmp") else { return }
 
-        for dirName in lemonDirs {
+        for dirName in tmpEntries where dirName.hasPrefix("lemon-") {
             let slug = String(dirName.dropFirst("lemon-".count))
+            if skip.contains(slug) { continue }
             let sessionPath = "/tmp/\(dirName)"
-
-            // Skip Lemon's own tmp scratch dirs (build output, smoke
-            // results, etc.) — only directories whose name matches the
-            // `lemon-<slug>` worktree convention count.
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: sessionPath, isDirectory: &isDir), isDir.boolValue else { continue }
-
-            // Already tracked this process — skip.
+            guard isDirectory(sessionPath) else { continue } // skip log/sentinel files
             if sessions.active.contains(where: { $0.cleanupInfo?.slug == slug }) { continue }
             if sessions.recent.contains(where: { $0.cleanupInfo?.slug == slug }) { continue }
+
+            // Live but un-indexed: an orphan from before this build. We can't
+            // reattach (no IssueRef) — leave it running rather than risk killing it.
+            if !(await probe.tmuxSessionDead(slug: slug)) {
+                Logger.orchestrator.info("restore: live un-indexed worktree \(slug) — leaving untracked")
+                continue
+            }
 
             guard let (ref, info) = matchSlugToWorkspace(slug: slug, sessionPath: sessionPath,
                                                          workspaces: workspaces) else { continue }
@@ -210,6 +321,11 @@ final class Orchestrator {
             sessions.add(session)
             Logger.orchestrator.info("Reconstructed dangling session for \(ref.identifier) at \(sessionPath)")
         }
+    }
+
+    private func isDirectory(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
     }
 
     /// Match a slug ("lem-42" / "frkline-lemon-14") against a configured
@@ -436,6 +552,14 @@ final class Orchestrator {
                 await startSession(ref: ref, workspace: workspace, identity: identity,
                                    client: client, auth: auth, retrigger: marker)
             }
+
+            // 3. Reconcile 🍋* labels for this workspace's active sessions. A
+            // crash mid-clearState can leave stragglers — issue #31 saw 🍋 In
+            // Progress + 🍋 Waiting + 🍋 Complete all set at once. Lemon is the
+            // sole writer of state labels, so we converge them every poll (#35).
+            for session in sessions.active where session.workspaceId == workspace.id {
+                await reconcileLabels(ref: session.issue, client: client, auth: auth)
+            }
             status.error = nil
         } catch {
             Logger.orchestrator.error("Poll error for workspace \(workspace.path) [\(scopeTag)]: \(error)")
@@ -444,6 +568,38 @@ final class Orchestrator {
         }
         status.lastPolledAt = Date()
         workspaceStatuses[workspace.id] = status
+    }
+
+    /// Converge an issue's 🍋* state labels toward a single consistent state,
+    /// healing the stragglers a crashed `clearState` leaves behind (issue #35 /
+    /// the #31 trifecta). Two rules, both of which only ever CLEAR a redundant
+    /// label and never erase the meaningful "needs attention" / "complete"
+    /// signal — so this is race-safe against Claude still setting 🍋 Waiting as a
+    /// triage signal (migrating that to a sentinel is deferred, out of scope here):
+    ///   1. 🍋 Complete present → the work is done, so 🍋 (trigger) / In Progress /
+    ///      Waiting are necessarily stale; clear them.
+    ///   2. In Progress AND Waiting both present → a session can't be building and
+    ///      parked at once; keep Waiting (attention wins) and clear In Progress.
+    /// Idempotent: a no-op when labels are already consistent.
+    @MainActor
+    private func reconcileLabels(ref: IssueRef, client: any IssueSourceClient,
+                                 auth: SourceAuth) async
+    {
+        guard let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth) else { return }
+        let present = Set(labels)
+        func has(_ s: LemonState) -> Bool { present.contains(s.labelName) }
+        func clear(_ s: LemonState, _ why: String) async {
+            try? await client.clearState(ref: ref, state: s, auth: auth)
+            Logger.orchestrator.info("reconcile \(ref.identifier): cleared \(s.labelName) — \(why)")
+        }
+
+        if has(.complete) {
+            if has(.trigger) { await clear(.trigger, "stale alongside 🍋 Complete") }
+            if has(.inProgress) { await clear(.inProgress, "stale alongside 🍋 Complete") }
+            if has(.waiting) { await clear(.waiting, "stale alongside 🍋 Complete") }
+        } else if has(.inProgress), has(.waiting) {
+            await clear(.inProgress, "can't build and wait at once — keeping 🍋 Waiting")
+        }
     }
 
     // MARK: - Lockdown trust helpers (#13)
@@ -553,11 +709,30 @@ final class Orchestrator {
         let session = Session(issue: ref)
         session.worktreePath = "/tmp/lemon-\(ref.pathSlug)"
         session.terminalWindowName = "Lemon · \(ref.identifier)"
+        // Stash the fields the persisted session index (issue #35) needs to
+        // reattach, BEFORE add() so the first persist captures them.
+        session.workspaceId = workspace.id
+        session.branch = retrigger?.branch ?? "lemon/\(ref.pathSlug)"
+        session.retrigger = retrigger
         sessions.add(session)
 
         let runner = WorktreeRunner()
         runners[session.id] = runner
+        wire(runner, to: session)
 
+        let pair = makePair(workspace: workspace, identity: identity)
+        let lockdown = workspace.lockdown
+        let trustedAuthor = identity.handle
+        Task.detached(priority: .background) {
+            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger,
+                             lockdown: lockdown, trustedAuthor: trustedAuthor)
+        }
+    }
+
+    /// Wire a runner's callbacks to a Session. Shared by `startSession` and the
+    /// reattach path (issue #35) so both keep identical UI + persistence hooks.
+    @MainActor
+    private func wire(_ runner: WorktreeRunner, to session: Session) {
         runner.onLogLine = { [weak session] line in
             DispatchQueue.main.async { session?.appendLog(line) }
         }
@@ -567,6 +742,10 @@ final class Orchestrator {
                 if status.isTerminal {
                     if let s = session { self?.sessions.finish(s) }
                     self?.runners.removeValue(forKey: session?.id ?? UUID())
+                } else {
+                    // Persist the new status so a relaunch reattaches at the
+                    // right point in the lifecycle (issue #35).
+                    self?.sessions.persist()
                 }
             }
         }
@@ -587,14 +766,20 @@ final class Orchestrator {
         runner.onPendingAction = { [weak session] msg in
             DispatchQueue.main.async { session?.pendingAction = msg }
         }
-        runner.onCleanupReady = { [weak session] info in
-            DispatchQueue.main.async { session?.cleanupInfo = info }
+        runner.onCleanupReady = { [weak self, weak session] info in
+            DispatchQueue.main.async {
+                session?.cleanupInfo = info
+                // Capture cleanupInfo in the index so a relaunch can drive
+                // cleanup of a dead-but-worktree-exists session (issue #35).
+                self?.sessions.persist()
+            }
         }
+    }
 
-        // WorktreeRunner still consumes the pair shape internally; build the
-        // matching pair from the workspace + identity. (R-next will switch
-        // the runner signature too, but this keeps the cut minimal.)
-        let pair = WorkspacePair(
+    /// Build the WorkspacePair the runner consumes from a workspace + identity.
+    /// Shared by `startSession` and the reattach path (issue #35).
+    private func makePair(workspace: Workspace, identity: Identity) -> WorkspacePair {
+        WorkspacePair(
             id: workspace.id,
             source: sourceConfig(identity: identity, surfaceId: workspace.routing.surfaceId),
             workspace: WorkspaceMapping(
@@ -604,13 +789,6 @@ final class Orchestrator {
                 homeRepo: workspace.homeRepo,
             ),
         )
-
-        let lockdown = workspace.lockdown
-        let trustedAuthor = identity.handle
-        Task.detached(priority: .background) {
-            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger,
-                             lockdown: lockdown, trustedAuthor: trustedAuthor)
-        }
     }
 
     func stopSession(_ session: Session) {
@@ -667,6 +845,8 @@ final class Orchestrator {
         default:
             break
         }
+        // Persist the post-gate status so a relaunch resumes correctly (issue #35).
+        sessions.persist()
         Logger.orchestrator.info("resolveGate \(session.issue.identifier) \(gate.displayLabel) -> \(decision.rawValue)")
     }
 

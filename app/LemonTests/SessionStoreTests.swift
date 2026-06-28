@@ -97,4 +97,54 @@ final class SessionStoreTests: XCTestCase {
         store.finish(stranger)
         XCTAssertEqual(store.recent.count, 1, "Second finish still idempotent")
     }
+
+    // MARK: - Persisted snapshot projection (issue #35)
+
+    private func tracked(id: String = "i1", status: SessionStatus = .executing) -> Session {
+        let s = Session(issue: issue(id: id))
+        s.workspaceId = UUID()
+        s.status = status
+        return s
+    }
+
+    func testSnapshotIncludesStartedSession() {
+        let store = SessionStore()
+        store.add(tracked())
+        let snap = store.snapshot()
+        XCTAssertEqual(snap.count, 1)
+        XCTAssertEqual(snap.first?.issue.id, "i1")
+        XCTAssertEqual(snap.first?.status, .executing)
+        // Default branch derives from the issue's pathSlug (DEMO-1 → demo-1).
+        XCTAssertEqual(snap.first?.branch, "lemon/demo-1")
+    }
+
+    func testSnapshotExcludesSessionWithoutWorkspaceId() {
+        let store = SessionStore()
+        let s = Session(issue: issue()) // workspaceId stays nil (mock/smoke)
+        s.status = .executing
+        store.add(s)
+        XCTAssertTrue(store.snapshot().isEmpty, "No workspaceId → can't reattach → excluded")
+    }
+
+    func testSnapshotExcludesTerminalSessions() {
+        let store = SessionStore()
+        store.add(tracked(status: .done))
+        store.add(tracked(id: "i2", status: .failed))
+        XCTAssertTrue(store.snapshot().isEmpty, "Terminal sessions are not reattachable")
+    }
+
+    func testSnapshotPreservesBranchAndRetrigger() {
+        let store = SessionStore()
+        let s = tracked(status: .reviewing)
+        s.branch = "lemon/custom"
+        s.retrigger = LemonMarker(branch: "lemon/custom", prNumber: "7",
+                                  commentId: "c1", repoPath: "/tmp/r", source: .github)
+        s.cleanupInfo = WorktreeCleanupInfo(sessionPath: "/tmp/lemon-demo-1", isMultiRepo: false,
+                                            repos: [.init(name: "r", repoPath: "/tmp/r")], slug: "demo-1")
+        store.add(s)
+        let p = store.snapshot().first
+        XCTAssertEqual(p?.branch, "lemon/custom")
+        XCTAssertEqual(p?.retrigger?.prNumber, "7")
+        XCTAssertEqual(p?.cleanupInfo?.slug, "demo-1")
+    }
 }

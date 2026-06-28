@@ -208,6 +208,100 @@ final class WorktreeRunner: @unchecked Sendable {
         )
     }
 
+    /// Reattach to a still-running tmux session after an app relaunch/crash
+    /// (issue #35). Unlike `run()`, this does NO worktree setup, NO context
+    /// write, NO label apply, and NO `launchTmux` — the detached `tmux` session
+    /// and its on-disk sentinels are already live, so re-launching would
+    /// double-launch claude and clobber live state. It rebuilds the locals `run()`
+    /// derives and resumes the lifecycle at the persisted status. The caller
+    /// (Orchestrator.restoreSessions) has already confirmed the tmux session is
+    /// alive (debounced) and wired the same callbacks as `startSession`.
+    func reattach(persisted: PersistedSession, pair: WorkspacePair,
+                  client: any IssueSourceClient, auth: SourceAuth) async
+    {
+        let workspace = pair.workspace
+        let ref = persisted.issue
+        let slug = persisted.slug
+        let branch = persisted.branch
+        let sessionPath = "/tmp/lemon-\(slug)"
+        let sentinelPath = "/tmp/lemon-exit-\(slug)"
+
+        // Rediscover repos exactly as run() does — the worktrees already exist.
+        let repos: [(name: String, repoPath: String)]
+        if workspace.allReposInFolder {
+            repos = discoverRepos(in: workspace.path)
+        } else {
+            let name = URL(fileURLWithPath: workspace.path).lastPathComponent
+            repos = [(name: name, repoPath: workspace.path)]
+        }
+
+        log("[lemon] reattaching to \(ref.identifier) at \(persisted.status.displayLabel)")
+
+        func resumePoll() async {
+            await pollUntilDone(
+                ref: ref, pair: pair, client: client, auth: auth,
+                sessionPath: sessionPath, repos: repos,
+                isMultiRepo: workspace.allReposInFolder, branch: branch,
+                retrigger: persisted.retrigger, workspacePath: workspace.path,
+                sentinelPath: sentinelPath,
+            )
+        }
+
+        switch persisted.status {
+        case .planning:
+            // Mirror run()'s gate decision: plan-mode sessions wait for + post a
+            // plan (resuming:false — not yet posted at .planning); retrigger /
+            // autopilot sessions skip the gate and poll directly.
+            let autopilot = TrustPolicy.isAutopilot(labels: ref.labelNames)
+            let planMode = persisted.retrigger == nil && !autopilot
+            if planMode {
+                guard await planGatePhase(ref: ref, client: client, auth: auth,
+                                          slug: slug, sentinelPath: sentinelPath,
+                                          resuming: false) else { return }
+            }
+            onStatusChange?(.executing)
+            await resumePoll()
+
+        case .planReview:
+            // Plan already posted + 🍋 Waiting applied pre-crash — resume the park
+            // loop without re-posting (resuming:true).
+            guard await planGatePhase(ref: ref, client: client, auth: auth,
+                                      slug: slug, sentinelPath: sentinelPath,
+                                      resuming: true) else { return }
+            onStatusChange?(.executing)
+            await resumePoll()
+
+        case .executing, .waiting, .resultReview:
+            // pollUntilDone is fully resumable: it re-reads the result sentinel,
+            // PR state, and labels from scratch each tick.
+            onStatusChange?(persisted.status)
+            await resumePoll()
+
+        case .reviewing:
+            // handleComplete already ran — or was interrupted mid-post. If the
+            // Lemon Report marker is present the report was posted, so restore
+            // .reviewing statically (cleanupInfo was rehydrated from the index).
+            // If absent, the crash beat the post — finish the job.
+            let marker = try? await client.findLemonMarker(ref: ref, auth: auth)
+            if marker != nil {
+                onStatusChange?(.reviewing)
+                log("[lemon] reattached at review — report already posted")
+            } else {
+                log("[lemon] reattached at review but no report found — completing")
+                await handleComplete(
+                    ref: ref, pair: pair, client: client, auth: auth,
+                    sessionPath: sessionPath, repos: repos,
+                    isMultiRepo: workspace.allReposInFolder, branch: branch,
+                    retrigger: persisted.retrigger, workspacePath: workspace.path,
+                )
+            }
+
+        case .done, .failed:
+            // Terminal statuses are never persisted; no-op defensively.
+            break
+        }
+    }
+
     func stop() {
         stopped = true
         pollTask?.cancel()
@@ -355,6 +449,12 @@ final class WorktreeRunner: @unchecked Sendable {
             "/tmp/lemon-launch-\(slug).sh",
             "/tmp/lemon-exit-\(slug)",
             "/tmp/lemon-mcp-\(slug).json",
+            // Plan-gate sentinels — without these, a GC'd-then-recreated slug
+            // could inherit a stale plan/decision/result and skip or mis-drive
+            // its gate (issue #35).
+            planReadyPath(slug: slug),
+            gateSentinelPath(slug: slug),
+            resultReadyPath(slug: slug),
         ]
         for path in leftovers {
             try? FileManager.default.removeItem(atPath: path)
@@ -531,6 +631,29 @@ final class WorktreeRunner: @unchecked Sendable {
         "lemon-\(slug)"
     }
 
+    /// One `tmux has-session` probe. True if the detached session is alive.
+    func tmuxSessionAlive(slug: String) -> Bool {
+        runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
+    }
+
+    /// Debounced death check. A *single* `tmux has-session` miss is not proof a
+    /// session ended — it can transiently fail for a still-alive claude (observed
+    /// live: a session was marked Failed mid-plan, then produced its plan three
+    /// minutes later). Re-probe up to `confirmations` times with a short gap and
+    /// report dead only if EVERY probe misses. A live session answers on the first
+    /// probe, so the happy path stays a single fast call. Used everywhere a lone
+    /// miss could move a live session to a terminal/cleanup state (planGatePhase,
+    /// pollUntilDone, and reattach reconciliation #35).
+    func tmuxSessionDead(slug: String, confirmations: Int = 3, delayMs: Int = 700) async -> Bool {
+        for attempt in 0 ..< max(1, confirmations) {
+            if tmuxSessionAlive(slug: slug) { return false }
+            if attempt < confirmations - 1 {
+                try? await Task.sleep(for: .milliseconds(delayMs))
+            }
+        }
+        return true
+    }
+
     func logPath(slug: String) -> String {
         "/tmp/lemon-log-\(slug).txt"
     }
@@ -614,17 +737,29 @@ final class WorktreeRunner: @unchecked Sendable {
     /// proceed into pollUntilDone. Sentinels decouple this from who runs claude:
     /// the ExitPlanMode hook / fake-claude writes the plan sentinel; resolveGate
     /// writes the gate sentinel.
+    /// `resuming` is set when reattaching to a session already parked at the plan
+    /// gate (issue #35): the plan was posted and the 🍋 Waiting label applied by
+    /// the pre-crash process, so we restore the UI and re-enter the park loop
+    /// WITHOUT re-posting the plan comment or re-applying labels.
     private func planGatePhase(ref: IssueRef, client: any IssueSourceClient,
-                               auth: SourceAuth, slug: String, sentinelPath: String) async -> Bool
+                               auth: SourceAuth, slug: String, sentinelPath: String,
+                               resuming: Bool = false) async -> Bool
     {
         let planPath = planReadyPath(slug: slug)
         let gatePath = gateSentinelPath(slug: slug)
-        try? FileManager.default.removeItem(atPath: planPath)
-        try? FileManager.default.removeItem(atPath: gatePath)
+        // When resuming a reattached gate, the plan (and possibly an unconsumed
+        // gate decision) is already on disk — keep it. Only a fresh gate clears.
+        if !resuming {
+            try? FileManager.default.removeItem(atPath: planPath)
+            try? FileManager.default.removeItem(atPath: gatePath)
+        }
 
-        func sessionEnded() -> Bool {
-            FileManager.default.fileExists(atPath: sentinelPath)
-                || !runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
+        // The exit sentinel is authoritative — the launcher only writes it after
+        // claude truly exits. A tmux miss is debounced (a lone miss can be a false
+        // positive on a still-alive session).
+        func sessionEnded() async -> Bool {
+            if FileManager.default.fileExists(atPath: sentinelPath) { return true }
+            return await tmuxSessionDead(slug: slug)
         }
 
         // 1. Wait for the plan to be ready (or early exit / timeout).
@@ -649,7 +784,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 onStatusChange?(.waiting)
                 return false
             }
-            if sessionEnded() {
+            if await sessionEnded() {
                 log("[lemon] session ended during planning", level: .error)
                 onStatusChange?(.failed)
                 return false
@@ -662,16 +797,22 @@ final class WorktreeRunner: @unchecked Sendable {
         }
 
         // Surface the plan for approval: card + posted comment + 🍋 Waiting.
-        log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
+        // On resume the comment + labels are already in place — just restore the
+        // card and status, then fall through to the park loop (no double-post).
         onPlanReady?(plan)
         onStatusChange?(.planReview)
-        try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
-        try? await client.applyState(ref: ref, state: .waiting, auth: auth)
-        _ = try? await client.postComment(
-            ref: ref,
-            body: "## 🍋 Lemon Plan — \(ref.identifier)\n\n\(plan)\n\n---\nReply **approve** to build, or leave feedback to revise.",
-            auth: auth,
-        )
+        if resuming {
+            log("[lemon] reattached at plan gate for \(ref.identifier) — awaiting approval")
+        } else {
+            log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
+            try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+            try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+            _ = try? await client.postComment(
+                ref: ref,
+                body: "## 🍋 Lemon Plan — \(ref.identifier)\n\n\(plan)\n\n---\nReply **approve** to build, or leave feedback to revise.",
+                auth: auth,
+            )
+        }
 
         // 2. Park until the gate is resolved.
         let gateDeadline = Date().addingTimeInterval(24 * 3600)
@@ -698,7 +839,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 return await planGatePhase(ref: ref, client: client, auth: auth,
                                            slug: slug, sentinelPath: sentinelPath)
             }
-            if sessionEnded() {
+            if await sessionEnded() {
                 log("[lemon] session ended while awaiting plan approval", level: .error)
                 onStatusChange?(.failed)
                 return false
@@ -1088,8 +1229,12 @@ final class WorktreeRunner: @unchecked Sendable {
             // would happily poll for hours after the user closed the window,
             // showing "Executing" forever.
             let sentinelExists = FileManager.default.fileExists(atPath: sentinelPath)
-            let tmuxAlive = runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
-            if sentinelExists || !tmuxAlive {
+            // Only pay for the debounced death probe when the sentinel is absent —
+            // a sentinel is already proof claude exited, and the debounce guards
+            // against a lone has-session false-positive killing a live session.
+            var tmuxGone = false
+            if !sentinelExists { tmuxGone = await tmuxSessionDead(slug: slug) }
+            if sentinelExists || tmuxGone {
                 let exitCode: String
                 let cause: String
                 if sentinelExists {

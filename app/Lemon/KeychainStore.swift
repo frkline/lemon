@@ -331,6 +331,36 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
+    /// Persisted session index (issue #35) — the value-type projection of the
+    /// live sessions, so Lemon can reattach to still-running tmux sessions after a
+    /// relaunch/crash. Unlike `workspaces` (fixed config, faked in sandbox), this
+    /// is dynamic runtime state, so it uses real UserDefaults even in sandbox —
+    /// the reattach flow is validated by relaunching the sandbox app, which must
+    /// see the index written by the prior process.
+    var sessionIndex: [PersistedSession] {
+        get {
+            let json = sessionIndexJSON
+            guard !json.isEmpty, let data = json.data(using: .utf8) else { return [] }
+            return (try? JSONDecoder().decode([PersistedSession].self, from: data)) ?? []
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            sessionIndexJSON = json
+        }
+    }
+
+    private var sessionIndexJSON: String {
+        get {
+            if memory != nil { return memory?["sessionIndex"] ?? "" }
+            return UserDefaults.standard.string(forKey: "lemon-session-index") ?? ""
+        }
+        set {
+            if memory != nil { memory?["sessionIndex"] = newValue; return }
+            UserDefaults.standard.set(newValue, forKey: "lemon-session-index")
+        }
+    }
+
     private var identitiesJSON: String {
         get {
             if memory != nil { return memory?["identities"] ?? "" }

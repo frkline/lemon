@@ -275,7 +275,7 @@ enum LemonState: String, CaseIterable, Equatable {
     static let active: Set<LemonState> = [.inProgress, .waiting, .complete]
 }
 
-enum SessionStatus: Equatable {
+enum SessionStatus: String, Codable, Equatable {
     case planning // worktree setup
     case planReview // plan drafted, awaiting human approval (the plan gate)
     case executing // claude session running
@@ -352,7 +352,7 @@ enum MenuBarGlyph: String, CaseIterable {
     }
 }
 
-struct LemonMarker: Equatable {
+struct LemonMarker: Codable, Equatable {
     let branch: String
     let prNumber: String
     let commentId: String
@@ -366,7 +366,7 @@ struct LemonMarker: Equatable {
 /// worktree(s) + tmux + /tmp leftovers, stashed on the Session so the
 /// user can fire the cleanup later from the "Ready for review" card
 /// without WorktreeRunner staying alive in memory.
-struct WorktreeCleanupInfo: Equatable {
+struct WorktreeCleanupInfo: Codable, Equatable {
     let sessionPath: String
     let isMultiRepo: Bool
     /// Per-repo (name, source-repo-path) tuples — both single-repo and
@@ -374,7 +374,7 @@ struct WorktreeCleanupInfo: Equatable {
     let repos: [RepoRef]
     let slug: String
 
-    struct RepoRef: Equatable {
+    struct RepoRef: Codable, Equatable {
         let name: String
         let repoPath: String
     }
@@ -385,6 +385,15 @@ final class Session: Identifiable {
     let id: UUID = .init()
     let issue: IssueRef
     let startedAt: Date
+    /// The owning Workspace.id, stashed so the persisted session index
+    /// (issue #35) can rebuild the WorkspacePair on reattach. Set by
+    /// Orchestrator.startSession / restoreSessions; nil for mock/smoke sessions.
+    var workspaceId: UUID?
+    /// Git branch and re-trigger marker, stashed so `SessionStore.persist()` is a
+    /// faithful projection — reattach resumes `pollUntilDone` with the same
+    /// branch (for PR detection) and retrigger (for the completion path).
+    var branch: String?
+    var retrigger: LemonMarker?
     var status: SessionStatus = .planning
     var logLines: [String] = []
     var prUrl: String?
@@ -418,6 +427,24 @@ final class Session: Identifiable {
         logLines.append(line)
         if logLines.count > 2000 { logLines.removeFirst() }
     }
+}
+
+/// Value-type projection of a `Session` persisted to UserDefaults so Lemon can
+/// reattach to still-running tmux sessions after a relaunch/crash (issue #35).
+/// The live `Session` (`@Observable`, holds log buffers) is intentionally NOT
+/// Codable — only the fields reattach needs are stored. The real `IssueRef` is
+/// kept (not reconstructed from the slug) because `pathSlug → IssueRef` is lossy:
+/// for Linear the node `id` is unrecoverable, so `fetchIssueLabels`/`postComment`
+/// would fail.
+struct PersistedSession: Codable, Equatable {
+    let issue: IssueRef
+    let workspaceId: UUID
+    let slug: String
+    let branch: String
+    let status: SessionStatus
+    let retrigger: LemonMarker?
+    let startedAt: Date
+    let cleanupInfo: WorktreeCleanupInfo?
 }
 
 // MARK: - Gemma response types
