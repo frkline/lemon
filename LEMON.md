@@ -4,6 +4,8 @@
 
 Lemon is a personal **menu-bar macOS app** that orchestrates Claude Code sessions driven by Linear or GitHub Issues labels. The user tags an issue with `🍋`; Lemon spins up a git worktree, launches `claude` in Terminal, and uses a local **Gemma 4** classifier (via SwiftLM + MLX) to auto-handle routine prompts so only the questions that need a human reach the user. Built for one developer on Apple Silicon (macOS 26 / Xcode 26); Lemon itself is glue — the intelligence is Claude Code.
 
+> This file is *injected into the worktree* Lemon spawns. For the operator-side workloop — how a human or agent drives Lemon on its own issues — see [`DOGFOOD.md`](DOGFOOD.md).
+
 ## The workflow (plan-gate, issue #11)
 
 A 🍋 issue runs as **one `claude` session with two human gates**:
