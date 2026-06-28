@@ -343,9 +343,17 @@ It exploits two seams Lemon already has:
 make sandbox-init                       # fixtures dir + throwaway git workspace (origin/main)
 make sandbox-issue T="Add hello" B="…"  # file a 🍋 fixture issue (sandbox/demo#N)
 make sandbox                            # build-ui + relaunch Lemon in sandbox mode (fake-claude + MCP)
+make sandbox-test                       # build-ui + drive one issue end-to-end WITH ASSERTIONS
 make sandbox-show                       # print every fixture issue's labels + comments
 make sandbox-reset                      # wipe and re-init
 ```
+
+`make sandbox-test` (`scripts/sandbox-scenario.sh`) is the **asserting regression check**:
+it kills any running Lemon (waits for the process gone + MCP port free), resets, files an
+issue, and asserts the lifecycle — session created · 🍋 In Progress · 🍋 Complete · Lemon
+Report posted · MCP status Reviewing — with a PASS/FAIL summary and a real exit code. Reset
+also cleans stale `/tmp/lemon-sandbox-demo-*` worktrees/tmux/sentinels (a leftover worktree
+otherwise fails the next `git worktree add`).
 
 `scripts/sandbox.sh <init|issue|show|reset>` is the harness; `make` wraps it. The app
 launches with `LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN=scripts/fake-claude.sh`
@@ -366,9 +374,10 @@ To exercise a **real** `claude` against the fixtures (truth-check, costs tokens)
 with `LEMON_SANDBOX=1` but **without** `LEMON_CLAUDE_BIN`. The fixture workspace is a real
 git repo, so worktrees and `gh` (against a throwaway) behave normally.
 
-> Not yet wired (next sandbox increments): a Gemma golden-snapshot corpus for tuning
-> `LocalLLM.classify()`, an `approve_gate` MCP tool (the popover button's backend, for
-> scripting the plan/result gates), and `.planReview`/`.resultReview` smoke states.
+> Not yet wired (next sandbox increments): an `approve_gate` MCP tool (the popover button's
+> backend, for scripting the plan/result gates — and the asserting runner will use it once
+> the gates exist), a Gemma golden-snapshot corpus for tuning `LocalLLM.classify()`, and
+> `.planReview`/`.resultReview` smoke states.
 
 ## Secrets and config
 

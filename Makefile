@@ -1,5 +1,5 @@
 .PHONY: build-image open smoke-test help ui build-ui smoke watch test integration-test loop \
-        sandbox sandbox-init sandbox-issue sandbox-show sandbox-reset
+        sandbox sandbox-init sandbox-issue sandbox-show sandbox-reset sandbox-test
 
 UI_BUILD_DIR := /tmp/lemon-build
 UI_APP       := $(UI_BUILD_DIR)/Lemon.app
@@ -27,6 +27,7 @@ help:
 	@echo "  make sandbox-init     Create /tmp/lemon-sandbox fixtures + throwaway git workspace"
 	@echo "  make sandbox-issue    File a 🍋 fixture issue (T=\"title\" B=\"body\")"
 	@echo "  make sandbox          build-ui + relaunch Lemon in sandbox mode (fake-claude)"
+	@echo "  make sandbox-test     build-ui + drive one issue end-to-end with assertions"
 	@echo "  make sandbox-show     Print fixture issues' labels + comments"
 	@echo "  make sandbox-reset    Wipe and re-init the sandbox"
 
@@ -85,6 +86,9 @@ sandbox: build-ui
 	@LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN="$(FAKE_CLAUDE)" \
 	  $(UI_APP)/Contents/MacOS/Lemon >/tmp/lemon-sandbox/app.log 2>&1 &
 	@echo "Running. File issues with 'make sandbox-issue', watch with 'make sandbox-show'."
+
+sandbox-test: build-ui
+	@scripts/sandbox-scenario.sh
 
 watch:
 	@which fswatch >/dev/null 2>&1 || (echo "Install: brew install fswatch" && exit 1)

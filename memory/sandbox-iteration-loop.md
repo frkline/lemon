@@ -11,14 +11,17 @@ sandbox that exploits Lemon's two existing protocol seams plus its mock infrastr
 principle: **separate the expensive/irreversible parts (real GitHub, real `claude` tokens)
 from the logic we iterate on (orchestration state machine + Gemma prompts).**
 
-**Landed 2026-06-27 (vertical slice, build + tests green):** components 1, 3, and the
-harness/Make targets — verified a full `🍋 → In Progress → Complete → Lemon Report`
-lifecycle end-to-end with no GitHub/Linear traffic and no claude tokens. Files:
-`app/Lemon/MockIssueClient.swift`, `scripts/sandbox.sh`, `scripts/fake-claude.sh`,
-`make sandbox*` targets, CLAUDE.md "Workflow sandbox". Seams: `LEMON_SANDBOX=1`
-(KeychainStore + Orchestrator.client(for:)), `LEMON_CLAUDE_BIN` (WorktreeRunner launcher).
-**Still TODO:** 2 (approve_gate MCP + asserting scenario runner), 4 (Gemma corpus),
-5 (gate smoke states), 6 (real-claude-against-fixtures is already usable: omit LEMON_CLAUDE_BIN).
+**Landed 2026-06-27 (build + tests green):** components 1, 3, the harness/Make targets,
+AND the asserting scenario runner (part of 2). `make sandbox-test`
+(`scripts/sandbox-scenario.sh`) drives one issue end-to-end and asserts session-created ·
+In Progress · Complete · Lemon Report · MCP Reviewing, with a real exit code. It already
+earned its keep — caught a stale-worktree bug and an app-kill/MCP-port race on first run.
+Files: `app/Lemon/MockIssueClient.swift`, `scripts/sandbox.sh`, `scripts/fake-claude.sh`,
+`scripts/sandbox-scenario.sh`, `make sandbox*` targets, CLAUDE.md "Workflow sandbox".
+Seams: `LEMON_SANDBOX=1` (KeychainStore + Orchestrator.client(for:)), `LEMON_CLAUDE_BIN`
+(WorktreeRunner launcher). **Still TODO:** `approve_gate` MCP tool (rest of 2 — needed once
+the gates exist), 4 (Gemma corpus), 5 (gate smoke states). 6 (real-claude-against-fixtures)
+is already usable: omit LEMON_CLAUDE_BIN.
 
 Components (build order = priority):
 

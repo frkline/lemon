@@ -17,8 +17,19 @@ ORIGIN="$ROOT/origin.git"
 
 cmd="${1:-help}"; shift || true
 
+clean_artifacts() {
+  # Worktrees/tmux/sentinels/launchers live at /tmp siblings, not under $ROOT,
+  # so wipe them explicitly or a stale worktree fails the next `git worktree add`.
+  tmux ls 2>/dev/null | grep -oE '^lemon-sandbox-demo-[^:]+' \
+    | xargs -I{} tmux kill-session -t {} 2>/dev/null || true
+  rm -rf /tmp/lemon-sandbox-demo-* 2>/dev/null || true
+  rm -f /tmp/lemon-exit-sandbox-demo-* /tmp/lemon-launch-sandbox-demo-*.sh \
+        /tmp/lemon-mcp-sandbox-demo-* 2>/dev/null || true
+}
+
 init() {
   echo "[sandbox] (re)initializing $ROOT"
+  clean_artifacts
   rm -rf "$ROOT"
   mkdir -p "$ISSUES"
   # Bare origin + a clone seeded with main, so `git worktree add ... origin/main`
