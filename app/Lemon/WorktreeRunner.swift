@@ -1082,6 +1082,14 @@ final class WorktreeRunner: @unchecked Sendable {
             } catch {
                 Logger.worktree.error("Failed to post reply comment for \(ref.identifier): \(error)")
             }
+            // #9: advance the marker. A fresh Lemon Report (same marker-bearing
+            // shape as initial completion) becomes the new findLatest() anchor,
+            // so this re-trigger's revision comments don't re-fire on every
+            // subsequent poll/launch. Without this the marker stays pinned to the
+            // ORIGINAL report and any reply after it re-triggers forever.
+            if let commentId = try? await client.postComment(ref: ref, body: commentBody, auth: auth) {
+                log("[lemon] posted Lemon comment \(commentId) (re-trigger marker advance)")
+            }
         } else {
             if let commentId = try? await client.postComment(ref: ref, body: commentBody, auth: auth) {
                 log("[lemon] posted Lemon comment \(commentId)")
