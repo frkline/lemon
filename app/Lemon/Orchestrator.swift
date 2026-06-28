@@ -865,12 +865,12 @@ final class Orchestrator {
     }
 
     private func sendTmuxKeys(to sessionName: String, keys: String) {
-        _ = runShellCommand("tmux send-keys -t '\(sessionName)' '\(keys)' Enter")
+        _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(keys)' Enter")
     }
 
     private func sendTmuxLine(to sessionName: String, text: String) {
         let esc = text.replacingOccurrences(of: "'", with: "'\\''")
-        _ = runShellCommand("tmux send-keys -t '\(sessionName)' '\(esc)' Enter")
+        _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(esc)' Enter")
     }
 
     @discardableResult
@@ -1011,7 +1011,7 @@ final class Orchestrator {
             )
             for line in [
                 "[lemon] starting session for sandbox/demo#1",
-                "[lemon] tmux session started — join: tmux attach -t lemon-sandbox-demo-1",
+                "[lemon] tmux session started — join: tmux -L lemon attach -t lemon-sandbox-demo-1",
                 "[lemon] 🍋 Complete detected for sandbox/demo#1",
                 "[gemma] Starting work on sandbox/demo#1",
                 "[lemon] posted Lemon comment c1",

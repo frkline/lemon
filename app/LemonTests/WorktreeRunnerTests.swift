@@ -159,4 +159,66 @@ final class WorktreeRunnerTests: XCTestCase {
             XCTAssertFalse(WorktreeRunner.isSafeSendKeys(unsafe), "\(unsafe) must be rejected")
         }
     }
+
+    // MARK: - tailLines / stripANSI (#44 classify-input bounding)
+
+    func testStripANSIRemovesCSIAndOSC() {
+        let raw = "\u{1B}[0;31mred\u{1B}[0m \u{1B}]0;title\u{07}plain"
+        XCTAssertEqual(WorktreeRunner.stripANSI(raw), "red plain")
+    }
+
+    func testTailLinesSplitsOnCarriageReturns() {
+        // A TUI repaint stream: bare CRs, no LFs — must still yield many lines.
+        let content = (1 ... 50).map { "frame\($0)" }.joined(separator: "\r")
+        let lines = WorktreeRunner.tailLines(from: content, last: 10)
+        XCTAssertEqual(lines.count, 10)
+        XCTAssertEqual(lines.last, "frame50")
+        XCTAssertEqual(lines.first, "frame41")
+    }
+
+    func testTailLinesBoundsCharsOnGiantAnsiBlob() {
+        // The #44 wedge: a huge ANSI-laden blob with almost no newlines.
+        let noise = String(repeating: "\u{1B}[2K\u{1B}[1G", count: 20000)
+        let blob = noise + "actual output line\r" + noise + "final line"
+        let lines = WorktreeRunner.tailLines(from: blob, last: 100, maxChars: 6000)
+        let totalChars = lines.reduce(0) { $0 + $1.count }
+        XCTAssertLessThanOrEqual(totalChars, 6000, "classify input must stay bounded")
+        XCTAssertEqual(lines.last, "final line")
+        XCTAssertFalse(lines.joined().contains("\u{1B}"), "ANSI must be stripped")
+    }
+
+    func testTailLinesEmptyContent() {
+        XCTAssertTrue(WorktreeRunner.tailLines(from: "", last: 100).isEmpty)
+    }
+
+    // MARK: - parseSessionLimitReset (#39 quota detection)
+
+    func testParseSessionLimitNilForNormalOutput() {
+        XCTAssertNil(WorktreeRunner.parseSessionLimitReset(from: "$ ls\nfile.txt\nbuild succeeded"))
+    }
+
+    func testParseSessionLimitParsesPMResetSameDay() throws {
+        let cal = Calendar(identifier: .gregorian)
+        let now = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 6, day: 28, hour: 10, minute: 0)))
+        let text = "You've hit your session limit · resets 3:20pm (America/Boise)"
+        let reset = WorktreeRunner.parseSessionLimitReset(from: text, now: now, calendar: cal)
+        XCTAssertNotNil(reset)
+        let rc = try cal.dateComponents([.hour, .minute, .day], from: XCTUnwrap(reset))
+        XCTAssertEqual(rc.hour, 15)
+        XCTAssertEqual(rc.minute, 20)
+        XCTAssertEqual(rc.day, 28)
+    }
+
+    func testParseSessionLimitRollsToTomorrowWhenPast() throws {
+        let cal = Calendar(identifier: .gregorian)
+        let now = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 6, day: 28, hour: 16, minute: 0)))
+        let reset = try XCTUnwrap(WorktreeRunner.parseSessionLimitReset(from: "session limit · resets 3:20pm", now: now, calendar: cal))
+        XCTAssertGreaterThan(reset, now)
+        XCTAssertEqual(cal.dateComponents([.day], from: reset).day, 29)
+    }
+
+    func testParseSessionLimitFallbackWhenNoTime() {
+        // Banner present but no parseable clock → fallback (non-nil, ~1h out).
+        XCTAssertNotNil(WorktreeRunner.parseSessionLimitReset(from: "You've hit your session limit, try later"))
+    }
 }

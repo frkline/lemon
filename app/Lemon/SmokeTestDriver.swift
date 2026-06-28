@@ -88,12 +88,12 @@
             }
 
             // 3c — join clipboard path (no iTerm): verifies the clipboard command is well-formed.
-            // When iTerm is absent the Join button copies "tmux attach -t lemon-{id}" to clipboard.
+            // When iTerm is absent the Join button copies "tmux -L lemon attach -t lemon-{id}" to clipboard.
             if let s = orchestrator.sessions.active.first(where: { $0.pendingAction == nil }),
                !FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
             {
                 let expectedSession = "lemon-\(s.issue.pathSlug)"
-                let expectedCmd = "tmux attach -t \(expectedSession)"
+                let expectedCmd = "tmux -L lemon attach -t \(expectedSession)"
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(expectedCmd, forType: .string)
                 let pasted = NSPasteboard.general.string(forType: .string) ?? ""

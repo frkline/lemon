@@ -66,7 +66,7 @@ stop_app
 # .reviewing worktree before the next launch). Without this the leftover
 # worktree blocks the re-trigger's `git worktree add`.
 rm -rf /tmp/lemon-sandbox-demo-1 2>/dev/null
-tmux kill-session -t lemon-sandbox-demo-1 2>/dev/null || true
+tmux -L lemon kill-session -t lemon-sandbox-demo-1 2>/dev/null || true
 
 # 3. RELAUNCH → the reply legitimately re-triggers; let it complete (report #2).
 echo "[phase] relaunch #1 → expect ONE re-trigger"

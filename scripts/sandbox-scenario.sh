@@ -43,7 +43,7 @@ stop_app() { # SIGTERM the app ONLY — the detached tmux session must survive
   for _ in $(seq 1 20); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null && sleep 0.5 || break; done
   APP_PID=""
 }
-tmux_alive() { tmux has-session -t "lemon-$SLUG" 2>/dev/null && echo 1 || echo 0; }
+tmux_alive() { tmux -L lemon has-session -t "lemon-$SLUG" 2>/dev/null && echo 1 || echo 0; }
 
 # --- probes -----------------------------------------------------------------
 fixture_has_comment() { # $1=num  $2=python-prefix-expr -> 1/0

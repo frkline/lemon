@@ -166,22 +166,26 @@ final class WorktreeRunner: @unchecked Sendable {
         let sessionLabel = WorktreeRunner.remoteControlName(
             identifier: identifier, title: ref.title,
         )
-        guard launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
-                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
-                         planMode: planMode)
-        else {
+        if let failure = launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
+                                    sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
+                                    planMode: planMode)
+        {
             log("[lemon] tmux launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
             try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
-            _ = try? await client.postComment(
-                ref: ref,
-                body: "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry.",
-                auth: auth,
-            )
+            let body = switch failure {
+            case .tmuxMissing:
+                "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry."
+            case let .claudeMissing(bin):
+                "🍋 Couldn't find the `\(bin)` binary on PATH. Install the Claude CLI (or fix your PATH) and re-add the 🍋 label to retry."
+            case let .launchError(detail):
+                "🍋 Failed to launch tmux session: \(detail). Re-add the 🍋 label to retry."
+            }
+            _ = try? await client.postComment(ref: ref, body: body, auth: auth)
             onStatusChange?(.failed)
             return
         }
-        log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(slug: slug))")
+        log("[lemon] tmux session started — join: \(Self.tmuxBase) attach -t \(tmuxSessionName(slug: slug))")
 
         // Plan gate: surface the plan, wait for human approval, then continue
         // into the build in the SAME session. Returns false if abandoned/failed.
@@ -443,7 +447,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // Kill tmux session and remove all per-session artefacts in /tmp so
         // repeated runs don't leak launcher scripts, sentinel files, merged
         // MCP configs, or pane logs.
-        runSync("tmux kill-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null || true")
+        runSync("\(Self.tmuxBase) kill-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null || true")
         let leftovers = [
             logPath(slug: slug),
             "/tmp/lemon-launch-\(slug).sh",
@@ -575,6 +579,16 @@ final class WorktreeRunner: @unchecked Sendable {
         content += "- **Reserved dev-server port:** `\(devPort)` — use this if you launch a dev server so concurrent Lemon sessions don't collide.\n"
         content += "- **Worktree:** you're in a fresh git worktree on branch `\(ref.identifier.hasPrefix("lemon/") ? ref.identifier : "lemon/\(ref.pathSlug)")`. Don't switch branches.\n\n"
 
+        // Self-isolation guard (#40). This worktree may be a checkout of Lemon
+        // itself, which ships dev/test scripts that tear down Lemon + tmux. Run
+        // from inside this Lemon-managed session, they kill the session you're in.
+        content += "### ⚠️ You are inside a Lemon-managed tmux session\n"
+        content += "This worktree runs inside a detached tmux session that Lemon owns and monitors. "
+        content += "Do NOT run Lemon teardown — it kills the session you're running in:\n"
+        content += "- No `make sandbox*` / `scripts/sandbox*.sh`\n"
+        content += "- No `tmux kill-server` / `tmux kill-session` / `pkill -f Lemon`\n"
+        content += "To validate, use plain `xcodebuild`, `make test`, or `make build-ui` instead.\n\n"
+
         // Source-specific completion instructions. The label set is identical
         // (🍋 / 🍋 In Progress / 🍋 Waiting / 🍋 Complete); the verb differs.
         let completeInstruction = switch ref.source {
@@ -627,13 +641,21 @@ final class WorktreeRunner: @unchecked Sendable {
     // break shell quoting + filesystem paths. Slug is already
     // lowercased + slash-flattened ("acme-widgets-7").
 
+    // Lemon runs its tmux on a DEDICATED socket so sessions never attach to a
+    // manual/sandbox-era default-socket server and inherit its global env (the
+    // `LEMON_CLAUDE_BIN` → deleted-fake-claude → exit-127 leak, #40). Every
+    // Lemon-owned tmux invocation — here, in LemonMCPTools, Orchestrator, and
+    // the user-facing Join command in SessionDetailView — must use `tmuxBase`.
+    static let tmuxSocket = "lemon"
+    static let tmuxBase = "tmux -L \(tmuxSocket)"
+
     func tmuxSessionName(slug: String) -> String {
         "lemon-\(slug)"
     }
 
     /// One `tmux has-session` probe. True if the detached session is alive.
     func tmuxSessionAlive(slug: String) -> Bool {
-        runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
+        runSync("\(Self.tmuxBase) has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
     }
 
     /// Debounced death check. A *single* `tmux has-session` miss is not proof a
@@ -912,15 +934,25 @@ final class WorktreeRunner: @unchecked Sendable {
     /// Headless — no terminal window is auto-opened (use Join to attach on demand).
     /// The launcher script writes sentinelPath when claude exits so pollUntilDone
     /// can detect early exits without waiting for the 8h deadline.
-    @discardableResult
+    /// Why a launch couldn't start. `nil` from `launchTmux` means success; a
+    /// non-nil value carries enough for the caller to post a specific issue
+    /// comment instead of a generic failure (so a missing `claude` binary or a
+    /// dead tmux server reads as a clear, actionable message — not a silent
+    /// exit-127 pane death, #40).
+    enum LaunchFailure {
+        case tmuxMissing
+        case claudeMissing(String)
+        case launchError(String)
+    }
+
     private func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
                             sentinelPath: String, mcpConfigPath: String? = nil,
-                            planMode: Bool = false) -> Bool
+                            planMode: Bool = false) -> LaunchFailure?
     {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
             log("[lemon] tmux not found — install with: brew install tmux", level: .error)
-            return false
+            return .tmuxMissing
         }
 
         let sessionName = tmuxSessionName(slug: slug)
@@ -952,26 +984,46 @@ final class WorktreeRunner: @unchecked Sendable {
             ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise produce a concise implementation plan and present it for approval via ExitPlanMode (do not edit files yet). Once approved you continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
             : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
+        // Resolve the claude binary. SANDBOX runs honour `LEMON_CLAUDE_BIN`
+        // (that's how fake-claude.sh is selected). REAL runs deliberately ignore
+        // any inherited `LEMON_CLAUDE_BIN`: a leftover sandbox-era tmux server can
+        // carry it (pointing at a now-deleted fake-claude) in its GLOBAL env, and a
+        // pane that inherits it dies with a silent exit 127 (#40). Real runs bake
+        // the literal `claude` and the launcher unsets the leak vars (below), so an
+        // attached pre-existing server's globals can't poison the launch. The
+        // dedicated `-L lemon` socket reinforces this — Lemon never shares a server
+        // with a manual/sandbox session.
+        let isSandbox = KeychainStore.isSandbox
+        let claudeBin = isSandbox
+            ? (ProcessInfo.processInfo.environment["LEMON_CLAUDE_BIN"] ?? "claude")
+            : "claude"
+
+        // Preflight: confirm the resolved binary actually resolves under the SAME
+        // login-shell PATH the launcher gets (runSync uses `zsh -l -c`, sourcing the
+        // same profiles). Fail loudly here — a missing binary becomes a clear issue
+        // comment instead of a tmux pane that boots and instantly exits 127.
+        guard runSync("command -v '\(claudeBin)' >/dev/null 2>&1") else {
+            log("[lemon] claude binary '\(claudeBin)' not found on PATH", level: .error)
+            return .claudeMissing(claudeBin)
+        }
+
         // Source common shell profiles so PATH includes Homebrew, npm-global,
         // pyenv shims, etc. Same root cause as the runSync(zsh -l -c) fix:
         // `claude` is typically installed via brew or npm -g, which puts it
         // somewhere non-default-bash PATH won't find. Without this the launch
         // dies immediately with "claude: command not found" the moment tmux
         // boots the launcher.
-        // Bake the resolved claude binary into the launcher so it doesn't depend
-        // on `LEMON_CLAUDE_BIN` being inherited into the tmux pane. When
-        // `tmux new-session` attaches to a PRE-EXISTING server (e.g. the caller is
-        // itself inside tmux), the pane gets that server's global environment —
-        // which may lack the var — and would silently fall back to real `claude`
-        // (a sandbox stall, diagnosed on the #31 run). We still honour a
-        // pane-level override if one is present, but default to what Lemon saw.
-        let claudeBin = ProcessInfo.processInfo.environment["LEMON_CLAUDE_BIN"] ?? "claude"
+        // Real runs `unset` the LEMON_* leak vars at the very top and invoke the
+        // baked binary directly (no `${LEMON_CLAUDE_BIN:-…}` fallback to inherit).
+        // Sandbox keeps the fallback so the fake-claude selection still works.
+        let prelude = isSandbox ? "" : "unset LEMON_CLAUDE_BIN LEMON_SANDBOX LEMON_ENABLE_MCP\n"
+        let binInvocation = isSandbox ? "\"${LEMON_CLAUDE_BIN:-\(claudeBin)}\"" : "\"\(claudeBin)\""
         let launcher = """
         #!/bin/bash
-        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
+        \(prelude)[ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-\(claudeBin)}" \(mcpFlag) --permission-mode \(permissionMode) --remote-control '\(sessionLabel)' -- '\(kickoffPrompt)'
+        cd '\(sessionPath)' && \(binInvocation) \(mcpFlag) --permission-mode \(permissionMode) --remote-control '\(sessionLabel)' -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
@@ -979,20 +1031,20 @@ final class WorktreeRunner: @unchecked Sendable {
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcherPath)
         } catch {
             Logger.worktree.error("Failed to write launcher: \(error)")
-            return false
+            return .launchError("couldn't write launcher script")
         }
 
         // Kill any leftover session from a prior run.
-        runSync("tmux kill-session -t '\(sessionName)' 2>/dev/null || true")
+        runSync("\(Self.tmuxBase) kill-session -t '\(sessionName)' 2>/dev/null || true")
 
         // Create detached tmux session.
-        guard runSync("tmux new-session -d -s '\(sessionName)' -x 220 -y 50 '\(launcherPath)'") else {
+        guard runSync("\(Self.tmuxBase) new-session -d -s '\(sessionName)' -x 220 -y 50 '\(launcherPath)'") else {
             log("[lemon] Failed to create tmux session '\(sessionName)'", level: .error)
-            return false
+            return .launchError("tmux new-session failed for '\(sessionName)'")
         }
 
         // Pipe all pane output to the log file for Gemma to read.
-        runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
+        runSync("\(Self.tmuxBase) pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
 
         // Headless by design. The tmux session is detached and the pane is piped
         // to the log for Gemma; we do NOT auto-open a terminal window. With the
@@ -1002,17 +1054,49 @@ final class WorktreeRunner: @unchecked Sendable {
         // Auto-popping a window per session was stale friction (sandbox was
         // already headless to avoid piling up scenario windows).
         log("[lemon] tmux session ready — headless; use Join to attach")
-        return true
+        return nil
     }
 
     // MARK: - Gemma orchestration
 
-    private func invokeGemma(ref: IssueRef) async {
+    /// Signature of the last classified pane tail. Skips re-classifying an
+    /// unchanged (stuck) pane so a wedged session can't drive Gemma in a loop
+    /// (defense-in-depth for the #44 CPU spin, alongside the input bounding).
+    private var lastClassifySig: Int?
+
+    /// Returns a resume `Date` if the pane shows a Max session-limit (quota)
+    /// wall — the caller parks until then and auto-resumes (#39). Otherwise
+    /// classifies the pane, acts on the verdict, and returns nil.
+    @discardableResult
+    private func invokeGemma(ref: IssueRef) async -> Date? {
         guard LocalLLM.shared.isReady() else {
             Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(ref.identifier)")
-            return
+            return nil
         }
         let lines = tailLog(slug: ref.pathSlug, last: 100)
+        // Quota wall (#39): claude hit the Max session limit and parked on a pane
+        // Gemma can't action — classifying it would just re-fire (and fed the
+        // #44 spin). Detect it here, surface the reset time, and let the caller
+        // park + auto-resume rather than burn inferences on a frozen pane.
+        if let resetAt = WorktreeRunner.parseSessionLimitReset(from: lines.joined(separator: "\n")) {
+            let when = WorktreeRunner.shortClock(resetAt)
+            Logger.worktree.error("[gemma] Max session limit reached for \(ref.identifier) — pausing until \(when)")
+            log("[gemma] Max session limit reached — pausing until \(when), then auto-resuming", level: .error)
+            onAiSummary?("⏳ Max limit — resuming \(when)")
+            return resetAt
+        }
+        // Pane-change gate: if the cleaned tail is identical to what we last
+        // classified, there's nothing new to decide — skip the inference.
+        var hasher = Hasher()
+        for line in lines {
+            hasher.combine(line)
+        }
+        let sig = hasher.finalize()
+        if sig == lastClassifySig {
+            Logger.worktree.info("[gemma] pane unchanged since last classify — skipping \(ref.identifier)")
+            return nil
+        }
+        lastClassifySig = sig
         Logger.worktree.info("[gemma] classifying \(ref.identifier) with \(lines.count) log lines")
         do {
             let response = try await LocalLLM.shared.classify(issue: ref, logLines: lines)
@@ -1021,7 +1105,7 @@ final class WorktreeRunner: @unchecked Sendable {
             onAiSummary?(response.summary)
             log("[gemma] \(response.summary)")
 
-            guard let action = response.action else { return }
+            guard let action = response.action else { return nil }
             switch action.type {
             case "send_keys":
                 handleSendKeys(keys: action.keys ?? "", slug: ref.pathSlug,
@@ -1036,6 +1120,64 @@ final class WorktreeRunner: @unchecked Sendable {
         } catch {
             Logger.worktree.error("[gemma] classify failed for \(ref.identifier): \(error.localizedDescription)")
         }
+        return nil
+    }
+
+    /// Parses Claude Code's Max session-limit banner — e.g.
+    /// "You've hit your session limit · resets 3:20pm (America/Boise)" — and
+    /// returns the next reset `Date` (today, or tomorrow if already past). The
+    /// banner's clock is in the user's local timezone, so we resolve against the
+    /// local calendar. Returns nil when no limit banner is present; falls back to
+    /// "now + 1h" if the banner is present but the time can't be parsed. Pure +
+    /// static so it's unit-testable.
+    static func parseSessionLimitReset(from text: String, now: Date = Date(),
+                                       calendar: Calendar = .current) -> Date?
+    {
+        guard text.range(of: "session limit", options: .caseInsensitive) != nil else { return nil }
+        let fallback = now.addingTimeInterval(3600)
+        guard let re = try? NSRegularExpression(
+            pattern: "resets\\s+(\\d{1,2}):(\\d{2})\\s*([ap]m)?", options: [.caseInsensitive],
+        ),
+            let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
+        else { return fallback }
+        let ns = text as NSString
+        var hour = Int(ns.substring(with: m.range(at: 1))) ?? 0
+        let minute = Int(ns.substring(with: m.range(at: 2))) ?? 0
+        if m.range(at: 3).location != NSNotFound {
+            switch ns.substring(with: m.range(at: 3)).lowercased() {
+            case "pm" where hour < 12: hour += 12
+            case "am" where hour == 12: hour = 0
+            default: break
+            }
+        }
+        var comps = calendar.dateComponents([.year, .month, .day], from: now)
+        comps.hour = hour
+        comps.minute = minute
+        comps.second = 0
+        guard var reset = calendar.date(from: comps) else { return fallback }
+        if reset <= now { reset = calendar.date(byAdding: .day, value: 1, to: reset) ?? reset }
+        return reset
+    }
+
+    /// Short local-time string (e.g. "3:20 PM") for surfacing the reset time.
+    static func shortClock(_ date: Date, calendar: Calendar = .current) -> String {
+        let f = DateFormatter()
+        f.calendar = calendar
+        f.locale = .current
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    /// Auto-resume nudge after a quota reset. Sends a continuation message and a
+    /// SEPARATE Enter — claude's TUI leaves a single combined text+Enter queued
+    /// in the composer without submitting, so the Enter must be its own event.
+    private func sendResumeKeys(slug: String) {
+        let msg = "Session limit has reset - please continue."
+        let escaped = msg.replacingOccurrences(of: "'", with: "'\\''")
+        let name = tmuxSessionName(slug: slug)
+        runSync("\(Self.tmuxBase) send-keys -t '\(name)' '\(escaped)'")
+        runSync("\(Self.tmuxBase) send-keys -t '\(name)' Enter")
     }
 
     // Shows a 5-second cancellable toast, then sends keys to the tmux pane.
@@ -1060,10 +1202,10 @@ final class WorktreeRunner: @unchecked Sendable {
             // Letter keys still get an auto-Enter suffix to confirm.
             let cmd: String
             if WorktreeRunner.specialKeys.contains(trimmed) {
-                cmd = "tmux send-keys -t '\(tmuxSessionName(slug: slug))' \(trimmed)"
+                cmd = "\(Self.tmuxBase) send-keys -t '\(tmuxSessionName(slug: slug))' \(trimmed)"
             } else {
                 let escaped = trimmed.replacingOccurrences(of: "'", with: "'\\''")
-                cmd = "tmux send-keys -t '\(tmuxSessionName(slug: slug))' '\(escaped)' Enter"
+                cmd = "\(Self.tmuxBase) send-keys -t '\(tmuxSessionName(slug: slug))' '\(escaped)' Enter"
             }
             runSync(cmd)
             log("[gemma] resolved: \(reason) (sent: \(trimmed.isEmpty ? "Enter" : trimmed))")
@@ -1101,8 +1243,48 @@ final class WorktreeRunner: @unchecked Sendable {
         guard let content = try? String(contentsOfFile: logPath(slug: slug), encoding: .utf8) else {
             return []
         }
-        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
-        return lines.count <= n ? lines : Array(lines[(lines.count - n)...])
+        return WorktreeRunner.tailLines(from: content, last: n)
+    }
+
+    /// Bounds the Gemma classify input. The pane log is dense with ANSI
+    /// cursor-redraw escapes and uses bare CRs (not LFs) for in-place repaints,
+    /// so a naive "split on \n, take last N" can return a single multi-hundred-KB
+    /// blob — which became a 600K-token prompt that wedged SwiftLM at prefill
+    /// (#44). Strip ANSI, split on CR *and* LF, drop blanks, take the last N
+    /// lines, then hard-cap total characters as a belt-and-suspenders ceiling.
+    /// Pure + static so it's unit-testable.
+    static func tailLines(from content: String, last n: Int, maxChars: Int = 6000) -> [String] {
+        let cleaned = stripANSI(content)
+        let lines = cleaned
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var tail = lines.count <= n ? lines : Array(lines[(lines.count - n)...])
+        // Char ceiling: drop oldest lines until under budget (keep most recent).
+        var total = tail.reduce(0) { $0 + $1.count }
+        while total > maxChars, tail.count > 1 {
+            total -= tail.removeFirst().count
+        }
+        // A single surviving line still over budget → truncate to its tail.
+        if tail.count == 1, let only = tail.first, only.count > maxChars {
+            tail[0] = String(only.suffix(maxChars))
+        }
+        return tail
+    }
+
+    /// Removes the common ANSI escape sequences (CSI + OSC) Claude's TUI emits,
+    /// so the cleaned text is line-splittable and compact. Not a full terminal
+    /// emulator — just enough to keep the classify prompt bounded and readable.
+    static func stripANSI(_ s: String) -> String {
+        var out = s
+        let patterns = [
+            "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", // CSI … final byte
+            "\u{1B}\\][^\u{07}\u{1B}]*(?:\u{07}|\u{1B}\\\\)", // OSC … BEL/ST
+        ]
+        for p in patterns {
+            out = out.replacingOccurrences(of: p, with: "", options: .regularExpression)
+        }
+        return out
     }
 
     // MARK: - Synchronous shell helper (used for setup/teardown, not in async hot paths)
@@ -1146,6 +1328,7 @@ final class WorktreeRunner: @unchecked Sendable {
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
         var resultGateActive = false
+        var resumeAt: Date? = nil // set when parked on a Max session-limit wall (#39)
 
         while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
@@ -1269,9 +1452,30 @@ final class WorktreeRunner: @unchecked Sendable {
                 lastLineCount = currentLines
                 lastActivityAt = Date()
             }
-            if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
+            // Quota wall (#39): if parked on a Max session-limit, don't classify
+            // (it would re-fire on a frozen pane). Auto-resume once the reset time
+            // passes — a continuation nudge + a separate Enter — then resume normal
+            // monitoring. The user reset the limit; we just un-park the session.
+            if let resume = resumeAt {
+                if Date() >= resume {
+                    log("[lemon] session limit reset reached — auto-resuming \(ref.identifier)")
+                    sendResumeKeys(slug: slug)
+                    resumeAt = nil
+                    lastClassifySig = nil
+                    lastActivityAt = Date()
+                    lastGemmaAt = Date()
+                    onStatusChange?(.executing)
+                    try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                    try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                }
+            } else if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
                 lastGemmaAt = Date()
-                await invokeGemma(ref: ref)
+                if let reset = await invokeGemma(ref: ref) {
+                    // Park on the quota wall: surface 🍋 Waiting + wait for reset.
+                    resumeAt = reset
+                    onStatusChange?(.waiting)
+                    try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                }
             }
         }
         // Loop exited without completing — either stopped externally or timed out.

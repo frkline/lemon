@@ -214,9 +214,9 @@ enum LemonMCPTools {
                     let sessionName = "lemon-\(issue.pathSlug)"
                     let specialKeys: Set = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
                     let cmd = if specialKeys.contains(keys) {
-                        "tmux send-keys -t '\(sessionName)' \(keys)"
+                        "\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' \(keys)"
                     } else {
-                        "tmux send-keys -t '\(sessionName)' '\(keys.replacingOccurrences(of: "'", with: "'\\''"))' Enter"
+                        "\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(keys.replacingOccurrences(of: "'", with: "'\\''"))' Enter"
                     }
                     acted = runShell(cmd) == 0
                 }
@@ -276,18 +276,18 @@ enum LemonMCPTools {
                 // Verify the tmux session is actually alive — silent failure
                 // here would just look like "I sent keys but nothing happened"
                 // and waste the caller's debugging time.
-                guard runShell("tmux has-session -t '\(sessionName)' 2>/dev/null") == 0 else {
+                guard runShell("\(WorktreeRunner.tmuxBase) has-session -t '\(sessionName)' 2>/dev/null") == 0 else {
                     throw MCPError(code: -32005, message: "tmux session '\(sessionName)' not alive")
                 }
                 let specialKeys: Set = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
                 let cmd: String
                 if specialKeys.contains(keys) {
-                    cmd = "tmux send-keys -t '\(sessionName)' \(keys)"
+                    cmd = "\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' \(keys)"
                 } else {
                     let escaped = keys.replacingOccurrences(of: "'", with: "'\\''")
                     cmd = appendEnter
-                        ? "tmux send-keys -t '\(sessionName)' '\(escaped)' Enter"
-                        : "tmux send-keys -t '\(sessionName)' '\(escaped)'"
+                        ? "\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(escaped)' Enter"
+                        : "\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(escaped)'"
                 }
                 let rc = runShell(cmd)
                 let payload: [String: Any] = [
