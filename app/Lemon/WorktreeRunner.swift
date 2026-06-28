@@ -754,9 +754,9 @@ final class WorktreeRunner: @unchecked Sendable {
             try? FileManager.default.removeItem(atPath: gatePath)
         }
 
-        // The exit sentinel is authoritative — the launcher only writes it after
-        // claude truly exits. A tmux miss is debounced (a lone miss can be a false
-        // positive on a still-alive session).
+        /// The exit sentinel is authoritative — the launcher only writes it after
+        /// claude truly exits. A tmux miss is debounced (a lone miss can be a false
+        /// positive on a still-alive session).
         func sessionEnded() async -> Bool {
             if FileManager.default.fileExists(atPath: sentinelPath) { return true }
             return await tmuxSessionDead(slug: slug)

@@ -201,7 +201,7 @@ final class Orchestrator {
             }
 
             let cli = client(for: identity)
-            let alive = !(await probe.tmuxSessionDead(slug: p.slug))
+            let alive = await !(probe.tmuxSessionDead(slug: p.slug))
             let sessionPath = "/tmp/lemon-\(p.slug)"
             let worktreeExists = isDirectory(sessionPath)
 
@@ -306,7 +306,7 @@ final class Orchestrator {
 
             // Live but un-indexed: an orphan from before this build. We can't
             // reattach (no IssueRef) — leave it running rather than risk killing it.
-            if !(await probe.tmuxSessionDead(slug: slug)) {
+            if await !(probe.tmuxSessionDead(slug: slug)) {
                 Logger.orchestrator.info("restore: live un-indexed worktree \(slug) — leaving untracked")
                 continue
             }
@@ -587,7 +587,9 @@ final class Orchestrator {
     {
         guard let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth) else { return }
         let present = Set(labels)
-        func has(_ s: LemonState) -> Bool { present.contains(s.labelName) }
+        func has(_ s: LemonState) -> Bool {
+            present.contains(s.labelName)
+        }
         func clear(_ s: LemonState, _ why: String) async {
             try? await client.clearState(ref: ref, state: s, auth: auth)
             Logger.orchestrator.info("reconcile \(ref.identifier): cleared \(s.labelName) — \(why)")
