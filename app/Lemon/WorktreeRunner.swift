@@ -162,6 +162,7 @@ final class WorktreeRunner: @unchecked Sendable {
         let planMode = retrigger == nil && !autopilot
         try? FileManager.default.removeItem(atPath: planReadyPath(slug: slug))
         try? FileManager.default.removeItem(atPath: gateSentinelPath(slug: slug))
+        pretrustWorktree(path: launchPath) // skip claude's folder-trust prompt
         if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
 
         guard launchTmux(sessionPath: launchPath, slug: slug,
@@ -567,6 +568,30 @@ final class WorktreeRunner: @unchecked Sendable {
     /// directly), Lemon parks at .resultReview until the human approves. Absent
     /// → the existing 🍋 Complete → handleComplete path runs unchanged.
     func resultReadyPath(slug: String) -> String { "/tmp/lemon-result-\(slug).md" }
+
+    /// Pre-trust the worktree in `~/.claude.json` so real `claude` skips the
+    /// "Is this a project you trust?" prompt on launch — otherwise the session
+    /// stalls at that prompt until the 2-min silence timer lets Gemma answer it
+    /// (a real snag found running real claude against a fresh worktree). Lemon
+    /// created the worktree, so trusting it is legitimate. Written BEFORE launch
+    /// so there's no concurrent write with the running session. No-op if the
+    /// config is absent/unreadable (e.g. fake-claude sandbox runs).
+    private func pretrustWorktree(path: String) {
+        let configPath = NSHomeDirectory() + "/.claude.json"
+        guard let data = FileManager.default.contents(atPath: configPath),
+              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return }
+        var projects = root["projects"] as? [String: Any] ?? [:]
+        var entry = projects[path] as? [String: Any] ?? [:]
+        entry["hasTrustDialogAccepted"] = true
+        entry["hasCompletedProjectOnboarding"] = true
+        projects[path] = entry
+        root["projects"] = projects
+        guard let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? out.write(to: URL(fileURLWithPath: configPath))
+        log("[lemon] pre-trusted worktree for claude: \(path)")
+    }
 
     // MARK: - Plan-gate hooks (real claude side)
 
