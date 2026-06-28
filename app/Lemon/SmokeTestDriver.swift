@@ -43,6 +43,15 @@
                 try? await Task.sleep(for: .milliseconds(80))
             }
 
+            // 2c — plan gate (the keystone state: plan card + Approve & run).
+            if let s = orchestrator.sessions.active.first(where: { $0.status == .planReview }) {
+                jump { nav.showDetail(s) }
+                try? await Task.sleep(for: .milliseconds(150))
+                await shot("02c-detail-plan-review")
+                jump { nav.showList() }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+
             // 3 — second active session (waiting + pending action toast)
             if let s = orchestrator.sessions.active.first(where: { $0.pendingAction != nil }) {
                 jump { nav.showDetail(s) }

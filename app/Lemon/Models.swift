@@ -261,8 +261,10 @@ enum LemonState: String, CaseIterable, Equatable {
 
 enum SessionStatus: Equatable {
     case planning // worktree setup
+    case planReview // plan drafted, awaiting human approval (the plan gate)
     case executing // claude session running
     case waiting // claude paused, awaiting human input
+    case resultReview // build done, awaiting human go to open PR (the result gate)
     case reviewing // PR open, Lemon comment posted
     case done // issue moved to completed state
     case failed // worktree/process error
@@ -270,11 +272,21 @@ enum SessionStatus: Equatable {
     var displayLabel: String {
         switch self {
         case .planning: "Planning"
+        case .planReview: "Plan Review"
         case .executing: "Executing"
         case .waiting: "Waiting"
+        case .resultReview: "Result Review"
         case .reviewing: "Reviewing"
         case .done: "Done"
         case .failed: "Failed"
+        }
+    }
+
+    /// The two human gates — Lemon is parked awaiting an approve/feedback signal.
+    var isGate: Bool {
+        switch self {
+        case .planReview, .resultReview: true
+        default: false
         }
     }
 
@@ -327,6 +339,9 @@ final class Session: Identifiable {
     var endedAt: Date?
     var aiSummary: String?
     var pendingAction: String?
+    /// The plan Claude proposed, captured from the ExitPlanMode hook's
+    /// planFilePath. Shown in the `.planReview` gate card for approval.
+    var planMarkdown: String?
     /// Populated when handleComplete fires. The session moves to
     /// `.reviewing` and stays in the active list until the user clicks
     /// "Cleanup worktree" in the detail view, which fires

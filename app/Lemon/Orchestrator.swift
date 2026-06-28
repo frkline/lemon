@@ -549,6 +549,75 @@ final class Orchestrator {
         session.pendingAction = nil
     }
 
+    // MARK: - Gates (plan / result human approval)
+
+    enum GateDecision: String { case approve, requestChanges }
+
+    /// Resolve a human gate (plan review or result review). Backs both the
+    /// popover buttons and the `approve_gate` MCP tool, so approval reaches a
+    /// session whether the user is at the desk or remote. The keystroke maps to
+    /// the live `claude` UI: the ExitPlanMode picker's "1. Yes, and use auto
+    /// mode" / "4. Tell Claude what to change". No-ops with a log if the session
+    /// isn't actually parked at a gate.
+    func resolveGate(session: Session, decision: GateDecision) {
+        let gate = session.status
+        guard gate.isGate else {
+            Logger.orchestrator.info("resolveGate \(session.issue.identifier): not at a gate (\(String(describing: gate)))")
+            return
+        }
+        let sessionName = "lemon-\(session.issue.pathSlug)"
+        switch (gate, decision) {
+        case (.planReview, .approve):
+            sendTmuxKeys(to: sessionName, keys: "1") // "Yes, and use auto mode"
+            session.planMarkdown = nil
+            session.aiSummary = "Plan approved — building"
+            session.status = .executing
+        case (.planReview, .requestChanges):
+            sendTmuxKeys(to: sessionName, keys: "4") // "Tell Claude what to change"
+        case (.resultReview, .approve):
+            sendTmuxLine(to: sessionName, text: "Approved — open the PR now.")
+            session.status = .reviewing
+        case (.resultReview, .requestChanges):
+            sendTmuxLine(to: sessionName, text: "Please revise before opening the PR.")
+            session.status = .executing
+        default:
+            break
+        }
+        Logger.orchestrator.info("resolveGate \(session.issue.identifier) \(gate.displayLabel) -> \(decision.rawValue)")
+    }
+
+    /// Resolve a gate by issue id/identifier — the path the MCP `approve_gate`
+    /// tool and remote/comment approvals take. Returns false if no session at a gate.
+    @discardableResult
+    func resolveGate(idOrIdentifier: String, decision: GateDecision) -> Bool {
+        let all = sessions.active + sessions.recent
+        guard let session = all.first(where: {
+            $0.issue.id == idOrIdentifier || $0.issue.identifier == idOrIdentifier
+        }), session.status.isGate else { return false }
+        resolveGate(session: session, decision: decision)
+        return true
+    }
+
+    private func sendTmuxKeys(to sessionName: String, keys: String) {
+        _ = runShellCommand("tmux send-keys -t '\(sessionName)' '\(keys)' Enter")
+    }
+
+    private func sendTmuxLine(to sessionName: String, text: String) {
+        let esc = text.replacingOccurrences(of: "'", with: "'\\''")
+        _ = runShellCommand("tmux send-keys -t '\(sessionName)' '\(esc)' Enter")
+    }
+
+    @discardableResult
+    private func runShellCommand(_ command: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = ["-lc", command]
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 }
+        catch { return false }
+    }
+
     /// User clicked "Cleanup worktree" in the Ready-for-review card.
     /// Reads the session's stashed `cleanupInfo`, fires the worktree +
     /// tmux + /tmp teardown, transitions the session to `.done`, and
@@ -685,8 +754,43 @@ final class Orchestrator {
                 reviewing.appendLog(line)
             }
 
+            // Plan gate — a proposed plan awaiting approval (the keystone state).
+            let planGate = Session(issue: IssueRef(
+                id: "mock-5", identifier: "sandbox/demo#2",
+                title: "Add CSV export to the reports page",
+                description: "Users want to export the reports table as CSV.",
+                labelNames: ["🍋 Waiting"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 2),
+            ), startedAt: now.addingTimeInterval(-90))
+            planGate.status = .planReview
+            planGate.planMarkdown = """
+            # Plan: CSV export for the reports page
+
+            ## Context
+            ReportsView renders a table but offers no export. Add an "Export CSV"
+            action that serializes the current rows and writes via a save panel.
+
+            ## Changes
+            1. CSVEncoder.swift (new) — encode [ReportRow] → RFC-4180 CSV
+            2. ReportsView.swift — toolbar "Export CSV" button → NSSavePanel
+            3. ReportsViewModel.swift — expose `rows` for the encoder
+
+            ## Verification
+            - Unit-test CSVEncoder against a known fixture (commas, quotes, newlines)
+            - Manual: export, open in Numbers, confirm column alignment
+            """
+            planGate.aiSummary = "Plan ready — awaiting your approval"
+            for line in [
+                "[lemon] starting session for sandbox/demo#2",
+                "[lemon] launched in plan mode — tmux: lemon-sandbox-demo-2",
+                "[gemma] plan ready — holding for human approval",
+                "[lemon] posted plan to sandbox/demo#2, label → 🍋 Waiting",
+            ] {
+                planGate.appendLog(line)
+            }
+
             sessions.add(active1)
             sessions.add(active2)
+            sessions.add(planGate)
             sessions.add(reviewing)
             sessions.finish(recent)
 

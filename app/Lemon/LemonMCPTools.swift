@@ -313,6 +313,50 @@ enum LemonMCPTools {
                 return json
             },
         ))
+
+        // ── approve_gate ───────────────────────────────────────────────────
+        // Resolve a human gate (plan review / result review) remotely — the
+        // same action the popover's Approve button takes. Lets the scenario
+        // runner (and a remote operator) drive the plan/result gates.
+        server.register(LemonMCPServer.Tool(
+            name: "approve_gate",
+            description: "Resolve a session parked at a human gate (Plan Review or Result Review). decision='approve' sends the live claude approval (plan→auto, or open-PR); decision='request_changes' sends it back for revision. No-ops if the session isn't at a gate.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
+                    "decision": ["type": "string", "enum": ["approve", "request_changes"], "default": "approve", "description": "approve = let it proceed; request_changes = send back for revision"],
+                ],
+                "required": ["id"],
+                "additionalProperties": false,
+            ],
+            handler: { args in
+                guard let idArg = args["id"] as? String, !idArg.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'id' argument")
+                }
+                let decision: Orchestrator.GateDecision =
+                    (args["decision"] as? String) == "request_changes" ? .requestChanges : .approve
+                let json: String? = await MainActor.run { () -> String? in
+                    guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg),
+                          session.status.isGate
+                    else { return nil }
+                    let gate = session.status.displayLabel
+                    orchestrator.resolveGate(session: session, decision: decision)
+                    return LemonMCPServer.encode([
+                        "identifier": session.issue.identifier,
+                        "uuid": session.id.uuidString,
+                        "gate": gate,
+                        "decision": decision.rawValue,
+                        "new_status": session.status.displayLabel,
+                        "resolved": true,
+                    ])
+                }
+                guard let json else {
+                    throw MCPError(code: -32004, message: "no session at a gate matching '\(idArg)'")
+                }
+                return json
+            },
+        ))
     }
 
     // MARK: - Helpers
