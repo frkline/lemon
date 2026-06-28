@@ -15,6 +15,12 @@ final class KeychainStore: @unchecked Sendable {
     /// Pass --smoke-test (alongside --mock) to auto-navigate and screenshot all UI states.
     static let isSmokeTesting: Bool = ProcessInfo.processInfo.arguments.contains("--smoke-test")
 
+    /// Sandbox iteration mode: swaps the tracker for MockIssueClient and seeds a
+    /// single fixture workspace/identity so the full poll loop runs against
+    /// /tmp/lemon-sandbox with no GitHub/Linear traffic. See SandboxFixtures.
+    static let isSandbox: Bool = ProcessInfo.processInfo.arguments.contains("--sandbox")
+        || ProcessInfo.processInfo.environment["LEMON_SANDBOX"] == "1"
+
     /// Detected automatically when launched by XCTest — suppresses Keychain dialogs.
     static let isTestRun: Bool = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
@@ -257,7 +263,7 @@ final class KeychainStore: @unchecked Sendable {
     }
 
     var isConfigured: Bool {
-        if Self.isMockMode { return true }
+        if Self.isMockMode || Self.isSandbox { return true }
         // Real Keychain store in test mode: always false to prevent the Keychain dialog
         // when there's no user to click it. In-memory stores (makeForTesting) are unaffected.
         if memory == nil, Self.isTestRun { return false }
@@ -294,6 +300,7 @@ final class KeychainStore: @unchecked Sendable {
 
     var identities: [Identity] {
         get {
+            if Self.isSandbox { return [SandboxFixtures.identity] }
             migrateLegacyWorkspaceIfNeeded()
             migrateLegacyPairsIfNeeded()
             let json = identitiesJSON
@@ -309,6 +316,7 @@ final class KeychainStore: @unchecked Sendable {
 
     var workspaces: [Workspace] {
         get {
+            if Self.isSandbox { return [SandboxFixtures.workspace] }
             migrateLegacyWorkspaceIfNeeded()
             migrateLegacyPairsIfNeeded()
             let json = workspacesJSON
@@ -514,6 +522,7 @@ final class KeychainStore: @unchecked Sendable {
     /// Build a `SourceAuth` from an identity. Returns nil if the credential
     /// or principal is missing.
     func authFor(identity: Identity) -> SourceAuth? {
+        if Self.isSandbox { return SandboxFixtures.auth }
         let secret = identitySecret(for: identity.id)
         guard !secret.isEmpty, !identity.principalId.isEmpty else { return nil }
         switch identity.kind {

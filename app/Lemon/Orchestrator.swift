@@ -57,6 +57,9 @@ final class Orchestrator {
     // Per-source clients, lazily created on first use per process.
     private let linearClient = LinearClient()
     private let githubClient = GitHubClient()
+    // Sandbox iteration mode: a single file-backed client replaces both, so the
+    // poll loop runs against /tmp/lemon-sandbox fixtures. See SandboxFixtures.
+    private let mockClient = MockIssueClient()
     private var pollTask: Task<Void, Never>?
     private var runners: [UUID: WorktreeRunner] = [:]
 
@@ -67,9 +70,10 @@ final class Orchestrator {
     /// Public client resolver — used by the editor when adding a new identity
     /// (verify + list surfaces) before the identity is persisted.
     func client(for kind: IdentityKind) -> any IssueSourceClient {
+        if KeychainStore.isSandbox { return mockClient }
         switch kind {
-        case .linear: linearClient
-        case .github: githubClient
+        case .linear: return linearClient
+        case .github: return githubClient
         }
     }
 

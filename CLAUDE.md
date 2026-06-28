@@ -315,6 +315,61 @@ status: normal
 
 This keeps the design feedback loop fully in the conversation — no Finder, no Preview.app, no manual file inspection.
 
+## Workflow sandbox (iterating on the orchestration + Gemma, not the UI)
+
+The UI loop above mocks *views*. The **workflow sandbox** mocks the two expensive,
+irreversible parts of the real loop — the **tracker** (GitHub/Linear traffic + public
+side effects) and **`claude`** (token cost; one plan pass can hit a Max session limit) —
+so the full `Orchestrator → WorktreeRunner` lifecycle runs free and side-effect-free.
+Use it to get the plan-gate workflow (issue #11) and Gemma prompts meticulously right.
+Design + rationale: `WORKFLOW_DESIGN.md`, `memory/sandbox-iteration-loop.md`.
+
+It exploits two seams Lemon already has:
+
+- **`MockIssueClient`** (`app/Lemon/MockIssueClient.swift`) — a file-backed
+  `IssueSourceClient`. `Orchestrator.client(for:)` returns it when `LEMON_SANDBOX=1`.
+  Issues are JSON fixtures under `/tmp/lemon-sandbox/issues/`; label flips and Lemon's
+  comments write back to those files. `KeychainStore` seeds one fixture identity +
+  workspace (`SandboxFixtures`) routed to a `sandbox/demo` surface, so the poll loop runs
+  unmodified. `isConfigured` is forced true — no Keychain, no onboarding.
+- **`fake-claude.sh`** — selected via `LEMON_CLAUDE_BIN` in WorktreeRunner's launcher
+  (`"${LEMON_CLAUDE_BIN:-claude}"`). Mimics claude's observable surface; `LEMON_FAKE_CLAUDE_MODE`
+  picks behaviour (`complete` flips the fixture to 🍋 Complete as real Claude would, `question`
+  idles, `exit` exits early). Reads the issue number from `LEMON_CONTEXT.md` in the worktree.
+
+### Commands
+
+```sh
+make sandbox-init                       # fixtures dir + throwaway git workspace (origin/main)
+make sandbox-issue T="Add hello" B="…"  # file a 🍋 fixture issue (sandbox/demo#N)
+make sandbox                            # build-ui + relaunch Lemon in sandbox mode (fake-claude + MCP)
+make sandbox-show                       # print every fixture issue's labels + comments
+make sandbox-reset                      # wipe and re-init
+```
+
+`scripts/sandbox.sh <init|issue|show|reset>` is the harness; `make` wraps it. The app
+launches with `LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN=scripts/fake-claude.sh`
+and logs to `/tmp/lemon-sandbox/app.log`.
+
+### The loop
+
+```
+make sandbox-init                  # once
+make sandbox                       # relaunch app against fixtures + fake-claude
+make sandbox-issue T="…"           # drop a test issue; next poll picks it up
+# observe via MCP (force_classify / get_pane_log / list_sessions) or:
+make sandbox-show                  # 🍋 → 🍋 In Progress → 🍋 Complete + Lemon's report comment
+# edit Orchestrator / WorktreeRunner / Gemma prompt → goto `make sandbox`
+```
+
+To exercise a **real** `claude` against the fixtures (truth-check, costs tokens), launch
+with `LEMON_SANDBOX=1` but **without** `LEMON_CLAUDE_BIN`. The fixture workspace is a real
+git repo, so worktrees and `gh` (against a throwaway) behave normally.
+
+> Not yet wired (next sandbox increments): a Gemma golden-snapshot corpus for tuning
+> `LocalLLM.classify()`, an `approve_gate` MCP tool (the popover button's backend, for
+> scripting the plan/result gates), and `.planReview`/`.resultReview` smoke states.
+
 ## Secrets and config
 
 API credentials (Linear API key, GitHub PAT) are sensitive and live in Keychain; everything else is UserDefaults.

@@ -47,6 +47,12 @@ a valid "this is worth writing" marker, not an error.
 
 ## Index
 
-- [plan-gate-workflow](plan-gate-workflow.md) — *decision* — target 🍋 flow:
-  two-session plan-first (approve plan → fresh auto build), gates + hooks. Spec in
-  `WORKFLOW_DESIGN.md`.
+- [plan-gate-workflow](plan-gate-workflow.md) — *decision* — target 🍋 flow: plan-first,
+  two human gates, single session that switches mode at the approval picker. Phase 0
+  spike done; not yet built. Spec in `WORKFLOW_DESIGN.md`.
+- [claude-code-plan-mode](claude-code-plan-mode.md) — *reference* — empirical facts about
+  `claude --permission-mode plan` (hooks fire, read-only, `planFilePath`, picker shape,
+  folder-trust, ~2× cost) from the Phase 0 spike.
+- [sandbox-iteration-loop](sandbox-iteration-loop.md) — *decision* — how to build a
+  free/side-effect-free loop to tune the workflow: MockIssueClient, fake-claude, Gemma
+  golden corpus, scenario runner. Build before plan-gate Phase 1.

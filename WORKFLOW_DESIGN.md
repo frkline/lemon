@@ -1,31 +1,9 @@
 # Lemon Plan-Gate Workflow — Design
 
-**Status:** Proposal / not yet implemented. This describes the target workflow for
-human-in-the-loop, plan-first orchestration. The shipped flow today is
-fire-straight-into-auto (see "Where we are today"). Phase 0 spike must validate the
-undocumented corners before code lands.
+**Status:** Proposal. Phase 0 spike **done** (2026-06-27) — core mechanics validated;
+implementation not started. The shipped flow is still fire-straight-into-auto.
 
 **Owner:** Frank · **Last updated:** 2026-06-27 · **Tracking:** issue #11
-
----
-
-## Relationship to issue #11
-
-This doc is the design for **#11** ("Plan-first session: plan mode → confirm →
-user-approved plan → auto execution"). It **resolves #11's central open question** —
-"one `claude` invocation switching `--permission-mode` mid-stream, or two invocations
-sharing session state via `--resume`?" — in favour of **two sessions bridged by a
-committed `PLAN.md`** (clean build context; no mid-stream mode switch to negotiate).
-
-Two parts of #11 are **not yet folded into the flow below** and remain to-do:
-
-- **Issue triage / reject (#11 Phase 1).** The plan session should first judge whether
-  the issue is clear / unambiguous / non-duplicate / unblocked; if not, post a clarifying
-  comment, set 🍋 Waiting, and exit without touching code.
-- **Confirm screen with editable fields (#11 Phase 2).** Before the plan itself, surface
-  issue summary + repos/branches + target PR branch for the user to accept/edit/reject.
-
-Both slot in ahead of the plan gate; track them as Phase 1.x once the keystone lands.
 
 ---
 
@@ -40,106 +18,160 @@ Two deliberate human gates:
 1. **Plan gate** — Claude proposes; you approve before it builds.
 2. **Result gate** — Claude finishes; you approve before the PR opens.
 
-Everything between and around the gates is autonomous.
+Everything else is autonomous. The plan-mode pass also gives Claude a cheap chance to
+**reject a malformed issue** before any commitment.
+
+---
+
+## Relationship to issue #11
+
+This is the design for **#11** ("Plan-first session: plan mode → confirm → user-approved
+plan → auto execution"). It **resolves #11's central open question** — "one `claude`
+invocation switching `--permission-mode` mid-stream, or two invocations sharing state via
+`--resume`?" — in favour of **one session that switches mode at the approval picker** (the
+spike confirmed this is a single clean keystroke; see below).
+
+Two #11 phases are **designed but not yet detailed** in the flow and remain to-do:
+
+- **Issue triage / reject (#11 Phase 1).** The plan pass first judges whether the issue is
+  clear / unambiguous / non-duplicate / unblocked; if not, it posts a clarifying comment,
+  sets 🍋 Waiting, and exits without touching code.
+- **Confirm screen with editable fields (#11 Phase 2).** Before the plan itself, surface
+  issue summary + repos/branches + target PR branch for accept / edit / reject.
+- **"Autopilot" opt-out (#11 acceptance).** A per-issue/label escape hatch that skips both
+  gates for trivial work — see Cost below for why this matters.
+
+---
+
+## Phase 0 spike — results (2026-06-27)
+
+Ran a real `claude --permission-mode plan` session in a throwaway git repo inside tmux,
+with hooks capturing every `PreToolUse` / `PermissionRequest` / `Stop` / `Notification`
+payload. Findings — these are now **settled facts the design rests on**:
+
+| # | Finding | Consequence for the design |
+|---|---|---|
+| 1 | **Hooks fire normally in plan mode** — every payload stamped `"permission_mode":"plan"`. | Sentinel-based state detection works in plan mode. |
+| 2 | **Plan mode is genuinely read-only** — `calc.py`/`README.md` untouched; Claude only explored. | The "touches no source" guarantee is real; no extra guardrail needed. |
+| 3 | **Claude Code auto-writes the plan to a file** at `~/.claude/plans/<auto-slug>.md` — no prompting. | We don't ask Claude to save the plan; it already does. |
+| 4 | **The ExitPlanMode hook payload carries both** `planFilePath` **and** the full `plan` markdown inline. | Lemon captures the plan deterministically at the moment it's ready — read the file or take the inline text. |
+| 5 | The plan filename has a **random suffix** (`…-majestic-glacier.md`) — unpredictable. | Lemon must read `planFilePath` **from the hook payload**, not guess the filename. |
+| 6 | **A capture-only `PermissionRequest` hook (emits no decision) leaves the interactive picker up** and the session parks, waiting. | This is the gate mechanism: hook captures + signals, picker stays live for a human to answer. |
+| 7 | The approval picker's first option is **"1. Yes, and use auto mode"** — approve + switch to auto in one keystroke, same session. | Single-session plan→auto is a clean `send-keys "1"`. No relaunch needed. |
+| 8 | A **folder-trust prompt** ("Is this a project you trust?") fires on first `claude` launch in a new dir, blocking until answered. | Lemon must **pre-trust** each worktree dir, or the session hangs before it starts. |
+| 9 | One plan pass pushed the Claude Max **session limit to 94%**. | Plan-first is ~2× Claude usage per issue. Real cost; motivates the autopilot opt-out. |
+
+Captured approval picker, verbatim:
+
+```
+Claude has written up a plan and is ready to execute. Would you like to proceed?
+❯ 1. Yes, and use auto mode
+  2. Yes, manually approve edits
+  3. No, refine with Ultraplan on Claude Code on the web
+  4. Tell Claude what to change
+```
 
 ---
 
 ## Where we are today
 
-`WorktreeRunner.run()` launches straight into auto mode:
+`WorktreeRunner.run()` launches straight into auto:
 
 1. 🍋 picked up → worktree setup → `writeContext` → label → 🍋 In Progress
 2. `claude --permission-mode auto --remote-control -- 'Read LEMON_CONTEXT.md … Use /loop'`
 3. `pollUntilDone` watches labels every 10s; **Claude** sets 🍋 Waiting / 🍋 Complete
 4. On Complete → single Lemon Report comment → cleanup
 
-There is no plan gate, no result gate. `SessionStatus.planning` means "worktree is being
-set up," not "a plan awaits approval." Gemma's only live role is classifying permission
-pickers in auto mode.
+No plan gate, no result gate. `SessionStatus.planning` means "worktree is being set up,"
+not "a plan awaits approval." Gemma's only live role is classifying permission pickers.
 
 ---
 
 ## Core design decisions
 
-### 1. Two sessions, bridged by a committed `PLAN.md`
+### 1. One session that switches mode at the approval picker (recommended)
 
-A 🍋 issue runs as **two sequential `claude` sessions in the same worktree/branch**:
+A 🍋 issue runs as **a single `claude` session launched in plan mode** that, on approval,
+switches to auto in the same session — retaining full context.
 
-- **Plan session** (`--permission-mode plan`): explores, writes a thorough `PLAN.md`,
-  commits it, and stops. No code changes.
-- **Auto session** (`--permission-mode auto`): a *fresh* session that reads the approved
-  `PLAN.md` and builds.
+- Launch `claude --permission-mode plan --remote-control -- '<kickoff>'`.
+- Claude explores (read-only) and calls ExitPlanMode. Our `PermissionRequest` hook
+  **captures the plan and writes a sentinel but emits no decision**, so the picker parks
+  live (spike finding #6).
+- Lemon reads `planFilePath`, posts the plan to the issue, flips to 🍋 Waiting /
+  `.planReview`, and surfaces the gate.
+- On human approval, Lemon `send-keys "1"` ("Yes, and use auto mode") — the session
+  switches to auto in place and starts implementing (#7).
 
-Why two sessions instead of one session that switches modes after approval:
+Why this over two sessions: the spike removed the only reason to split. The plan→auto
+transition is one clean keystroke, not a messy mid-stream switch, and the plan is captured
+either way via `planFilePath`. One session is simpler to build (no relaunch, no worktree
+state to re-establish) and keeps the planning context for the build.
 
-- **Clean build context.** Session 2 starts on just the plan — no exploration cruft.
-  This is the "keep context clean" goal, achieved structurally rather than by prompting.
-- **Dissolves the approval-mechanism uncertainty.** There is no in-session mode
-  transition to negotiate (no ExitPlanMode picker to answer, no contested
-  remote-control-approves-a-picker question). The plan session ends; approval is just a
-  signal that tells **Lemon** to launch session 2 — which Lemon fully controls.
-- **Reuses the re-trigger machinery.** "Post artifact → wait for human signal → launch
-  next session" is exactly today's Lemon Report → human reply → re-launch flow.
-- **Solves concurrency for free.** A session waiting at the plan gate is *torn down*, not
-  idling. It holds no build slot. No concurrency-accounting split needed.
+**Context hygiene** — the goal that motivated two sessions — is met *within* the session
+via sub-agents during the build (instructed in `LEMON_CONTEXT.md`) and the plan file as an
+anchor, rather than by discarding the session.
 
-**Cost:** the plan-phase *conversation* context is lost between sessions. Mitigation is
-the point — `PLAN.md` must capture key file paths and findings so session 2 doesn't
-re-derive them. Forcing that to be written down makes the plan better.
+> **Alternative: two sessions** (kept on record). The hook *denies* the exit; Lemon
+> captures `planFilePath`, tears down the session, and launches a fresh
+> `--permission-mode auto` session that reads the plan. Buys exactly one thing single can't
+> — a **clean build context** — at the cost of a relaunch and replayed worktree state. It
+> also tears down the parked session, which sidesteps the concurrency note below. Revisit
+> only if carried planning context proves to pollute builds in practice.
 
-The **worktree and branch persist across both sessions** (`PLAN.md` is committed on the
-branch). Only the `claude`/tmux process is torn down at the gate.
+### 2. The plan is captured from `planFilePath`, posted into the issue
 
-### 2. The plan is posted into the issue
-
-When the plan session finishes, Lemon posts `PLAN.md` as a comment on the issue, tagged
-with a **`Lemon Plan` marker**. This comment does triple duty:
-
-- **Async review surface** — review the plan from anywhere, not just the desk.
-- **Approval anchor** — a human comment *after* the marker is the approval/feedback
-  signal (same mechanism as re-trigger's reply-after-Lemon-Report).
-- **PR material** — the approved plan flows into the PR body later.
+Claude Code writes the plan to disk itself; the ExitPlanMode hook hands Lemon the path
+(#3–#5). Lemon reads it and posts it as an issue comment tagged with a **`Lemon Plan`
+marker**. That comment does triple duty: async review surface, approval anchor (a human
+comment after the marker is feedback/approval — same mechanism as re-trigger), and PR
+material later. Lemon keeps a copy in the worktree (`PLAN.md`) for the PR body.
 
 ### 3. Input injection is the one primitive
 
-Every gate reduces to "get a go/feedback signal to Lemon." Channels, in priority order:
+Every gate reduces to getting a go/feedback signal to Lemon, which Lemon turns into a
+keystroke. Channels, in priority order:
 
-1. **Lemon popover** (primary — you're at the Mac mini): shows `PLAN.md`, "Approve & run"
-   button → Lemon launches the auto session.
-2. **Tracker comment** (away path): comment "approved" (or feedback) on the issue → Lemon
-   relays/acts on it. This is the real remote-approval path.
+1. **Lemon popover** (primary — you're at the Mac mini): shows the plan, "Approve & run"
+   → `send-keys "1"`.
+2. **Tracker comment** (away path): comment "approved" / feedback on the issue → Lemon
+   relays it (`send-keys "1"`, or `send-keys "4"` + the feedback to re-plan).
 3. **Remote control**: push notifications throughout, and answering ordinary questions
-   *during the auto build* (definitely supported). Not relied on for plan approval —
-   between sessions there is no live session for it to talk to anyway.
+   during the auto build. Whether it can answer the ExitPlanMode picker itself is
+   recorded-but-not-relied-on (the popover/comment channels cover approval regardless).
 
-Lemon stays an **observer + relay**, never an approval orchestrator. Claude drives its
-own label transitions; Gemma stays a classifier.
-
-> **Note on remote control + plan approval.** An earlier draft claimed remote control
-> *cannot* approve a plan. That was an unverified inference (reasoning by analogy from
-> "/plugin and /resume are local-only"). ExitPlanMode is a *permission request*, a
-> different category that remote control may well handle. The two-session model makes the
-> question moot, so we don't depend on the answer — but the Phase 0 spike should still
-> record what actually happens.
+Lemon stays **observer + relay**, never an approval orchestrator. Claude drives its own
+label transitions; Gemma routes but does not decide the gate (see §6).
 
 ### 4. Claude opens the PR
 
-At the result gate, Claude (still alive in the auto session) assembles the PR body —
-reading `PLAN.md`, the Lemon-written journal, and `.lemon/screenshots/` out of the
-worktree — and runs `gh pr create` on approval. Lemon writes its journal to a file *in
-the worktree* so Claude picks it up directly; no post-hoc body editing by Lemon.
+At the result gate, Claude (still alive in the same session) assembles the PR body —
+reading `PLAN.md`, the Lemon-written journal, and `.lemon/screenshots/` from the worktree —
+and runs `gh pr create` on approval. Lemon writes its journal to a file *in the worktree*
+so Claude folds it in directly; no post-hoc body editing by Lemon.
 
 ### 5. State detection via hooks, not log-scraping
 
-Lemon writes a project-local hooks config into the worktree (the way it already pre-merges
-`.mcp.json`) emitting sentinel files for:
+Lemon writes a project-local `.claude/settings.json` into each worktree (the way it already
+pre-merges `.mcp.json`) emitting sentinel files. The spike proved these fire (#1). This is
+the deterministic, robust path and largely retires the line-count silence detector.
 
-- **plan ready** — `Stop` hook (plan session finished writing `PLAN.md`) → sentinel
-- **awaiting input** — `Notification` hook (Claude genuinely waiting) → sentinel
-- **done** — `Stop` hook (auto session) → sentinel
+### 6. Gemma routes the gate; it does not decide it
 
-This is the documented, robust path and largely retires the fragile line-count silence
-detector. (Existing early-exit sentinel `/tmp/lemon-exit-{slug}` stays.)
+The plan-approval picker is the **human gate** — Gemma must never auto-answer it. Two
+layers ensure this:
+
+- **Primary (deterministic):** the ExitPlanMode hook sentinel tells Lemon "this is the
+  plan gate." While in `.planReview`, Lemon **does not invoke Gemma's auto-answer at all** —
+  it waits for a human signal. (In the spike, Gemma didn't answer the picker simply because
+  the raw session wasn't Lemon-tracked; in the real flow it's suppressed *by design*.)
+- **Defensive:** add a worked example to `LocalLLM.classify()` so that *if* Gemma is ever
+  fed the plan-approval picker, it classifies it as **halt-for-human** (a new state),
+  rather than picking an option. This is #11's "Gemma must recognize plan-mode prompts as
+  different from auto-mode prompts."
+
+During the **auto build**, Gemma's existing job is unchanged: auto-answer routine pickers
+(Bash perms, edits) so the build doesn't stall.
 
 ---
 
@@ -148,65 +180,85 @@ detector. (Existing early-exit sentinel `/tmp/lemon-exit-{slug}` stays.)
 Public labels stay the coarse four. Internal `SessionStatus` gets richer so the popover
 shows exactly where each session sits.
 
-| Phase | Label | `SessionStatus` | Driven by |
+| Phase | Label | `SessionStatus` | Detected by |
 |---|---|---|---|
-| Tagged | 🍋 | — | Human |
-| Planning | 🍋 In Progress | `.planning` | Lemon launches plan session |
-| Plan review | 🍋 Waiting | `.planReview` *(new)* | Plan posted; awaiting approval |
-| Executing | 🍋 In Progress | `.executing` | Auto session building |
-| Question | 🍋 Waiting | `.waiting` | Claude paused mid-build |
-| Result review | 🍋 Waiting | `.resultReview` *(new)* | Build done; awaiting PR go |
+| Tagged | 🍋 | — | Trigger poll |
+| Planning | 🍋 In Progress | `.planning` | Lemon launches plan-mode session |
+| Plan review | 🍋 Waiting | `.planReview` *(new)* | **ExitPlanMode hook sentinel** |
+| Executing | 🍋 In Progress | `.executing` | `send-keys "1"` accepted |
+| Question | 🍋 Waiting | `.waiting` | **Notification hook sentinel** |
+| Result review | 🍋 Waiting | `.resultReview` *(new)* | Build-done signal / Stop hook |
 | Complete | 🍋 Complete | `.reviewing` → `.done` | PR opened; cleanup |
 
-`.planReview` and `.resultReview` are new `SessionStatus` cases. Both overload the public
-🍋 Waiting label; the popover disambiguates. New smoke-test scenarios for each.
+`.planReview` and `.resultReview` are new `SessionStatus` cases; both overload the public
+🍋 Waiting label, disambiguated in the popover. New smoke-test scenarios for each.
 
 ---
 
-## End-to-end flow
+## End-to-end flow (single-session)
 
 ```
 🍋 added
-  └─ Lemon: worktree add /tmp/lemon-{slug} -b lemon/{slug} origin/main
-     write LEMON_CONTEXT.md + project-local hooks config
+  └─ Lemon: git worktree add /tmp/lemon-{slug} -b lemon/{slug} origin/main
+     PRE-TRUST the worktree dir            ← spike #8 (else claude hangs on trust prompt)
+     write LEMON_CONTEXT.md + .claude/settings.json (hooks)
      label → 🍋 In Progress, status .planning
 
-  ┌─ PLAN SESSION ──────────────────────────────────────────────┐
-  │ claude --permission-mode plan --remote-control -- '<kickoff>' │
-  │ kickoff: explore; write a thorough PLAN.md (key file paths +  │
-  │   findings so a fresh session can execute it); commit it;     │
-  │   stop. Do not implement.                                     │
-  │ Stop hook → /tmp/lemon-{slug}-plan-ready sentinel             │
-  └───────────────────────────────────────────────────────────────┘
-     └─ Lemon: read PLAN.md, post to issue w/ `Lemon Plan` marker
-        label → 🍋 Waiting, status .planReview
-        tear down claude/tmux session (KEEP worktree + branch)
-        remote-control push: "plan ready for {id}"
+  ┌─ ONE SESSION, launched in plan mode ─────────────────────────────┐
+  │ claude --permission-mode plan --remote-control -- '<kickoff>'      │
+  │ kickoff: read LEMON_CONTEXT.md; triage the issue (#11 P1, TBD);    │
+  │   explore; propose a plan via ExitPlanMode. Don't implement.       │
+  │                                                                    │
+  │ Claude explores (read-only) → calls ExitPlanMode →                 │
+  │   PermissionRequest(ExitPlanMode) hook:                            │
+  │     • read tool_input.planFilePath / .plan                         │
+  │     • write /tmp/lemon-{slug}-plan-ready sentinel (+ copy plan)    │
+  │     • emit NO decision  → picker parks live (spike #6)             │
+  └────────────────────────────────────────────────────────────────────┘
+     └─ Lemon poll sees sentinel:
+        read planFilePath → write worktree PLAN.md → post to issue (Lemon Plan marker)
+        label → 🍋 Waiting, status .planReview ; remote push "plan ready for {id}"
+        Gemma auto-answer SUPPRESSED while .planReview (§6)
 
-  ── PLAN GATE ── (approve: popover button | comment after marker | …)
-     feedback instead of approval → relaunch plan session to revise
-        (loops; stays .planReview)
+  ── PLAN GATE ──  approve: popover "Approve & run" | comment "approved" | remote reply
+     approve  → send-keys "1"  (Yes + auto mode)        → SAME session, now auto
+     feedback → send-keys "4" + text (or re-plan)       → revised plan, advance marker
+                                                            stays .planReview
 
-  ┌─ AUTO SESSION ──────────────────────────────────────────────┐
-  │ same worktree/branch                                          │
-  │ claude --permission-mode auto --remote-control -- '<kickoff>' │
-  │ kickoff: read committed PLAN.md; implement it; Use /loop.     │
-  │   When done, summarize results + capture screenshots into     │
-  │   .lemon/screenshots/. DO NOT open the PR — wait.             │
-  │ Gemma classifies permission pickers (existing)                │
-  │ Notification hook → awaiting-input sentinel for mid-build Qs   │
-  │ label → 🍋 In Progress, status .executing                     │
-  └───────────────────────────────────────────────────────────────┘
+  ┌─ same session, now in auto mode (context retained) ───────────────┐
+  │ implements the approved plan; Use /loop                            │
+  │ Gemma auto-answers routine pickers (existing)                      │
+  │ Notification hook → awaiting-input sentinel for genuine mid-build Qs│
+  │ label → 🍋 In Progress, status .executing                          │
+  │ completion checklist: capture screenshots → .lemon/screenshots/;   │
+  │   DO NOT open the PR — summarize results and wait                  │
+  └────────────────────────────────────────────────────────────────────┘
      └─ build done → status .resultReview
 
-  ── RESULT GATE ── popover shows: diff summary, screenshots,
-     "What Lemon did" (Gemma), branch-confirm "Open PR" button
-     approve →
-       Claude (still alive): assemble PR body from PLAN.md +
-       .lemon/journal.md + .lemon/screenshots/; gh pr create
-     label → 🍋 Complete, status .reviewing → .done
-     Lemon: cleanup worktree
+  ── RESULT GATE ──  popover: diff summary · screenshots · "What Lemon did" (Gemma) ·
+     branch-confirm "Open PR" button
+     approve → Claude assembles PR body (PLAN.md + .lemon/journal.md + screenshots);
+       gh pr create
+     label → 🍋 Complete, status .reviewing → .done ; Lemon cleans up worktree
 ```
+
+---
+
+## Hooks Lemon installs (per-worktree `.claude/settings.json`)
+
+| Event | Matcher | Action |
+|---|---|---|
+| `PermissionRequest` | `ExitPlanMode` | Read `planFilePath`/`plan`; write `…-plan-ready` sentinel + plan copy; **emit no decision** (park the picker). |
+| `Notification` | — | Write `…-awaiting-input` sentinel (genuine mid-build question). |
+| `Stop` | — | Write `…-stopped` sentinel (session idle/ended — build-done candidate, early-exit). |
+
+Open implementation detail (spike #8 + scoping): confirm the cleanest way to **pre-trust**
+a worktree and scope this hooks config without disturbing the user's global Claude config.
+Candidates: a `--add-dir`/trusted-dirs entry, or seeding the project's trust state. The
+existing early-exit sentinel `/tmp/lemon-exit-{slug}` stays.
+
+> Note: the `PreToolUse` write-allowlist idea from earlier drafts is **dropped** — plan
+> mode's native read-only guarantee (spike #2) makes it unnecessary.
 
 ---
 
@@ -216,97 +268,100 @@ All live in the worktree:
 
 | Artifact | Written by | Used for |
 |---|---|---|
-| `PLAN.md` (committed) | Plan session (Claude) | Popover review · issue comment · PR "Plan" section |
-| `.lemon/screenshots/` | Auto session (Claude) | Result-gate popover · PR (mock-operation evidence) |
+| `PLAN.md` | Lemon, from `planFilePath` | Popover review · issue comment · PR "Plan" section |
+| `.lemon/screenshots/` | Auto phase (Claude) | Result-gate popover · PR (mock-operation evidence) |
 | `.lemon/journal.md` | **Lemon** | PR "What Lemon orchestrated" section |
 
 - **`.lemon/journal.md`** is Lemon's authoritative record of *its own* actions: Gemma
-  verdicts, relayed approvals, picker answers, phase timings. Claude can't self-report
-  what Gemma did behind the scenes; Lemon owns this file.
-- At the result gate, **Gemma summarizes the journal** into the PR section. This needs a
-  larger generation budget than the 300-token / 80-char classify path — a separate
-  generation call, possibly chunked. (Classify constraints in `CLAUDE.md` still apply to
-  the picker path.)
+  verdicts, relayed approvals, picker answers, phase timings. Claude can't self-report what
+  Gemma did; Lemon owns this file.
+- At the result gate, **Gemma summarizes the journal** into the PR section. Needs a larger
+  generation budget than the 300-token / 80-char classify path — a separate call, possibly
+  chunked.
 - **Screenshot hosting into the PR is source-specific** (commit into branch so GitHub
-  renders inline; Linear's upload API). Mirror the `IssueSourceClient` pattern. Defer the
-  polish — text + committed images first.
+  renders inline; Linear's upload API). Mirror the `IssueSourceClient` pattern. Text + diff
+  reliably; screenshots best-effort (see Operational requirements).
 
 ---
 
 ## Gemma's role (narrowed, explicit)
 
 Keep:
-- **Classify permission pickers** in the auto session (existing).
+- **Classify routine permission pickers** in the auto phase (existing).
 
 Add:
-- **Summarize `.lemon/journal.md`** into the "What Lemon orchestrated" PR section
-  (one-shot, larger budget).
+- **Halt-for-human on the plan-approval picker** — defensive example so Gemma never
+  auto-answers the gate (§6).
+- **Summarize `.lemon/journal.md`** into the "What Lemon orchestrated" PR section.
 
 Explicitly *not* Gemma's job:
-- Orchestrating plan approval → input-injection primitive + the gate.
-- Deciding sub-agent usage for context hygiene → a *prompt* instruction in
-  `LEMON_CONTEXT.md`, not a runtime loop.
+- Deciding plan approval → the input-injection primitive + the gate.
+- Deciding sub-agent usage for context hygiene → a `LEMON_CONTEXT.md` prompt instruction.
 - Nudging screenshots → a completion-checklist item Claude self-prompts on.
+
+---
+
+## Operational requirements (mostly surfaced by the spike)
+
+- **Pre-trust every worktree** before launching `claude`, or it hangs on the folder-trust
+  prompt (#8). Hard blocker — needed for *any* plan-mode launch.
+- **Capture `planFilePath` from the hook payload** — never guess the plan filename (#5).
+- **Cost / session limits (#9).** Plan-first is ~2× Claude usage per issue (two phases).
+  On a Max plan this is material — one spike pass hit 94%. Mitigations: the **autopilot
+  opt-out** for trivial issues (skip the plan gate), and surfacing remaining session
+  budget in the popover so a user isn't surprised mid-build.
+- **Screenshots are best-effort.** Capturing mock-operation screenshots for an arbitrary
+  user project is hard (run the app? Playwright? platform-specific). Lemon's own UI has the
+  smoke harness; arbitrary projects don't. Promise text + diff reliably.
 
 ---
 
 ## Failure modes & hardening
 
-- **Plan never approved.** Session is torn down, so no compute leaks — but the issue sits
-  in `.planReview`. Need an abandonment policy: surface staleness in the popover; optional
-  notify after N hours. (No auto-discard.)
-- **Plan rejected / feedback given.** Relaunch the plan session with the feedback;
-  re-post a revised plan (advancing the marker). Stays `.planReview` — never flips to
-  executing without a go.
+- **Plan never approved.** Single-session: the session sits parked at the picker, holding a
+  live process **and a concurrency slot**. Need either (a) "parked ≠ active" accounting so
+  gated sessions don't block the max-2 build limit, or (b) a park timeout. (The two-session
+  alternative avoids this by tearing down.) Surface staleness in the popover; optional
+  notify after N hours; no auto-discard.
+- **Plan rejected / feedback.** `send-keys "4"` + feedback (or re-plan); re-post the revised
+  plan, **advancing the marker**. Stays `.planReview` — never executes without a go.
 - **Marker advancement.** Live comment relay sharpens the existing known gap
   (`hasNewComment` re-fires on already-handled comments). **Must** post a fresh marker
-  comment after each plan revision and each relayed interaction so the marker advances.
-  This is in-scope for the relay work, not deferred.
-- **Build fails after approval.** Resume from the committed `PLAN.md` — do not re-plan.
-- **Screenshots are best-effort.** Capturing mock-operation screenshots for an arbitrary
-  user project is hard (run the app? Playwright? platform-specific). Lemon's own UI has
-  the smoke harness; arbitrary projects do not. Promise text + diff reliably, screenshots
-  best-effort.
-- **Result gate holds a live session.** The auto session stays alive (idle) through the
-  result gate so Claude can open the PR. Brief; acceptable. If review drags, the
-  abandonment policy applies here too.
+  comment after each plan revision / relayed interaction. In scope for the relay work.
+- **Build fails after approval.** Resume from the committed `PLAN.md`; do not re-plan.
+- **Result gate holds a live session.** Acceptable (brief, idle); the parked-session
+  accounting/timeout above applies here too.
 
 ---
 
 ## Phasing
 
-- **Phase 0 — spike (½ day).** In a real tmux session, prove the mechanics the design
-  rests on:
-  1. `--permission-mode plan` session writes `PLAN.md` and **halts cleanly**; a `Stop`
-     hook writes a sentinel Lemon can watch.
-  2. A fresh `--permission-mode auto` session **resumes the same worktree/branch** and
-     reads `PLAN.md`.
-  3. (Record-only) What remote control actually does with an ExitPlanMode-style approval.
-  Much less uncertain than the single-session path — these are bread-and-butter, but the
-  headless/hook corners are undocumented, so verify before building.
-
-- **Phase 1 — plan gate, desk channel (keystone).** Plan session + Stop-hook sentinel +
-  post `PLAN.md` to issue + `.planReview` + popover "Approve & run" → launch auto session.
-  Delivers the core human-in-the-loop plan approval.
-
+- **Phase 0 — spike. ✅ DONE (2026-06-27).** Validated plan-mode read-only, hooks fire,
+  `planFilePath` capture, parked-picker gate, one-keystroke plan→auto, folder-trust blocker,
+  ~2× cost. See "Phase 0 spike — results."
+- **Phase 1 — plan gate, desk channel (keystone).** Pre-trust worktrees; install hooks;
+  ExitPlanMode sentinel → capture `planFilePath` → post plan to issue → `.planReview` →
+  popover "Approve & run" → `send-keys "1"`. Suppress Gemma in `.planReview`. Delivers the
+  core human-in-the-loop plan approval.
+- **Phase 1.x — #11 extras.** Issue triage/reject pass; confirm screen with editable
+  fields; autopilot opt-out.
 - **Phase 2 — approval channels.** Tracker-comment approval (away path) + remote-control
-  notifications. Generalize re-trigger into live comment relay; **fix marker advancement.**
-
-- **Phase 3 — result gate.** Hold the PR; present results + branch confirm in popover;
-  approve → Claude opens PR.
-
-- **Phase 4 — artifacts + Gemma summary.** `PLAN.md` / screenshots / `.lemon/journal.md`
-  → PR body; Gemma "What Lemon did" section; source-specific screenshot hosting.
+  notifications; **fix marker advancement**; defensive Gemma halt example.
+- **Phase 3 — result gate.** Hold the PR; present results + branch confirm; approve →
+  Claude opens PR. Parked-session accounting/timeout.
+- **Phase 4 — artifacts + Gemma summary.** `PLAN.md` / screenshots / journal → PR body;
+  Gemma "What Lemon did" section; source-specific screenshot hosting.
 
 Each phase ships value independently. Phase 1 is the keystone.
 
 ---
 
-## Open questions for the spike
+## Open decisions
 
-1. Does `--permission-mode plan` in an interactive tmux session reliably **stop** after
-   writing `PLAN.md`, or does it sit at an ExitPlanMode prompt? (Determines whether the
-   kickoff says "don't call ExitPlanMode, just stop" vs. a hook denies+signals on it.)
-2. Exact `Stop` / `Notification` hook payloads and how to scope a project-local hooks
-   config in the worktree without disturbing the user's global config.
-3. What remote control surfaces for an ExitPlanMode approval (record-only; not depended on).
+1. **Session model** — single-session (recommended; spike-validated) vs the two-session
+   alternative for clean build context. *Lean: single.*
+2. **Parked-session policy** — accounting fix vs timeout vs both, for sessions idling at a
+   gate (single-session only).
+3. **Autopilot trigger** — a label (e.g. `🍋 auto`) vs a per-workspace default, for
+   skipping the plan gate on trivial issues.
+4. **Pre-trust mechanism** — the cleanest way to mark a worktree trusted (spike to-do).

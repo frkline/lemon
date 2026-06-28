@@ -1,0 +1,50 @@
+---
+title: Workflow sandbox / autonomous iteration loop
+type: decision
+status: active
+date: 2026-06-27
+related: [[plan-gate-workflow]], [[claude-code-plan-mode]]
+---
+
+To tune the plan-gate workflow meticulously (and for free / side-effect-free), build a
+sandbox that exploits Lemon's two existing protocol seams plus its mock infrastructure. The
+principle: **separate the expensive/irreversible parts (real GitHub, real `claude` tokens)
+from the logic we iterate on (orchestration state machine + Gemma prompts).**
+
+**Landed 2026-06-27 (vertical slice, build + tests green):** components 1, 3, and the
+harness/Make targets — verified a full `🍋 → In Progress → Complete → Lemon Report`
+lifecycle end-to-end with no GitHub/Linear traffic and no claude tokens. Files:
+`app/Lemon/MockIssueClient.swift`, `scripts/sandbox.sh`, `scripts/fake-claude.sh`,
+`make sandbox*` targets, CLAUDE.md "Workflow sandbox". Seams: `LEMON_SANDBOX=1`
+(KeychainStore + Orchestrator.client(for:)), `LEMON_CLAUDE_BIN` (WorktreeRunner launcher).
+**Still TODO:** 2 (approve_gate MCP + asserting scenario runner), 4 (Gemma corpus),
+5 (gate smoke states), 6 (real-claude-against-fixtures is already usable: omit LEMON_CLAUDE_BIN).
+
+Components (build order = priority):
+
+1. **`MockIssueClient`** — conforms to `IssueSourceClient`, reads/writes issues+labels+
+   comments as JSON fixtures under `/tmp/lemon-sandbox/`. Returned by
+   `Orchestrator.client(for:)` when `LEMON_SANDBOX=1`. Dropping a fixture = triggering a
+   test issue; label flips + Lemon's comments write back to inspectable files. Keystone —
+   decouples the whole workflow from GitHub/Linear. Works against today's flow too.
+2. **`approve_gate` MCP tool + scenario runner** (`make workflow`) — the popover "Approve
+   & run" backend, exposed via MCP so a script can answer gates. Runner = build → relaunch
+   unattended in sandbox → drop issue → drive via MCP → assert fixture state.
+3. **`fake-claude.sh`** — mimics claude's observable surface (scripted pane output, writes
+   the plan file + ExitPlanMode hook sentinel, parks for `send-keys "1"`, then "implements",
+   signals done; plus a misbehave mode). Selected via env override of the claude binary in
+   the launcher. Makes the loop free + deterministic; solves the ~2× session-limit cost.
+4. **Gemma golden corpus** — captured pane snapshots per picker shape (plan-approval,
+   Bash perm, edit, MCP, git push, ambiguous) + expected `classify()` verdicts; a harness
+   diffs real Gemma output vs expected. Seed from the spike's real plan-picker text. This
+   is how to tune `LocalLLM.classify()` prompts without regressions.
+5. **Gate smoke states** — add `.planReview` / `.resultReview` scenarios to
+   `SmokeTestDriver` to see + screenshot the gate UI with mock data.
+6. **Real-claude-against-fixtures mode** (`LEMON_SANDBOX_REAL_CLAUDE=1`) — same fixture
+   workspace, real CLI, opt-in, for periodic truth-checks of orchestration assumptions.
+
+**Why:** the workflow involves real `claude` sessions + tracker mutations; iterating
+against those is slow, costly (Max limits), and has side effects on a public repo.
+**How to apply:** build the sandbox FIRST, then implement plan-gate Phase 1 inside it.
+Reuse: `isMockMode`/`MockAppState`, `integration-test.sh` mock Gemma, MCP tools, the
+unattended env-launch loop, and the `make ui`/smoke harness. See [[plan-gate-workflow]].
