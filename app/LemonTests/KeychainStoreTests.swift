@@ -545,4 +545,49 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertNotNil(s.identity(for: workspace), "identity lookup still works")
         XCTAssertNil(s.surface(for: workspace), "surface deleted upstream → nil")
     }
+
+    // MARK: - Session index (issue #35)
+
+    func testSessionIndexEmptyByDefault() {
+        XCTAssertTrue(store().sessionIndex.isEmpty)
+    }
+
+    func testSessionIndexRoundTrip() {
+        let s = store()
+        let ref = IssueRef(
+            id: "acme/widgets#7", identifier: "acme/widgets#7", title: "Title",
+            description: "desc", labelNames: ["🍋", "🍋 In Progress"],
+            scope: .githubRepo(owner: "acme", repo: "widgets", number: 7),
+            authorLogin: "frank",
+        )
+        let cleanup = WorktreeCleanupInfo(
+            sessionPath: "/tmp/lemon-acme-widgets-7", isMultiRepo: false,
+            repos: [.init(name: "widgets", repoPath: "/src/widgets")], slug: "acme-widgets-7",
+        )
+        let p = PersistedSession(
+            issue: ref, workspaceId: UUID(), slug: "acme-widgets-7",
+            branch: "lemon/acme-widgets-7", status: .resultReview,
+            retrigger: LemonMarker(branch: "lemon/acme-widgets-7", prNumber: "7",
+                                   commentId: "c1", repoPath: "/src", source: .github),
+            startedAt: Date(timeIntervalSince1970: 1000), cleanupInfo: cleanup,
+        )
+        s.sessionIndex = [p]
+        // Round-trips through JSON → exercises every new Codable conformance
+        // (SessionStatus, LemonMarker, WorktreeCleanupInfo, IssueRef/scope).
+        XCTAssertEqual(s.sessionIndex, [p])
+    }
+
+    func testSessionIndexOverwriteReplaces() {
+        let s = store()
+        let ref = IssueRef(id: "1", identifier: "LEM-1", title: "t", description: nil,
+                           labelNames: [], scope: .linearTeam(id: "LEM"))
+        let p = PersistedSession(issue: ref, workspaceId: UUID(), slug: "lem-1",
+                                 branch: "lemon/lem-1", status: .executing,
+                                 retrigger: nil, startedAt: Date(timeIntervalSince1970: 0),
+                                 cleanupInfo: nil)
+        s.sessionIndex = [p, p]
+        XCTAssertEqual(s.sessionIndex.count, 2)
+        s.sessionIndex = []
+        XCTAssertTrue(s.sessionIndex.isEmpty)
+    }
 }

@@ -25,8 +25,25 @@ bad()  { echo "  ✗ $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
 assert() { if [ "$2" = "1" ]; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 APP_PID=""
+SLUG="sandbox-demo-1"           # pathSlug of sandbox/demo#1 → tmux lemon-$SLUG
 teardown() { [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null; }
 trap teardown EXIT
+
+# --- app lifecycle (shared by the initial launch + the reattach relaunch) ----
+launch_app() {
+  LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN="$(pwd)/scripts/fake-claude.sh" \
+    "$APP" >>"$ROOT/app.log" 2>&1 &
+  APP_PID=$!
+  echo "[setup] launched sandbox Lemon (pid $APP_PID); waiting for MCP…"
+  for _ in $(seq 1 30); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null && break; sleep 1; done
+}
+stop_app() { # SIGTERM the app ONLY — the detached tmux session must survive
+  [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null
+  for _ in $(seq 1 20); do kill -0 "$APP_PID" 2>/dev/null && sleep 0.5 || break; done
+  for _ in $(seq 1 20); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null && sleep 0.5 || break; done
+  APP_PID=""
+}
+tmux_alive() { tmux has-session -t "lemon-$SLUG" 2>/dev/null && echo 1 || echo 0; }
 
 # --- probes -----------------------------------------------------------------
 fixture_has_comment() { # $1=num  $2=python-prefix-expr -> 1/0
@@ -84,11 +101,8 @@ scripts/sandbox.sh reset >/dev/null
 scripts/sandbox.sh issue "Add a hello function" "Add hello(name) and a test." >/dev/null
 
 # 3. Launch in sandbox mode; wait for MCP up.
-LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN="$(pwd)/scripts/fake-claude.sh" \
-  "$APP" >"$ROOT/app.log" 2>&1 &
-APP_PID=$!
-echo "[setup] launched sandbox Lemon (pid $APP_PID); waiting for MCP…"
-for _ in $(seq 1 30); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null && break; sleep 1; done
+: >"$ROOT/app.log"
+launch_app
 
 # 4. PLAN GATE — wait for the session to reach Plan Review.
 echo "[phase] waiting for plan gate…"
@@ -100,6 +114,26 @@ echo "── plan gate assertions ───────────────�
 assert "session created (worktree via MCP)"     "$saw_worktree"
 assert "plan posted to issue (Lemon Plan)"       "$plan_posted"
 assert "reached Plan Review gate"                "$reached_plan_review" "status=$(mcp_status)"
+
+# 4b. REATTACH (issue #35) — at Plan Review the detached tmux session is alive
+# (fake-claude is blocked on the approval read). SIGTERM the app ONLY, relaunch,
+# and assert the session is re-adopted at the same status (not ABSENT) — proving
+# restoreSessions reattached a live session rather than orphaning or killing it.
+echo "[phase] reattach: killing app (tmux survives), relaunching…"
+tmux_before="$(tmux_alive)"
+stop_app
+tmux_survived="$(tmux_alive)"
+absent_while_down="$([ -z "$(mcp_status)" ] && echo 1 || echo 0)"  # MCP down → no status
+launch_app
+reattached_plan_review="$(wait_for_status 'Plan Review' 60)"
+reattached_worktree="$(mcp_has_worktree)"
+
+echo "── reattach assertions (issue #35) ─────────────────────────────"
+assert "tmux session alive at Plan Review"       "$tmux_before"
+assert "tmux session survived app SIGTERM"       "$tmux_survived"
+assert "MCP gone while app down"                 "$absent_while_down"
+assert "session reattached at Plan Review"       "$reattached_plan_review" "status=$(mcp_status)"
+assert "reattached session has its worktree"     "$reattached_worktree"
 
 # 5. APPROVE the plan via the MCP gate tool (what the popover button calls).
 echo "[phase] approving plan via approve_gate…"

@@ -34,6 +34,15 @@ make loop              # build-ui + test + smoke
 
 Builds go to `/tmp/lemon-build/Lemon.app`. **`-warnings-as-errors` is enforced** — both build and tests must be clean.
 
+**Lint before you finish — the #1 CI failure.** A clean `xcodebuild`/`make test` is *not* enough: CI (`.github/workflows/ci.yml`) also runs a separate `lint` job that fails the PR on any formatting/style miss. Code that builds and tests locally routinely fails it. Run both before committing:
+
+```sh
+swiftformat app/Lemon app/LemonTests      # auto-fix (then commit the result)
+swiftlint lint --strict                    # must report 0 violations
+```
+
+CI runs `swiftformat --lint app/Lemon app/LemonTests` (no auto-fix) + `swiftlint lint --strict`. See [[ci-lint-swiftformat]].
+
 ### Workflow sandbox — iterate on orchestration with no tokens / no side effects
 
 The killer dev loop for the workflow itself. A file-backed tracker (`MockIssueClient`, `LEMON_SANDBOX=1`) + a scripted `claude` stand-in (`fake-claude.sh`, `LEMON_CLAUDE_BIN`) run the **entire** plan→gate→build→gate→PR lifecycle against `/tmp/lemon-sandbox` fixtures — no GitHub/Linear calls, no Claude tokens, no public side effects.

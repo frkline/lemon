@@ -63,3 +63,6 @@ a valid "this is worth writing" marker, not an error.
   the workflow on a real issue: validation ladder (sandbox → real claude → real issue),
   what to look for (#31 labeler-trust, request-changes, silence stall), what's
   deliberately not done, and the issues this branch closes.
+- [ci-lint-swiftformat](ci-lint-swiftformat.md) — *instruction* — CI's `lint` job
+  (swiftformat --lint + swiftlint --strict) is the #1 PR-check failure; a clean
+  build/test doesn't cover it. Run `swiftformat` + `swiftlint --strict` before pushing.

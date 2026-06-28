@@ -211,6 +211,11 @@ xcodebuild -project app/Lemon.xcodeproj -scheme Lemon -configuration Debug \
 xcodebuild -project app/Lemon.xcodeproj -scheme Lemon -configuration Debug \
   OTHER_SWIFT_FLAGS="-warnings-as-errors" -destination 'platform=macOS' test
 
+# Lint — CI's separate `lint` job; the #1 PR-check failure. A clean build/test
+# does NOT cover it. Run both before committing (see memory/ci-lint-swiftformat.md):
+swiftformat app/Lemon app/LemonTests   # auto-fix, then commit the result
+swiftlint lint --strict                 # must report 0 violations
+
 # App — open app/Lemon.xcodeproj in Xcode 26, build target "Lemon"
 # Unsandboxed (direct download at lemon.living, not App Store)
 ```
@@ -383,10 +388,11 @@ To exercise a **real** `claude` against the fixtures (truth-check, costs tokens)
 with `LEMON_SANDBOX=1` but **without** `LEMON_CLAUDE_BIN`. The fixture workspace is a real
 git repo, so worktrees and `gh` (against a throwaway) behave normally.
 
-> Not yet wired (next sandbox increments): an `approve_gate` MCP tool (the popover button's
-> backend, for scripting the plan/result gates — and the asserting runner will use it once
-> the gates exist), a Gemma golden-snapshot corpus for tuning `LocalLLM.classify()`, and
-> `.planReview`/`.resultReview` smoke states.
+> The `approve_gate` MCP tool (the popover button's backend, `decision=approve|request_changes`)
+> is now **wired** — it resolves a session parked at a Plan Review / Result Review gate.
+>
+> Not yet wired (next sandbox increments): a Gemma golden-snapshot corpus for tuning
+> `LocalLLM.classify()`, and `.planReview`/`.resultReview` smoke states.
 
 ## Trust boundary & lockdown (#13)
 
