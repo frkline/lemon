@@ -7,6 +7,7 @@ struct LinearIssue: Identifiable, Codable, Equatable {
     let description: String?
     let labelNames: [String]
     let teamId: String
+    var creatorName: String? = nil // issue opener (trust boundary #13)
 
     var identifierPrefix: String {
         String(identifier.prefix(while: { $0.isLetter }))
@@ -100,6 +101,7 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
         self.description = i.description
         self.labelNames = i.labelNames
         self.scope = .linearTeam(id: i.teamId)
+        self.authorLogin = i.creatorName
     }
 
     init(id: String, identifier: String, title: String, description: String?,

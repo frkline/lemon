@@ -50,19 +50,20 @@ init() {
 issue() {
   local title="${1:-Add a hello function}"
   local body="${2:-Add a hello(name) function and a test.}"
-  local author="${3:-sandbox}"   # issue opener; default = the sandbox user
+  local author="${3:-sandbox}"        # issue opener; default = the sandbox user
+  local labeledBy="${4:-$author}"     # who applied 🍋; default = the author
   mkdir -p "$ISSUES"
   local n; n=$(( $(find "$ISSUES" -name '*.json' 2>/dev/null | wc -l | tr -d ' ') + 1 ))
-  python3 - "$ISSUES/$n.json" "$n" "$title" "$body" "$author" <<'PY'
+  python3 - "$ISSUES/$n.json" "$n" "$title" "$body" "$author" "$labeledBy" <<'PY'
 import json, sys
-path, n, title, body, author = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
+path, n, title, body, author, labeledBy = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 json.dump({
     "number": n, "title": title, "description": body,
     "labelNames": ["\U0001F34B"],  # 🍋 trigger
-    "comments": [], "commentSeq": 0, "author": author,
+    "comments": [], "commentSeq": 0, "author": author, "labeledBy": labeledBy,
 }, open(path, "w"), ensure_ascii=False, indent=2)
 PY
-  echo "[sandbox] filed sandbox/demo#$n  \"$title\"  by @$author  (labelled 🍋)"
+  echo "[sandbox] filed sandbox/demo#$n  \"$title\"  by @$author  labelled-by @$labeledBy"
 }
 
 show() {
@@ -84,7 +85,7 @@ reset() { init; }
 
 case "$cmd" in
   init)  init ;;
-  issue) issue "${1:-}" "${2:-}" "${3:-}" ;;
+  issue) issue "${1:-}" "${2:-}" "${3:-}" "${4:-}" ;;
   show)  show ;;
   reset) reset ;;
   *) cat <<EOF

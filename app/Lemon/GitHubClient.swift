@@ -343,6 +343,37 @@ final class GitHubClient: Sendable {
             return IssueComment(id: String(dto.id), body: dto.body ?? "", createdAt: date, author: dto.user?.login)
         }
     }
+
+    // MARK: - Trigger-label actor (#13 M2)
+
+    private struct EventDTO: Decodable {
+        let event: String
+        let actor: UserDTO?
+        let label: LabelName?
+        struct LabelName: Decodable { let name: String }
+    }
+
+    /// Login of whoever most recently applied the 🍋 trigger label, via the
+    /// issue events timeline. Returns nil if undeterminable (caller falls back
+    /// to the issue author). Events come oldest-first, so the last matching
+    /// `labeled` event is the most recent.
+    func triggerLabelActor(ref: IssueRef, auth: SourceAuth) async throws -> String? {
+        guard case let .github(token, _, host) = auth,
+              case let .githubRepo(owner, repo, number) = ref.scope else { return nil }
+        let req = authedRequest(
+            "GET",
+            path: "/repos/\(owner)/\(repo)/issues/\(number)/events",
+            query: [URLQueryItem(name: "per_page", value: "100")],
+            token: token,
+            host: host,
+        )
+        let (_, data) = try await send(req)
+        let events = try decode(data, as: [EventDTO].self)
+        let trigger = LemonState.trigger.labelName
+        return events.reversed().first {
+            $0.event == "labeled" && Self.normalizeIncomingLabel($0.label?.name ?? "") == trigger
+        }?.actor?.login
+    }
 }
 
 /// Tiny thread-safe set used to memoize the per-repo bootstrap status during

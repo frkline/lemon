@@ -29,6 +29,13 @@ protocol IssueSourceClient: Sendable {
     func fetchCommentsAfter(ref: IssueRef, afterCommentId: String, auth: SourceAuth) async throws -> [String]
     func findLemonMarker(ref: IssueRef, auth: SourceAuth) async throws -> LemonMarker?
 
+    /// Login of whoever most recently applied the 🍋 trigger label (the labeler,
+    /// not necessarily the opener) — the trust anchor for lockdown (#13 M2).
+    /// nil = undeterminable; callers fall back to the issue author. A protocol
+    /// requirement (not just an extension default) so `any IssueSourceClient`
+    /// dynamically dispatches to each client's real implementation.
+    func triggerLabelActor(ref: IssueRef, auth: SourceAuth) async throws -> String?
+
     /// Per-source label bootstrap. Linear: ensure labels in each configured
     /// team. GitHub: ensure labels in each configured repo (lazy is fine too).
     func bootstrapLabels(config: SourceConfig, auth: SourceAuth) async throws
@@ -57,6 +64,13 @@ extension IssueSourceClient {
     func verifyCredential(token: String) async throws -> CredentialIdentity {
         try await verifyCredential(token: token, host: nil)
     }
+
+    /// Login of whoever most recently applied the 🍋 trigger label — the labeler,
+    /// not necessarily the issue opener. The precise trust anchor for lockdown
+    /// (#13 M2): you can authorize an outsider's issue by labeling it yourself,
+    /// and an outsider labeling your issue is caught. nil = undeterminable;
+    /// callers fall back to the issue author. Default nil (sources opt in).
+    func triggerLabelActor(ref _: IssueRef, auth _: SourceAuth) async throws -> String? { nil }
 }
 
 /// Per-source credential.

@@ -64,6 +64,7 @@ private struct SandboxIssueFixture: Codable {
     var comments: [SandboxCommentFixture] = []
     var commentSeq: Int = 0
     var author: String? = nil // issue opener (defaults to the sandbox user)
+    var labeledBy: String? = nil // who applied 🍋 (defaults to the author)
 }
 
 private struct SandboxCommentFixture: Codable {
@@ -227,6 +228,13 @@ final class MockIssueClient: IssueSourceClient, @unchecked Sendable {
         withLock {
             guard let n = number(of: ref) else { return nil }
             return LemonMarkerExtractor.findLatest(in: comments(for: n))
+        }
+    }
+
+    func triggerLabelActor(ref: IssueRef, auth _: SourceAuth) async throws -> String? {
+        withLock {
+            guard let n = number(of: ref), let issue = load(n) else { return nil }
+            return issue.labeledBy ?? issue.author ?? SandboxFixtures.identity.handle
         }
     }
 

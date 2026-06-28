@@ -66,6 +66,7 @@ final class LinearClient: Sendable {
               labels { nodes { name } }
               team { id }
               state { type }
+              creator { displayName }
             }
           }
         }
@@ -103,6 +104,7 @@ final class LinearClient: Sendable {
               labels { nodes { name } }
               team { id }
               state { type }
+              creator { displayName }
             }
           }
         }
@@ -378,6 +380,7 @@ final class LinearClient: Sendable {
             description: node["description"] as? String,
             labelNames: labelNames,
             teamId: teamId,
+            creatorName: (node["creator"] as? [String: Any])?["displayName"] as? String,
         )
     }
 

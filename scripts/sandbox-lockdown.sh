@@ -47,6 +47,16 @@ assert "outsider issue did NOT trigger (no worktree)" "$([ ! -d /tmp/lemon-sandb
 scripts/sandbox.sh issue "Legit ask" "Add a hello()." "sandbox" >/dev/null        # #2, owner
 assert "owner issue DID trigger (worktree created)" "$(wait_worktree 2 40)"
 
+# ── Part C: lockdown ON — trust the LABELER, not just the author (M2) ─────────
+echo "[C] lockdown ON — labeler trust (M2)"
+# #3: YOU opened it, but an OUTSIDER applied 🍋 → must NOT trigger.
+scripts/sandbox.sh issue "Mine, labeled by other" "x" "sandbox" "attacker" >/dev/null
+sleep 20
+assert "your issue labeled by an outsider did NOT trigger" "$([ ! -d /tmp/lemon-sandbox-demo-3 ] && echo 1 || echo 0)"
+# #4: an OUTSIDER opened it, but YOU applied 🍋 → you authorized it → triggers.
+scripts/sandbox.sh issue "Theirs, labeled by you" "x" "attacker" "sandbox" >/dev/null
+assert "outsider issue you labeled DID trigger" "$(wait_worktree 4 40)"
+
 echo "────────────────────────────────────────────────────────────────"
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "  SCENARIO PASSED" || echo "  SCENARIO FAILED"

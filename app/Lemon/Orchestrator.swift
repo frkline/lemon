@@ -359,14 +359,22 @@ final class Orchestrator {
 
             for ref in newIssues {
                 guard !sessions.isTracking(ref: ref) else { continue }
-                // Lockdown (#13): only the user's own issues trigger. A 🍋 added
-                // by anyone else on a low-trust (e.g. public) workspace is ignored.
-                // Fail-open on unknown authorship — GitHub always populates the
-                // opener, so it's fully enforced there; a source that doesn't
-                // expose it won't silently drop every issue.
-                if workspace.lockdown, isKnownOutsider(ref.authorLogin, identity: identity) {
-                    Logger.orchestrator.info("Lockdown: skip \(ref.identifier) — author \(ref.authorLogin ?? "?") ≠ \(identity.handle)")
-                    continue
+                // Lockdown (#13): trust who APPLIED the 🍋 (M2) — you can authorize
+                // an outsider's issue by labeling it yourself, and an outsider
+                // labeling your issue is caught. If the labeler is undeterminable,
+                // fall back to the issue author (fail-open on unknown so a source
+                // that exposes neither doesn't silently drop everything).
+                if workspace.lockdown {
+                    let labeler = try? await client.triggerLabelActor(ref: ref, auth: auth)
+                    let allowed = if let labeler {
+                        TrustPolicy.isTrusted(author: labeler, trustedAuthor: identity.handle)
+                    } else {
+                        !isKnownOutsider(ref.authorLogin, identity: identity)
+                    }
+                    if !allowed {
+                        Logger.orchestrator.info("Lockdown: skip \(ref.identifier) — labeler=\(labeler ?? "?") author=\(ref.authorLogin ?? "?") not trusted (\(identity.handle))")
+                        continue
+                    }
                 }
                 guard sessions.active.count < maxConcurrent else {
                     Logger.orchestrator.info("At max concurrent sessions, skipping \(ref.identifier)")
