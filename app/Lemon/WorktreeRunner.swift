@@ -1064,12 +1064,27 @@ final class WorktreeRunner: @unchecked Sendable {
     /// (defense-in-depth for the #44 CPU spin, alongside the input bounding).
     private var lastClassifySig: Int?
 
-    private func invokeGemma(ref: IssueRef) async {
+    /// Returns a resume `Date` if the pane shows a Max session-limit (quota)
+    /// wall — the caller parks until then and auto-resumes (#39). Otherwise
+    /// classifies the pane, acts on the verdict, and returns nil.
+    @discardableResult
+    private func invokeGemma(ref: IssueRef) async -> Date? {
         guard LocalLLM.shared.isReady() else {
             Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(ref.identifier)")
-            return
+            return nil
         }
         let lines = tailLog(slug: ref.pathSlug, last: 100)
+        // Quota wall (#39): claude hit the Max session limit and parked on a pane
+        // Gemma can't action — classifying it would just re-fire (and fed the
+        // #44 spin). Detect it here, surface the reset time, and let the caller
+        // park + auto-resume rather than burn inferences on a frozen pane.
+        if let resetAt = WorktreeRunner.parseSessionLimitReset(from: lines.joined(separator: "\n")) {
+            let when = WorktreeRunner.shortClock(resetAt)
+            Logger.worktree.error("[gemma] Max session limit reached for \(ref.identifier) — pausing until \(when)")
+            log("[gemma] Max session limit reached — pausing until \(when), then auto-resuming", level: .error)
+            onAiSummary?("⏳ Max limit — resuming \(when)")
+            return resetAt
+        }
         // Pane-change gate: if the cleaned tail is identical to what we last
         // classified, there's nothing new to decide — skip the inference.
         var hasher = Hasher()
@@ -1079,7 +1094,7 @@ final class WorktreeRunner: @unchecked Sendable {
         let sig = hasher.finalize()
         if sig == lastClassifySig {
             Logger.worktree.info("[gemma] pane unchanged since last classify — skipping \(ref.identifier)")
-            return
+            return nil
         }
         lastClassifySig = sig
         Logger.worktree.info("[gemma] classifying \(ref.identifier) with \(lines.count) log lines")
@@ -1090,7 +1105,7 @@ final class WorktreeRunner: @unchecked Sendable {
             onAiSummary?(response.summary)
             log("[gemma] \(response.summary)")
 
-            guard let action = response.action else { return }
+            guard let action = response.action else { return nil }
             switch action.type {
             case "send_keys":
                 handleSendKeys(keys: action.keys ?? "", slug: ref.pathSlug,
@@ -1105,6 +1120,64 @@ final class WorktreeRunner: @unchecked Sendable {
         } catch {
             Logger.worktree.error("[gemma] classify failed for \(ref.identifier): \(error.localizedDescription)")
         }
+        return nil
+    }
+
+    /// Parses Claude Code's Max session-limit banner — e.g.
+    /// "You've hit your session limit · resets 3:20pm (America/Boise)" — and
+    /// returns the next reset `Date` (today, or tomorrow if already past). The
+    /// banner's clock is in the user's local timezone, so we resolve against the
+    /// local calendar. Returns nil when no limit banner is present; falls back to
+    /// "now + 1h" if the banner is present but the time can't be parsed. Pure +
+    /// static so it's unit-testable.
+    static func parseSessionLimitReset(from text: String, now: Date = Date(),
+                                       calendar: Calendar = .current) -> Date?
+    {
+        guard text.range(of: "session limit", options: .caseInsensitive) != nil else { return nil }
+        let fallback = now.addingTimeInterval(3600)
+        guard let re = try? NSRegularExpression(
+            pattern: "resets\\s+(\\d{1,2}):(\\d{2})\\s*([ap]m)?", options: [.caseInsensitive],
+        ),
+            let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
+        else { return fallback }
+        let ns = text as NSString
+        var hour = Int(ns.substring(with: m.range(at: 1))) ?? 0
+        let minute = Int(ns.substring(with: m.range(at: 2))) ?? 0
+        if m.range(at: 3).location != NSNotFound {
+            switch ns.substring(with: m.range(at: 3)).lowercased() {
+            case "pm" where hour < 12: hour += 12
+            case "am" where hour == 12: hour = 0
+            default: break
+            }
+        }
+        var comps = calendar.dateComponents([.year, .month, .day], from: now)
+        comps.hour = hour
+        comps.minute = minute
+        comps.second = 0
+        guard var reset = calendar.date(from: comps) else { return fallback }
+        if reset <= now { reset = calendar.date(byAdding: .day, value: 1, to: reset) ?? reset }
+        return reset
+    }
+
+    /// Short local-time string (e.g. "3:20 PM") for surfacing the reset time.
+    static func shortClock(_ date: Date, calendar: Calendar = .current) -> String {
+        let f = DateFormatter()
+        f.calendar = calendar
+        f.locale = .current
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    /// Auto-resume nudge after a quota reset. Sends a continuation message and a
+    /// SEPARATE Enter — claude's TUI leaves a single combined text+Enter queued
+    /// in the composer without submitting, so the Enter must be its own event.
+    private func sendResumeKeys(slug: String) {
+        let msg = "Session limit has reset - please continue."
+        let escaped = msg.replacingOccurrences(of: "'", with: "'\\''")
+        let name = tmuxSessionName(slug: slug)
+        runSync("\(Self.tmuxBase) send-keys -t '\(name)' '\(escaped)'")
+        runSync("\(Self.tmuxBase) send-keys -t '\(name)' Enter")
     }
 
     // Shows a 5-second cancellable toast, then sends keys to the tmux pane.
@@ -1255,6 +1328,7 @@ final class WorktreeRunner: @unchecked Sendable {
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
         var resultGateActive = false
+        var resumeAt: Date? = nil // set when parked on a Max session-limit wall (#39)
 
         while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
@@ -1378,9 +1452,30 @@ final class WorktreeRunner: @unchecked Sendable {
                 lastLineCount = currentLines
                 lastActivityAt = Date()
             }
-            if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
+            // Quota wall (#39): if parked on a Max session-limit, don't classify
+            // (it would re-fire on a frozen pane). Auto-resume once the reset time
+            // passes — a continuation nudge + a separate Enter — then resume normal
+            // monitoring. The user reset the limit; we just un-park the session.
+            if let resume = resumeAt {
+                if Date() >= resume {
+                    log("[lemon] session limit reset reached — auto-resuming \(ref.identifier)")
+                    sendResumeKeys(slug: slug)
+                    resumeAt = nil
+                    lastClassifySig = nil
+                    lastActivityAt = Date()
+                    lastGemmaAt = Date()
+                    onStatusChange?(.executing)
+                    try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                    try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                }
+            } else if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
                 lastGemmaAt = Date()
-                await invokeGemma(ref: ref)
+                if let reset = await invokeGemma(ref: ref) {
+                    // Park on the quota wall: surface 🍋 Waiting + wait for reset.
+                    resumeAt = reset
+                    onStatusChange?(.waiting)
+                    try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                }
             }
         }
         // Loop exited without completing — either stopped externally or timed out.
