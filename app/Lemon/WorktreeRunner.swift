@@ -153,8 +153,13 @@ final class WorktreeRunner: @unchecked Sendable {
 
         // Fresh sessions go through the plan gate (plan mode → human approval →
         // auto). Retriggers are revisions to already-approved work, so they skip
-        // the gate and go straight to auto.
-        let planMode = retrigger == nil
+        // the gate. Autopilot opt-out: a `🍋 auto` label on the issue skips the
+        // gate for trivial work the user trusts to run unattended.
+        let autopilot = ref.labelNames.contains {
+            $0.replacingOccurrences(of: "🍋", with: "").trimmingCharacters(in: .whitespaces).lowercased() == "auto"
+        }
+        if autopilot { log("[lemon] autopilot (🍋 auto) — skipping the plan gate") }
+        let planMode = retrigger == nil && !autopilot
         try? FileManager.default.removeItem(atPath: planReadyPath(slug: slug))
         try? FileManager.default.removeItem(atPath: gateSentinelPath(slug: slug))
         if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
@@ -621,6 +626,16 @@ final class WorktreeRunner: @unchecked Sendable {
                 plan = p
                 break
             }
+            // Triage reject: Claude judged the issue malformed/blocked, posted a
+            // clarifying comment, and set 🍋 Waiting instead of planning. Treat as
+            // awaiting-human, not a plan gate or a failure.
+            if let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth),
+               labels.contains(LemonState.waiting.labelName)
+            {
+                log("[lemon] triage: issue needs clarification (🍋 Waiting) — pausing for human")
+                onStatusChange?(.waiting)
+                return false
+            }
             if sessionEnded() {
                 log("[lemon] session ended during planning", level: .error)
                 onStatusChange?(.failed)
@@ -661,7 +676,11 @@ final class WorktreeRunner: @unchecked Sendable {
                     return true
                 }
                 // Changes requested: claude got "4" + re-plans; wait for a new plan.
+                // Reset the label to In Progress so the re-plan's triage check
+                // doesn't mistake the gate's 🍋 Waiting for a triage reject.
                 log("[lemon] changes requested for \(ref.identifier) — re-planning")
+                try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
                 onStatusChange?(.planning)
                 return await planGatePhase(ref: ref, client: client, auth: auth,
                                            slug: slug, sentinelPath: sentinelPath)
@@ -755,7 +774,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // the gate and go straight to auto.
         let permissionMode = planMode ? "plan" : "auto"
         let kickoffPrompt = planMode
-            ? "Read LEMON_CONTEXT.md in this directory. First produce a concise implementation plan and present it for approval via ExitPlanMode — do not edit files yet. Once the plan is approved you will continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
+            ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise produce a concise implementation plan and present it for approval via ExitPlanMode (do not edit files yet). Once approved you continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
             : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
         // Source common shell profiles so PATH includes Homebrew, npm-global,

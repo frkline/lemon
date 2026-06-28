@@ -106,9 +106,7 @@ struct LemonApp: App {
                 LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
             }
         } label: {
-            Image(nsImage: LemonGlyph.menuBar(for: orchestrator.menuBarGlyph))
-                .renderingMode(.template)
-                .accessibilityLabel("Lemon — \(orchestrator.menuBarGlyph.rawValue)")
+            MenuBarGlyphView(glyph: orchestrator.menuBarGlyph)
         }
         .menuBarExtraStyle(.window)
     }
@@ -155,6 +153,30 @@ struct LemonApp: App {
 /// The shape is a stylized lemon: a plump oval body with gently pointed tips
 /// (two cubic arcs meeting at corners), tilted so the upper tip lifts to the
 /// left, with a small leaf sprouting from the top.
+/// The menu-bar label. While an agent is **working**, the solid lemon gently
+/// "breathes" (opacity 1 → 0.62 → 1, ~2.4s ease-in-out) per the design handoff —
+/// a calm sign of life. Other states render static. (MenuBarExtra honors the
+/// label's animation where the platform supports it; static otherwise — harmless.)
+struct MenuBarGlyphView: View {
+    let glyph: MenuBarGlyph
+    @State private var dim = false
+
+    var body: some View {
+        Image(nsImage: LemonGlyph.menuBar(for: glyph))
+            .renderingMode(.template)
+            .opacity(glyph == .working && dim ? 0.62 : 1)
+            .animation(
+                glyph == .working
+                    ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
+                    : .default,
+                value: dim,
+            )
+            .onAppear { dim = glyph == .working }
+            .onChange(of: glyph) { _, new in dim = new == .working }
+            .accessibilityLabel("Lemon — \(glyph.rawValue)")
+    }
+}
+
 private enum LemonGlyph {
     /// Filled lemon — shown while sessions are active.
     static let active: NSImage = render(filled: true)
