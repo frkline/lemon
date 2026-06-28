@@ -1,0 +1,38 @@
+# Lemon
+
+> A personal, menu-bar app that orchestrates Claude Code from your issue tracker (Linear or GitHub). Tag an issue with 🍋 and Lemon cuts a git worktree, drops in the right context, and launches *your own* `claude` CLI — gating the work behind two human approvals while a small local Gemma 4 model handles the routine confirmations.
+
+Lemon is deliberately thin: the intelligence is Claude Code running under your login, and the judgment is yours. Its defining trait is a **self-review loop** — the work pauses at a **plan gate** (Claude proposes a plan read-only; nothing is written until you approve) and a **result gate** (Claude finishes and stops; you review the build before any PR opens), and an **on-device Gemma 4 supervisor** watches the session in between, clearing routine prompts and paging you only for the decisions that need a person. In short: *it pauses for you; it doesn't merge for you.* Runs entirely on Apple silicon, no cloud inference. (This file complements the lemon.living SEO work in #42 — same surface, distilled for agents.)
+
+## How the self-review loop works
+
+- [The loop, on lemon.living](https://lemon.living/#loop): plan gate → Gemma keeps it moving → result gate → PR, explained for humans.
+- [WORKFLOW_DESIGN.md](https://github.com/frkline/lemon/blob/main/WORKFLOW_DESIGN.md): the design and rationale for the two gates (single session switching `--permission-mode plan` → `auto` at approval).
+
+## The 🍋 workflow
+
+- `🍋` (set by you): the trigger — Lemon picks it up on the next poll, cuts a worktree, and launches `claude` in plan mode.
+- `🍋 In Progress` (set by Lemon): worktree active, Claude running.
+- `🍋 Waiting` (set by Claude/Gemma): paused at a gate, a question, or a quota wall — needs a human.
+- `🍋 Complete` (set by Claude): PR open; Lemon posts its report and cleans up the worktree.
+- On GitHub, a run requires both that the issue is assigned to you **and** that the 🍋 label was applied by you (belt-and-suspenders trigger) — untrusted issue/comment text is treated as data, never instructions.
+
+## Docs
+
+- [README.md](https://github.com/frkline/lemon/blob/main/README.md): install, the 🍋 workflow, trust & lockdown, local AI, recursive mode, the stack.
+- [DOGFOOD.md](https://github.com/frkline/lemon/blob/main/DOGFOOD.md): the operator workloop — how a human or agent runs Lemon on its own issues (pre-flight, trigger, monitor via MCP + tmux, the two gates, failure modes, salvage).
+- [LEMON.md](https://github.com/frkline/lemon/blob/main/LEMON.md): the team instructions Lemon injects into the worktrees it spawns.
+- [WORKFLOW_DESIGN.md](https://github.com/frkline/lemon/blob/main/WORKFLOW_DESIGN.md): the plan/result gate design.
+- [CLAUDE.md](https://github.com/frkline/lemon/blob/main/CLAUDE.md): full architecture and conventions for developing Lemon itself.
+
+## Install
+
+- Runtime prereqs: `brew install hf tmux gh claude-code`.
+- App: grab the signed `.app` from [GitHub Releases](https://github.com/frkline/lemon/releases), drag to `/Applications`, and let the onboarding wizard connect Linear/GitHub and pull the model.
+- Supervisor model: a 4-bit MLX Gemma 4 checkpoint — `gemma-4-e4b-it-4bit` (recommended, ~24 GB+ RAM) or `gemma-4-e2b-it-4bit` (16 GB Macs). Fetched on first launch from `mlx-community`.
+- Target: macOS 26, Apple silicon. No cloud inference — all supervision runs on device.
+
+## Optional
+
+- [Marketing site (lemon.living)](https://lemon.living): the human-facing landing page.
+- [Source on GitHub](https://github.com/frkline/lemon): the full repository.

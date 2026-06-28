@@ -18,7 +18,7 @@
 
 ### → [**lemon.living**](https://lemon.living) ←
 
-[Install](#install) · [Workflow](#workflow) · [Trust &amp; lockdown](#trust--lockdown) · [Local AI](#local-ai) · [Recursive mode](#recursive-mode) · [Stack](#stack--gratitude) · [Releases](https://github.com/frkline/lemon/releases)
+[Install](#install) · [Workflow](#workflow) · [Trust &amp; lockdown](#trust--lockdown) · [Local AI](#local-ai) · [Recursive mode](#recursive-mode) · [Dogfooding](DOGFOOD.md) · [Stack](#stack--gratitude) · [Releases](https://github.com/frkline/lemon/releases)
 
 </div>
 
@@ -104,6 +104,8 @@ Configure up to ten `(source, workspace)` pairs and mix them in one queue:
 - **GitHub Issues** — a classic or fine-grained PAT with `repo` scope from `github.com/settings/tokens`. Each pair maps `owner/repo` to a local repo or folder.
 
 Both poll on the same cadence — 15 s when a session is active, 45 s when idle. Webhook triggers are tracked in [#4](https://github.com/frkline/lemon/issues/4); when that lands, the trigger source flips but everything downstream stays the same.
+
+Running Lemon on its own issues? [`DOGFOOD.md`](DOGFOOD.md) is the operator workloop — pre-flight, trigger, monitor via MCP + tmux, the two gates, and the known failure modes.
 
 <div align="center">
 <img src="docs/img/real/05-empty.png" alt="Lemon's empty state listing two watched workspaces — a Linear team and a GitHub repo" width="320">
