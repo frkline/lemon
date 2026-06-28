@@ -298,6 +298,44 @@ enum SessionStatus: Equatable {
     }
 }
 
+/// Aggregate menu-bar state derived from all sessions, mapped to the design
+/// handoff's six glyph states (idle/working/waiting/done/error/disabled). The
+/// NSImage assets are the `MenuLemon*` template imagesets; loading lives in the
+/// AppKit layer (LemonApp) since Models stays Foundation-only.
+enum MenuBarGlyph: String, CaseIterable {
+    case idle, working, waiting, done, error, disabled
+
+    var assetName: String {
+        switch self {
+        case .idle: "MenuLemonIdle"
+        case .working: "MenuLemonWorking"
+        case .waiting: "MenuLemonWaiting"
+        case .done: "MenuLemonDone"
+        case .error: "MenuLemonError"
+        case .disabled: "MenuLemonDisabled"
+        }
+    }
+
+    /// Pure aggregate: which glyph for the current sessions. Priority reflects
+    /// what most needs the user's eye — a session awaiting human input (either
+    /// gate, or a mid-build question) wins, then active work, then a reviewing
+    /// session (finished, awaiting cleanup), then the most recent terminal
+    /// outcome. Disabled when nothing is configured. Pure so it's unit-testable
+    /// without AppKit or the Keychain.
+    static func aggregate(activeStatuses: [SessionStatus],
+                          lastRecentStatus: SessionStatus?,
+                          configured: Bool) -> MenuBarGlyph
+    {
+        guard configured else { return .disabled }
+        if activeStatuses.contains(where: { $0.isGate || $0 == .waiting }) { return .waiting }
+        if activeStatuses.contains(where: { $0 == .planning || $0 == .executing }) { return .working }
+        if activeStatuses.contains(.reviewing) { return .done }
+        if lastRecentStatus == .failed { return .error }
+        if lastRecentStatus == .done { return .done }
+        return .idle
+    }
+}
+
 struct LemonMarker: Equatable {
     let branch: String
     let prNumber: String

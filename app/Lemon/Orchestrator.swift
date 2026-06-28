@@ -45,6 +45,18 @@ final class Orchestrator {
         workspaceStatuses[workspaceId]
     }
 
+    /// Aggregate state for the menu-bar status glyph. Priority reflects what most
+    /// needs the user's eye: a session awaiting human input (plan/result gate or
+    /// a mid-build question) wins, then active work, then the most recent
+    /// outcome (error/done), else idle. Disabled when nothing is configured.
+    var menuBarGlyph: MenuBarGlyph {
+        MenuBarGlyph.aggregate(
+            activeStatuses: sessions.active.map(\.status),
+            lastRecentStatus: sessions.recent.first?.status,
+            configured: KeychainStore.shared.isConfigured,
+        )
+    }
+
     /// Back-compat readers for any view still keyed on the old pair shape.
     var pairStatuses: [UUID: WorkspaceStatus] {
         workspaceStatuses

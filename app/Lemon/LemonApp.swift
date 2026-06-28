@@ -106,9 +106,9 @@ struct LemonApp: App {
                 LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
             }
         } label: {
-            Image(nsImage: orchestrator.sessions.active.isEmpty ? LemonGlyph.idle : LemonGlyph.active)
+            Image(nsImage: LemonGlyph.menuBar(for: orchestrator.menuBarGlyph))
                 .renderingMode(.template)
-                .accessibilityLabel("Lemon")
+                .accessibilityLabel("Lemon — \(orchestrator.menuBarGlyph.rawValue)")
         }
         .menuBarExtraStyle(.window)
     }
@@ -160,6 +160,18 @@ private enum LemonGlyph {
     static let active: NSImage = render(filled: true)
     /// Outlined lemon — shown while idle.
     static let idle: NSImage = render(filled: false)
+
+    /// The status glyph template image for the aggregate menu-bar state. Uses the
+    /// design-handoff `MenuLemon*` template imagesets (idle/working/waiting/done/
+    /// error/disabled, with badges); falls back to the programmatic lemon if an
+    /// asset is somehow missing so the menu bar never goes blank.
+    static func menuBar(for glyph: MenuBarGlyph) -> NSImage {
+        if let img = NSImage(named: glyph.assetName) {
+            img.isTemplate = true
+            return img
+        }
+        return (glyph == .idle || glyph == .disabled) ? idle : active
+    }
 
     /// Point size of the rendered image. The drawing handler is resolution
     /// independent (AppKit re-invokes it per backing scale), so this is just the
