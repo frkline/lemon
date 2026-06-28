@@ -161,9 +161,7 @@ struct PopoverView: View {
 
                 // Compact status indicator — quiet count badge when healthy.
                 if orchestrator.isPolling {
-                    ProgressView()
-                        .scaleEffect(0.5)
-                        .frame(width: 12, height: 12)
+                    LemonSpinner()
                 } else if let err = orchestrator.lastPollError {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 12))

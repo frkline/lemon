@@ -24,6 +24,13 @@
             // 1 — list (active + recent)
             await shot("01-list")
 
+            // 1b — header polling indicator (forced on; mock mode doesn't poll).
+            jump { orchestrator.isPolling = true }
+            try? await Task.sleep(for: .milliseconds(200))
+            await shot("01b-polling")
+            jump { orchestrator.isPolling = false }
+            try? await Task.sleep(for: .milliseconds(80))
+
             // 2 — first active session (executing, with AI summary)
             if let s = orchestrator.sessions.active.first(where: { $0.pendingAction == nil }) {
                 jump { nav.showDetail(s) }
