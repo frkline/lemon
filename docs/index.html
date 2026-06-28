@@ -322,38 +322,43 @@ em{font-style:italic;color:var(--ink)}
 .pchip.pr{background:rgba(69,194,122,.15);color:#66C78F;box-shadow:inset 0 0 0 .5px rgba(69,194,122,.32)}
 .phome{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:120px;height:5px;
   border-radius:3px;background:rgba(0,0,0,.32);z-index:5}
-/* ---- Claude iOS app (light) ---- */
+/* ---- Claude iOS app (dark — matches the real Claude Code app) ---- */
+/* The remote-control phone shows Claude's actual (dark) mobile UI, so its
+   screen + status bar go dark here (scoped to .remote so the Lemon-UI phone
+   elsewhere keeps its own treatment). */
+.remote .pscreen{background:#191512}
+.remote .pstat{color:#ECE6D8}
 .capp{position:absolute;inset:0}
 .cbar{position:absolute;top:46px;left:0;right:0;display:flex;align-items:center;gap:9px;padding:0 13px;z-index:3}
-.cbtn{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.94);flex:none;
-  box-shadow:0 2px 9px rgba(40,30,10,.12),inset 0 0 0 .5px rgba(0,0,0,.05);
-  display:flex;align-items:center;justify-content:center;color:#3a352e;font-size:19px}
+.cbtn{width:40px;height:40px;border-radius:50%;background:rgba(236,230,216,.08);flex:none;
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.14);
+  display:flex;align-items:center;justify-content:center;color:#ECE6D8;font-size:19px}
 .cmore{font-size:17px;letter-spacing:1px}
 .ctitle{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
-  background:rgba(255,255,255,.94);border-radius:18px;padding:6px 10px;
-  box-shadow:0 2px 9px rgba(40,30,10,.12),inset 0 0 0 .5px rgba(0,0,0,.05)}
-.ctitle .t{font-size:12.5px;font-weight:600;color:#1d1b17;max-width:150px;overflow:hidden;
+  background:rgba(236,230,216,.08);border-radius:18px;padding:6px 10px;
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.14)}
+.ctitle .t{font-size:12.5px;font-weight:600;color:#F1ECE0;max-width:150px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.ctitle .s{font-size:10.5px;color:#9a948a;margin-top:1px}
+.ctitle .s{font-size:10.5px;color:rgba(236,230,216,.5);margin-top:1px}
 .cbody{position:absolute;top:108px;left:0;right:0;bottom:160px;overflow:hidden;
-  padding:4px 20px;color:#26231e;font-size:13.5px;line-height:1.5}
+  padding:4px 20px;color:#DCD6CA;font-size:13.5px;line-height:1.5}
 .cbody p{margin-bottom:12px}
 .cbody .m{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:.85em;
-  background:rgba(40,30,10,.06);padding:1px 5px;border-radius:5px;color:#3a352e}
+  background:rgba(236,230,216,.09);padding:1px 5px;border-radius:5px;color:#ECE6D8}
 .cdock{position:absolute;left:0;right:0;bottom:0;padding:0 13px 18px}
 .cchips{display:flex;gap:9px;margin-bottom:10px;padding-left:3px}
 .cchip{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 15px;border-radius:12px;
-  background:rgba(255,255,255,.95);font-size:13px;font-weight:600;color:#26231e;
-  box-shadow:0 2px 9px rgba(40,30,10,.12),inset 0 0 0 .5px rgba(0,0,0,.05)}
-.cchip .plus{color:#2E9E5B;font-weight:700}
-.ccomposer{background:rgba(255,255,255,.97);border-radius:24px;padding:15px 16px 12px;
-  box-shadow:0 8px 22px rgba(40,30,10,.13),inset 0 0 0 .5px rgba(0,0,0,.05)}
-.ccomposer .ph{font-size:14.5px;color:#a39d92}
+  background:rgba(236,230,216,.08);font-size:13px;font-weight:600;color:#ECE6D8;
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.14)}
+.cchip .plus{color:#45C27A;font-weight:700}
+.ccomposer{background:rgba(236,230,216,.07);border-radius:24px;padding:15px 16px 12px;
+  box-shadow:inset 0 0 0 .5px rgba(236,230,216,.13)}
+.ccomposer .ph{font-size:14.5px;color:rgba(236,230,216,.42)}
 .crow{display:flex;align-items:center;gap:15px;margin-top:13px}
-.crow .ce{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#3a352e;margin-right:auto}
-.crow .cdev{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:11.5px;color:#8d877c}
-.crow .cic{display:flex}.crow .cic svg{width:19px;height:19px;display:block;stroke:#8d877c;fill:none}
-.csend{width:31px;height:31px;border-radius:50%;background:#F3C0AE;color:#fff;flex:none;
+.crow .ce{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#DCD6CA;margin-right:auto}
+.crow .cdev{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:11.5px;color:rgba(236,230,216,.5)}
+.crow .cic{display:flex}.crow .cic svg{width:19px;height:19px;display:block;stroke:rgba(236,230,216,.5);fill:none}
+.csend{width:31px;height:31px;border-radius:50%;background:#C96342;color:#fff;flex:none;
   display:flex;align-items:center;justify-content:center;font-size:16px}
 .remote .vizcol{position:relative}
 .remote .vizcol::after{content:"";position:absolute;inset:-8% -12%;z-index:-1;border-radius:50%;
