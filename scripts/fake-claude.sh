@@ -25,8 +25,11 @@ slug="$(basename "$(pwd)" | sed 's/^lemon-//')"
 num="$(grep -oE 'sandbox/demo#[0-9]+' LEMON_CONTEXT.md 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)"
 echo "[fake-claude] launched (mode=$MODE) worktree=$(pwd) issue=#${num:-unknown}"
 
+PLAN_MODE=0
+
 # --- Plan gate ---------------------------------------------------------------
 if [[ "$ARGS" == *"--permission-mode plan"* ]]; then
+  PLAN_MODE=1
   echo "[fake-claude] plan mode — drafting plan for sandbox/demo#$num"
   sleep 2
   cat > "/tmp/lemon-plan-$slug.md" <<PLAN
@@ -64,6 +67,17 @@ PY
 case "$MODE" in
   complete)
     sleep 4
+    # Result gate: a plan-gated session signals "ready for review" instead of
+    # opening the PR directly, and waits for the human's go.
+    if [ "$PLAN_MODE" = 1 ]; then
+      echo "[fake-claude] build done — signalling ready for review"
+      cat > "/tmp/lemon-result-$slug.md" <<RESULT
+Built sandbox/demo#$num — 2 files changed, tests green. Awaiting approval to open the PR.
+RESULT
+      echo "[fake-claude] parked at result gate (awaiting approval to open PR)"
+      read -r approve2 || true
+      echo "[fake-claude] result approved ('$approve2') — opening PR"
+    fi
     set_complete
     sleep 30  # stay alive so Lemon's 10s label poll observes Complete
     ;;

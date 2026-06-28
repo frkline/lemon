@@ -103,17 +103,27 @@ assert "reached Plan Review gate"                "$reached_plan_review" "status=
 
 # 5. APPROVE the plan via the MCP gate tool (what the popover button calls).
 echo "[phase] approving plan via approve_gate…"
-approve_out="$(approve_gate)"
-echo "[phase] approve_gate → $(echo "$approve_out" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("result",{}).get("content",[{}])[0].get("text","?"))' 2>/dev/null | head -c 200)"
+plan_approve_out="$(approve_gate)"
 
-# 6. BUILD — wait for Complete + report + Reviewing.
-echo "[phase] waiting for build + completion…"
+# 6. RESULT GATE — build runs, then parks at Result Review; approve to open PR.
+echo "[phase] waiting for result gate…"
+reached_result_review="$(wait_for_status 'Result Review' 60)"
+
+echo "── result gate assertions ──────────────────────────────────────"
+assert "plan approved → resolved"                "$([ "$(echo "$plan_approve_out" | grep -c resolved)" -ge 1 ] && echo 1 || echo 0)"
+assert "reached Result Review gate"              "$reached_result_review" "status=$(mcp_status)"
+
+echo "[phase] approving result via approve_gate…"
+result_approve_out="$(approve_gate)"
+
+# 7. BUILD COMPLETION — PR opens, report posted, Reviewing.
+echo "[phase] waiting for completion…"
 reached_reviewing="$(wait_for_status 'Reviewing' 60)"
 sleep 2
 report_posted="$(has_report)"
 
-echo "── build assertions ────────────────────────────────────────────"
-assert "plan approved → resolved"                "$([ "$(echo "$approve_out" | grep -c resolved)" -ge 1 ] && echo 1 || echo 0)"
+echo "── completion assertions ───────────────────────────────────────"
+assert "result approved → resolved"              "$([ "$(echo "$result_approve_out" | grep -c resolved)" -ge 1 ] && echo 1 || echo 0)"
 assert "Lemon Report comment posted"             "$report_posted"
 assert "reached Reviewing (post-build)"          "$reached_reviewing" "status=$(mcp_status)"
 

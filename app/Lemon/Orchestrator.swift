@@ -510,6 +510,11 @@ final class Orchestrator {
         runner.onPlanReady = { [weak session] plan in
             DispatchQueue.main.async { session?.planMarkdown = plan }
         }
+        runner.onResultReady = { [weak session] summary in
+            DispatchQueue.main.async {
+                session?.aiSummary = summary.split(separator: "\n").first.map(String.init) ?? "Ready for review"
+            }
+        }
         runner.onAiSummary = { [weak session] summary in
             DispatchQueue.main.async { session?.aiSummary = summary }
         }
@@ -584,9 +589,11 @@ final class Orchestrator {
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
         case (.resultReview, .approve):
             sendTmuxLine(to: sessionName, text: "Approved — open the PR now.")
-            session.status = .reviewing
+            try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+            session.status = .executing
         case (.resultReview, .requestChanges):
             sendTmuxLine(to: sessionName, text: "Please revise before opening the PR.")
+            try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.status = .executing
         default:
             break

@@ -15,6 +15,9 @@ final class WorktreeRunner: @unchecked Sendable {
     /// Fired when the plan-mode session writes its plan (via the ExitPlanMode
     /// hook → plan sentinel). Carries the plan markdown for the .planReview card.
     var onPlanReady: ((String) -> Void)?
+    /// Fired when the build signals "ready for review" (result sentinel) instead
+    /// of opening the PR directly. Carries the result summary for the gate card.
+    var onResultReady: ((String) -> Void)?
     var onAiSummary: ((String) -> Void)?
     var onPendingAction: ((String?) -> Void)?
     /// Fired from handleComplete once the Lemon Report is posted and
@@ -493,9 +496,14 @@ final class WorktreeRunner: @unchecked Sendable {
     /// signal that the session has reached the plan gate.
     func planReadyPath(slug: String) -> String { "/tmp/lemon-plan-\(slug).md" }
 
-    /// Written by Orchestrator.resolveGate when the human approves/rejects the
-    /// plan ("approve" or "changes"). The plan-gate park loop watches for it.
+    /// Written by Orchestrator.resolveGate when the human approves/rejects a
+    /// gate ("approve" or "changes"). Both gate park-loops watch for it.
     func gateSentinelPath(slug: String) -> String { "/tmp/lemon-gate-\(slug)" }
+
+    /// Optional result gate: if the build writes this (instead of opening the PR
+    /// directly), Lemon parks at .resultReview until the human approves. Absent
+    /// → the existing 🍋 Complete → handleComplete path runs unchanged.
+    func resultReadyPath(slug: String) -> String { "/tmp/lemon-result-\(slug).md" }
 
     // MARK: - Plan-gate hooks (real claude side)
 
@@ -899,10 +907,45 @@ final class WorktreeRunner: @unchecked Sendable {
         var lastLineCount = 0
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
+        var resultGateActive = false
 
         while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
             guard !stopped else { break }
+
+            // Result gate (opt-in): if the build wrote the result sentinel
+            // instead of opening the PR, park at .resultReview until the human
+            // approves, then let the same session open the PR. Absent → the
+            // 🍋 Complete path below runs unchanged.
+            let resultPath = resultReadyPath(slug: slug)
+            if let summary = try? String(contentsOfFile: resultPath, encoding: .utf8),
+               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                if !resultGateActive {
+                    resultGateActive = true
+                    log("[lemon] build ready for review — awaiting approval to open PR")
+                    onResultReady?(summary)
+                    onStatusChange?(.resultReview)
+                    try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                }
+                let gatePath = gateSentinelPath(slug: slug)
+                if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
+                    let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    try? FileManager.default.removeItem(atPath: gatePath)
+                    try? FileManager.default.removeItem(atPath: resultPath)
+                    resultGateActive = false
+                    if decision == "approve" {
+                        log("[lemon] result approved for \(ref.identifier) — opening PR")
+                        onStatusChange?(.executing)
+                        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                        try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                    } else {
+                        log("[lemon] result changes requested for \(ref.identifier)")
+                        onStatusChange?(.executing)
+                    }
+                }
+                continue // parked at the result gate; skip Complete/silence checks
+            }
 
             // Poll PR URL from gh CLI (first match across all repos).
             if let prUrl = await detectPR(branch: branch, repos: repos) {
