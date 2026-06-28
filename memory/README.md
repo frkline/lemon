@@ -56,3 +56,7 @@ a valid "this is worth writing" marker, not an error.
 - [sandbox-iteration-loop](sandbox-iteration-loop.md) — *decision* — how to build a
   free/side-effect-free loop to tune the workflow: MockIssueClient, fake-claude, Gemma
   golden corpus, scenario runner. Build before plan-gate Phase 1.
+- [next-session-playbook](next-session-playbook.md) — *project* — how to refine/bug-fix
+  the workflow on a real issue: validation ladder (sandbox → real claude → real issue),
+  what to look for (#31 labeler-trust, request-changes, silence stall), what's
+  deliberately not done, and the issues this branch closes.
