@@ -821,6 +821,16 @@ final class WorktreeRunner: @unchecked Sendable {
         // Pipe all pane output to the log file for Gemma to read.
         runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
 
+        // Sandbox runs are headless: the detached tmux session + pipe-pane log is
+        // all the scenario/MCP driver needs, so DON'T pop a Terminal window per
+        // session (dozens of scenario runs would otherwise pile up windows — and a
+        // killed tmux server strands them on "[server exited]"). Join a real
+        // session via the popover's Join button instead.
+        if KeychainStore.isSandbox {
+            log("[lemon] sandbox: headless tmux (no terminal window opened)")
+            return true
+        }
+
         // Open a visible terminal so the user can watch and join. Prefer iTerm2
         // (native tmux control mode via tmux -CC) and fall back to Terminal.app,
         // which is present on every macOS install. The tmux session is detached
