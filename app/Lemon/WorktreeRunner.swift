@@ -12,6 +12,12 @@ final class WorktreeRunner: @unchecked Sendable {
     var onStatusChange: ((SessionStatus) -> Void)?
     var onLogLine: ((String) -> Void)?
     var onPRUrl: ((String) -> Void)?
+    /// Fired when the plan-mode session writes its plan (via the ExitPlanMode
+    /// hook → plan sentinel). Carries the plan markdown for the .planReview card.
+    var onPlanReady: ((String) -> Void)?
+    /// Fired when the build signals "ready for review" (result sentinel) instead
+    /// of opening the PR directly. Carries the result summary for the gate card.
+    var onResultReady: ((String) -> Void)?
     var onAiSummary: ((String) -> Void)?
     var onPendingAction: ((String?) -> Void)?
     /// Fired from handleComplete once the Lemon Report is posted and
@@ -29,7 +35,8 @@ final class WorktreeRunner: @unchecked Sendable {
     // MARK: - Entry point
 
     func run(ref: IssueRef, pair: WorkspacePair, client: any IssueSourceClient,
-             auth: SourceAuth, retrigger: LemonMarker? = nil) async
+             auth: SourceAuth, retrigger: LemonMarker? = nil,
+             lockdown: Bool = false, trustedAuthor: String? = nil) async
     {
         let workspace = pair.workspace
         let identifier = ref.identifier
@@ -89,14 +96,23 @@ final class WorktreeRunner: @unchecked Sendable {
         // marker — those are the human's revision requests. Without this
         // context, Claude reads only the original issue body and concludes
         // the task is already done.
-        var revisionComments: [String] = []
+        // Author-aware so the trust boundary (#13) can frame/exclude untrusted
+        // content. In lockdown, comments not authored by the user are dropped
+        // entirely; otherwise they're kept but flagged untrusted for delimiting.
+        var revisionComments: [RevisionComment] = []
         if let marker = retrigger {
             do {
-                revisionComments = try await client.fetchCommentsAfter(
-                    ref: ref,
-                    afterCommentId: marker.commentId,
-                    auth: auth,
-                )
+                let all = try await client.fetchComments(ref: ref, auth: auth)
+                if let idx = all.firstIndex(where: { $0.id == marker.commentId }) {
+                    for c in all[all.index(after: idx)...] {
+                        let trusted = isTrusted(c.author, trustedAuthor: trustedAuthor)
+                        if lockdown, !trusted {
+                            log("[lemon] lockdown: dropping untrusted comment by \(c.author ?? "?")")
+                            continue
+                        }
+                        revisionComments.append(RevisionComment(body: c.body, author: c.author, trusted: trusted))
+                    }
+                }
                 if !revisionComments.isEmpty {
                     log("[lemon] re-trigger with \(revisionComments.count) revision comment(s)")
                 }
@@ -112,6 +128,8 @@ final class WorktreeRunner: @unchecked Sendable {
             lemonMdPath: lemonMdPath,
             devPort: devPort,
             revisionComments: revisionComments,
+            trustedAuthor: trustedAuthor,
+            lockdown: lockdown,
         )
 
         // Update source state labels.
@@ -133,8 +151,21 @@ final class WorktreeRunner: @unchecked Sendable {
                                              isMultiRepo: workspace.allReposInFolder,
                                              slug: slug)
 
+        // Fresh sessions go through the plan gate (plan mode → human approval →
+        // auto). Retriggers are revisions to already-approved work, so they skip
+        // the gate. Autopilot opt-out: a `🍋 auto` label on the issue skips the
+        // gate for trivial work the user trusts to run unattended.
+        let autopilot = TrustPolicy.isAutopilot(labels: ref.labelNames)
+        if autopilot { log("[lemon] autopilot (🍋 auto) — skipping the plan gate") }
+        let planMode = retrigger == nil && !autopilot
+        try? FileManager.default.removeItem(atPath: planReadyPath(slug: slug))
+        try? FileManager.default.removeItem(atPath: gateSentinelPath(slug: slug))
+        pretrustWorktree(path: launchPath) // skip claude's folder-trust prompt
+        if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
+
         guard launchTmux(sessionPath: launchPath, slug: slug,
-                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath)
+                         sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
+                         planMode: planMode)
         else {
             log("[lemon] tmux launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
@@ -147,8 +178,17 @@ final class WorktreeRunner: @unchecked Sendable {
             onStatusChange?(.failed)
             return
         }
-        onStatusChange?(.executing)
         log("[lemon] tmux session started — join: tmux attach -t \(tmuxSessionName(slug: slug))")
+
+        // Plan gate: surface the plan, wait for human approval, then continue
+        // into the build in the SAME session. Returns false if abandoned/failed.
+        if planMode {
+            let proceed = await planGatePhase(ref: ref, client: client, auth: auth,
+                                              slug: slug, sentinelPath: sentinelPath)
+            guard proceed else { return }
+        }
+
+        onStatusChange?(.executing)
 
         await pollUntilDone(
             ref: ref,
@@ -342,13 +382,30 @@ final class WorktreeRunner: @unchecked Sendable {
         return 3000 + (n % 1000) // stays in 3000–3999, wraps for very large issue numbers
     }
 
+    /// A revision-request comment plus whether its author is the trusted user.
+    struct RevisionComment {
+        let body: String
+        let author: String?
+        let trusted: Bool
+    }
+
+    private func isTrusted(_ author: String?, trustedAuthor: String?) -> Bool {
+        TrustPolicy.isTrusted(author: author, trustedAuthor: trustedAuthor)
+    }
+
+    private func untrustedBlock(_ body: String, author: String?, role: String, source: IssueSource) -> String {
+        TrustPolicy.untrustedBlock(body, author: author, role: role, source: source)
+    }
+
     private func writeContext(
         to sessionPath: String,
         ref: IssueRef,
         repos: [(name: String, repoPath: String)],
         lemonMdPath: String?,
         devPort: Int,
-        revisionComments: [String] = [],
+        revisionComments: [RevisionComment] = [],
+        trustedAuthor: String? = nil,
+        lockdown _: Bool = false,
     ) {
         var content = ""
 
@@ -362,11 +419,18 @@ final class WorktreeRunner: @unchecked Sendable {
             log("[lemon] loaded team instructions from \(path)")
         }
 
-        // Issue details.
+        // Issue details. The body is trusted only if the user opened the issue;
+        // otherwise it's attacker-influenceable (#13 A3) and gets the untrusted
+        // delimiter + framing so Claude treats it as data, not instructions.
+        let bodyTrusted = isTrusted(ref.authorLogin, trustedAuthor: trustedAuthor)
         content += "# \(ref.source.displayName) Issue: \(ref.identifier) — \(ref.title)\n\n"
         if let desc = ref.description, !desc.isEmpty {
-            content += desc.trimmingCharacters(in: .whitespacesAndNewlines)
-            content += "\n\n"
+            let trimmed = desc.trimmingCharacters(in: .whitespacesAndNewlines)
+            if bodyTrusted {
+                content += trimmed + "\n\n"
+            } else {
+                content += untrustedBlock(trimmed, author: ref.authorLogin, role: "issue reporter", source: ref.source)
+            }
         }
 
         // Re-trigger context — comments posted after the last Lemon Report.
@@ -382,11 +446,14 @@ final class WorktreeRunner: @unchecked Sendable {
             content += "they layer on top of (and supersede where applicable) the original "
             content += "issue description above.\n\n"
             for (i, comment) in revisionComments.enumerated() {
-                let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmed = comment.body.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty { continue }
                 content += "### Revision \(i + 1)\n\n"
-                content += trimmed
-                content += "\n\n"
+                if comment.trusted {
+                    content += trimmed + "\n\n"
+                } else {
+                    content += untrustedBlock(trimmed, author: comment.author, role: "commenter", source: ref.source)
+                }
             }
         }
 
@@ -465,6 +532,179 @@ final class WorktreeRunner: @unchecked Sendable {
         "/tmp/lemon-log-\(slug).txt"
     }
 
+    // MARK: - Plan-gate paths (the contract between the claude side and Lemon)
+
+    /// Written by the ExitPlanMode hook (real claude) or fake-claude (sandbox)
+    /// when a plan is ready. Contains the plan markdown; its presence is the
+    /// signal that the session has reached the plan gate.
+    func planReadyPath(slug: String) -> String {
+        "/tmp/lemon-plan-\(slug).md"
+    }
+
+    /// Written by Orchestrator.resolveGate when the human approves/rejects a
+    /// gate ("approve" or "changes"). Both gate park-loops watch for it.
+    func gateSentinelPath(slug: String) -> String {
+        "/tmp/lemon-gate-\(slug)"
+    }
+
+    /// Optional result gate: if the build writes this (instead of opening the PR
+    /// directly), Lemon parks at .resultReview until the human approves. Absent
+    /// → the existing 🍋 Complete → handleComplete path runs unchanged.
+    func resultReadyPath(slug: String) -> String {
+        "/tmp/lemon-result-\(slug).md"
+    }
+
+    /// Pre-trust the worktree in `~/.claude.json` so real `claude` skips the
+    /// "Is this a project you trust?" prompt on launch — otherwise the session
+    /// stalls at that prompt until the 2-min silence timer lets Gemma answer it
+    /// (a real snag found running real claude against a fresh worktree). Lemon
+    /// created the worktree, so trusting it is legitimate. Written BEFORE launch
+    /// so there's no concurrent write with the running session. No-op if the
+    /// config is absent/unreadable (e.g. fake-claude sandbox runs).
+    private func pretrustWorktree(path: String) {
+        let configPath = NSHomeDirectory() + "/.claude.json"
+        guard let data = FileManager.default.contents(atPath: configPath),
+              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return }
+        var projects = root["projects"] as? [String: Any] ?? [:]
+        var entry = projects[path] as? [String: Any] ?? [:]
+        entry["hasTrustDialogAccepted"] = true
+        entry["hasCompletedProjectOnboarding"] = true
+        projects[path] = entry
+        root["projects"] = projects
+        guard let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? out.write(to: URL(fileURLWithPath: configPath))
+        log("[lemon] pre-trusted worktree for claude: \(path)")
+    }
+
+    // MARK: - Plan-gate hooks (real claude side)
+
+    /// Writes a project-local `.claude/settings.json` into the worktree so REAL
+    /// claude copies its plan to the plan sentinel the moment it calls
+    /// ExitPlanMode (the picker stays up for a human to approve). In the sandbox,
+    /// fake-claude writes the sentinel directly, so this is a no-op for that path
+    /// but harmless to install. See WORKFLOW_DESIGN.md / claude-code-plan-mode.
+    private func writePlanHooks(launchPath: String, slug: String) {
+        let planPath = planReadyPath(slug: slug)
+        // The hook receives the ExitPlanMode tool_input on stdin; copy the plan
+        // file it points at (or the inline plan) to the sentinel.
+        let cmd = "python3 -c \"import json,sys,os; d=json.load(sys.stdin); ti=d.get('tool_input',{}); p=ti.get('planFilePath'); plan=open(p).read() if p and os.path.exists(p) else ti.get('plan',''); open('\(planPath)','w').write(plan)\""
+        let settings: [String: Any] = [
+            "hooks": [
+                "PreToolUse": [[
+                    "matcher": "ExitPlanMode",
+                    "hooks": [["type": "command", "command": cmd]],
+                ]],
+            ],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted]) else { return }
+        let dir = "\(launchPath)/.claude"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings.json"))
+    }
+
+    // MARK: - Plan gate (the human approval before any code is written)
+
+    /// Wait for the plan, surface it for approval, park until the human resolves
+    /// the gate, then continue (approve → build) or abort. Returns true to
+    /// proceed into pollUntilDone. Sentinels decouple this from who runs claude:
+    /// the ExitPlanMode hook / fake-claude writes the plan sentinel; resolveGate
+    /// writes the gate sentinel.
+    private func planGatePhase(ref: IssueRef, client: any IssueSourceClient,
+                               auth: SourceAuth, slug: String, sentinelPath: String) async -> Bool
+    {
+        let planPath = planReadyPath(slug: slug)
+        let gatePath = gateSentinelPath(slug: slug)
+        try? FileManager.default.removeItem(atPath: planPath)
+        try? FileManager.default.removeItem(atPath: gatePath)
+
+        func sessionEnded() -> Bool {
+            FileManager.default.fileExists(atPath: sentinelPath)
+                || !runSync("tmux has-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null")
+        }
+
+        // 1. Wait for the plan to be ready (or early exit / timeout).
+        let planDeadline = Date().addingTimeInterval(2 * 3600)
+        var plan: String?
+        while !stopped, Date() < planDeadline {
+            try? await Task.sleep(for: .seconds(3))
+            if stopped { return false }
+            if let p = try? String(contentsOfFile: planPath, encoding: .utf8),
+               !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                plan = p
+                break
+            }
+            // Triage reject: Claude judged the issue malformed/blocked, posted a
+            // clarifying comment, and set 🍋 Waiting instead of planning. Treat as
+            // awaiting-human, not a plan gate or a failure.
+            if let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth),
+               labels.contains(LemonState.waiting.labelName)
+            {
+                log("[lemon] triage: issue needs clarification (🍋 Waiting) — pausing for human")
+                onStatusChange?(.waiting)
+                return false
+            }
+            if sessionEnded() {
+                log("[lemon] session ended during planning", level: .error)
+                onStatusChange?(.failed)
+                return false
+            }
+        }
+        guard let plan else {
+            log("[lemon] timed out waiting for a plan", level: .error)
+            onStatusChange?(.failed)
+            return false
+        }
+
+        // Surface the plan for approval: card + posted comment + 🍋 Waiting.
+        log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
+        onPlanReady?(plan)
+        onStatusChange?(.planReview)
+        try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+        try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+        _ = try? await client.postComment(
+            ref: ref,
+            body: "## 🍋 Lemon Plan — \(ref.identifier)\n\n\(plan)\n\n---\nReply **approve** to build, or leave feedback to revise.",
+            auth: auth,
+        )
+
+        // 2. Park until the gate is resolved.
+        let gateDeadline = Date().addingTimeInterval(24 * 3600)
+        while !stopped, Date() < gateDeadline {
+            try? await Task.sleep(for: .seconds(2))
+            if stopped { return false }
+            if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
+                let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                try? FileManager.default.removeItem(atPath: gatePath)
+                try? FileManager.default.removeItem(atPath: planPath)
+                if decision == "approve" {
+                    log("[lemon] plan approved for \(ref.identifier) — building")
+                    try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                    try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                    return true
+                }
+                // Changes requested: claude got "4" + re-plans; wait for a new plan.
+                // Reset the label to In Progress so the re-plan's triage check
+                // doesn't mistake the gate's 🍋 Waiting for a triage reject.
+                log("[lemon] changes requested for \(ref.identifier) — re-planning")
+                try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                onStatusChange?(.planning)
+                return await planGatePhase(ref: ref, client: client, auth: auth,
+                                           slug: slug, sentinelPath: sentinelPath)
+            }
+            if sessionEnded() {
+                log("[lemon] session ended while awaiting plan approval", level: .error)
+                onStatusChange?(.failed)
+                return false
+            }
+        }
+        onStatusChange?(.failed)
+        return false
+    }
+
     // MARK: - MCP config preparation
 
     /// Merges .mcp.json files from all worktree repos into a single config file.
@@ -512,7 +752,8 @@ final class WorktreeRunner: @unchecked Sendable {
     /// can detect early exits without waiting for the 8h deadline.
     @discardableResult
     private func launchTmux(sessionPath: String, slug: String,
-                            sentinelPath: String, mcpConfigPath: String? = nil) -> Bool
+                            sentinelPath: String, mcpConfigPath: String? = nil,
+                            planMode: Bool = false) -> Bool
     {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
@@ -536,7 +777,15 @@ final class WorktreeRunner: @unchecked Sendable {
         // at an empty REPL with the prompt mis-bound. Live-test caught this
         // on HRP-37 — Gemma classified the resulting silence as state=stuck.
         // Single-quoted in bash, so no apostrophes in the prompt body.
-        let kickoffPrompt = "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
+        // Plan-gate flow: launch in plan mode so Claude proposes a plan and
+        // parks at the ExitPlanMode approval picker. Lemon surfaces the plan for
+        // human approval, then send-keys "1" ("Yes, and use auto mode") to let
+        // the SAME session continue into the build. Retriggers (revisions) skip
+        // the gate and go straight to auto.
+        let permissionMode = planMode ? "plan" : "auto"
+        let kickoffPrompt = planMode
+            ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise produce a concise implementation plan and present it for approval via ExitPlanMode (do not edit files yet). Once approved you continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
+            : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
         // Source common shell profiles so PATH includes Homebrew, npm-global,
         // pyenv shims, etc. Same root cause as the runSync(zsh -l -c) fix:
@@ -549,7 +798,7 @@ final class WorktreeRunner: @unchecked Sendable {
         [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && claude \(mcpFlag) --permission-mode auto --remote-control -- '\(kickoffPrompt)'
+        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-claude}" \(mcpFlag) --permission-mode \(permissionMode) --remote-control -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
@@ -745,10 +994,45 @@ final class WorktreeRunner: @unchecked Sendable {
         var lastLineCount = 0
         var lastActivityAt = Date()
         var lastGemmaAt: Date? = nil
+        var resultGateActive = false
 
         while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
             guard !stopped else { break }
+
+            // Result gate (opt-in): if the build wrote the result sentinel
+            // instead of opening the PR, park at .resultReview until the human
+            // approves, then let the same session open the PR. Absent → the
+            // 🍋 Complete path below runs unchanged.
+            let resultPath = resultReadyPath(slug: slug)
+            if let summary = try? String(contentsOfFile: resultPath, encoding: .utf8),
+               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                if !resultGateActive {
+                    resultGateActive = true
+                    log("[lemon] build ready for review — awaiting approval to open PR")
+                    onResultReady?(summary)
+                    onStatusChange?(.resultReview)
+                    try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                }
+                let gatePath = gateSentinelPath(slug: slug)
+                if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
+                    let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    try? FileManager.default.removeItem(atPath: gatePath)
+                    try? FileManager.default.removeItem(atPath: resultPath)
+                    resultGateActive = false
+                    if decision == "approve" {
+                        log("[lemon] result approved for \(ref.identifier) — opening PR")
+                        onStatusChange?(.executing)
+                        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                        try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                    } else {
+                        log("[lemon] result changes requested for \(ref.identifier)")
+                        onStatusChange?(.executing)
+                    }
+                }
+                continue // parked at the result gate; skip Complete/silence checks
+            }
 
             // Poll PR URL from gh CLI (first match across all repos).
             if let prUrl = await detectPR(branch: branch, repos: repos) {
@@ -884,6 +1168,14 @@ final class WorktreeRunner: @unchecked Sendable {
                 _ = try await client.postComment(ref: ref, body: replyBody, auth: auth)
             } catch {
                 Logger.worktree.error("Failed to post reply comment for \(ref.identifier): \(error)")
+            }
+            // #9: advance the marker. A fresh Lemon Report (same marker-bearing
+            // shape as initial completion) becomes the new findLatest() anchor,
+            // so this re-trigger's revision comments don't re-fire on every
+            // subsequent poll/launch. Without this the marker stays pinned to the
+            // ORIGINAL report and any reply after it re-triggers forever.
+            if let commentId = try? await client.postComment(ref: ref, body: commentBody, auth: auth) {
+                log("[lemon] posted Lemon comment \(commentId) (re-trigger marker advance)")
             }
         } else {
             if let commentId = try? await client.postComment(ref: ref, body: commentBody, auth: auth) {

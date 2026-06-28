@@ -1,4 +1,5 @@
-.PHONY: build-image open smoke-test help ui build-ui smoke watch test integration-test loop
+.PHONY: build-image open smoke-test help ui build-ui smoke watch test integration-test loop \
+        sandbox sandbox-init sandbox-issue sandbox-show sandbox-reset sandbox-test
 
 UI_BUILD_DIR := /tmp/lemon-build
 UI_APP       := $(UI_BUILD_DIR)/Lemon.app
@@ -21,6 +22,14 @@ help:
 	@echo "                        LocalLLM, WorktreeRunner)"
 	@echo "  make integration-test Shell: tmux lifecycle + mock Gemma server + claude -p"
 	@echo "  make loop             Full validation: build-ui + test + smoke"
+	@echo ""
+	@echo "Workflow sandbox (side-effect-free, no claude tokens):"
+	@echo "  make sandbox-init     Create /tmp/lemon-sandbox fixtures + throwaway git workspace"
+	@echo "  make sandbox-issue    File a 🍋 fixture issue (T=\"title\" B=\"body\")"
+	@echo "  make sandbox          build-ui + relaunch Lemon in sandbox mode (fake-claude)"
+	@echo "  make sandbox-test     build-ui + drive one issue end-to-end with assertions"
+	@echo "  make sandbox-show     Print fixture issues' labels + comments"
+	@echo "  make sandbox-reset    Wipe and re-init the sandbox"
 
 build-ui:
 	@xcodebuild \
@@ -51,6 +60,35 @@ integration-test:
 	@scripts/integration-test.sh
 
 loop: build-ui test smoke
+
+# --- Workflow sandbox -------------------------------------------------------
+# File-backed tracker (MockIssueClient) + throwaway git workspace + fake-claude,
+# so the full plan→build→PR loop runs with no GitHub/Linear traffic and no
+# claude tokens. See CLAUDE.md → "Workflow sandbox".
+FAKE_CLAUDE := $(abspath scripts/fake-claude.sh)
+
+sandbox-init:
+	@scripts/sandbox.sh init
+
+sandbox-issue:
+	@scripts/sandbox.sh issue "$(T)" "$(B)"
+
+sandbox-show:
+	@scripts/sandbox.sh show
+
+sandbox-reset:
+	@scripts/sandbox.sh reset
+
+sandbox: build-ui
+	@pkill -f 'Lemon.app/Contents/MacOS/Lemon' 2>/dev/null; sleep 1 || true
+	@[ -d /tmp/lemon-sandbox/workspace ] || scripts/sandbox.sh init
+	@echo "Launching Lemon in sandbox mode (fake-claude, MCP on 127.0.0.1:8765)…"
+	@LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN="$(FAKE_CLAUDE)" \
+	  $(UI_APP)/Contents/MacOS/Lemon >/tmp/lemon-sandbox/app.log 2>&1 &
+	@echo "Running. File issues with 'make sandbox-issue', watch with 'make sandbox-show'."
+
+sandbox-test: build-ui
+	@scripts/sandbox-scenario.sh
 
 watch:
 	@which fswatch >/dev/null 2>&1 || (echo "Install: brew install fswatch" && exit 1)

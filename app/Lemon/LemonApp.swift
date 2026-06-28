@@ -106,9 +106,7 @@ struct LemonApp: App {
                 LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
             }
         } label: {
-            Image(nsImage: orchestrator.sessions.active.isEmpty ? LemonGlyph.idle : LemonGlyph.active)
-                .renderingMode(.template)
-                .accessibilityLabel("Lemon")
+            MenuBarGlyphView(glyph: orchestrator.menuBarGlyph)
         }
         .menuBarExtraStyle(.window)
     }
@@ -155,11 +153,47 @@ struct LemonApp: App {
 /// The shape is a stylized lemon: a plump oval body with gently pointed tips
 /// (two cubic arcs meeting at corners), tilted so the upper tip lifts to the
 /// left, with a small leaf sprouting from the top.
+/// The menu-bar label. While an agent is **working**, the solid lemon gently
+/// "breathes" (opacity 1 → 0.62 → 1, ~2.4s ease-in-out) per the design handoff —
+/// a calm sign of life. Other states render static. (MenuBarExtra honors the
+/// label's animation where the platform supports it; static otherwise — harmless.)
+struct MenuBarGlyphView: View {
+    let glyph: MenuBarGlyph
+    @State private var dim = false
+
+    var body: some View {
+        Image(nsImage: LemonGlyph.menuBar(for: glyph))
+            .renderingMode(.template)
+            .opacity(glyph == .working && dim ? 0.62 : 1)
+            .animation(
+                glyph == .working
+                    ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
+                    : .default,
+                value: dim,
+            )
+            .onAppear { dim = glyph == .working }
+            .onChange(of: glyph) { _, new in dim = new == .working }
+            .accessibilityLabel("Lemon — \(glyph.rawValue)")
+    }
+}
+
 private enum LemonGlyph {
     /// Filled lemon — shown while sessions are active.
     static let active: NSImage = render(filled: true)
     /// Outlined lemon — shown while idle.
     static let idle: NSImage = render(filled: false)
+
+    /// The status glyph template image for the aggregate menu-bar state. Uses the
+    /// design-handoff `MenuLemon*` template imagesets (idle/working/waiting/done/
+    /// error/disabled, with badges); falls back to the programmatic lemon if an
+    /// asset is somehow missing so the menu bar never goes blank.
+    static func menuBar(for glyph: MenuBarGlyph) -> NSImage {
+        if let img = NSImage(named: glyph.assetName) {
+            img.isTemplate = true
+            return img
+        }
+        return (glyph == .idle || glyph == .disabled) ? idle : active
+    }
 
     /// Point size of the rendered image. The drawing handler is resolution
     /// independent (AppKit re-invokes it per backing scale), so this is just the

@@ -151,8 +151,10 @@ extension SessionStatus {
     var color: Color {
         switch self {
         case .planning: LD.statusPlanning
+        case .planReview: LD.statusWaiting
         case .executing: LD.statusExecuting
         case .waiting: LD.statusWaiting
+        case .resultReview: LD.statusReviewing
         case .reviewing: LD.statusReviewing
         case .done: LD.statusDone
         case .failed: LD.statusFailed
@@ -162,8 +164,10 @@ extension SessionStatus {
     var symbol: String {
         switch self {
         case .planning: "brain"
+        case .planReview: "list.clipboard"
         case .executing: "hammer.fill"
         case .waiting: "pause.circle.fill"
+        case .resultReview: "checklist"
         case .reviewing: "checklist"
         case .done: "checkmark"
         case .failed: "xmark"
@@ -172,6 +176,33 @@ extension SessionStatus {
 }
 
 // MARK: - Reusable components
+
+/// Quiet polling indicator — a comet-trail arc (angular gradient fading to clear)
+/// that spins continuously. Replaces the stock `ProgressView()`, whose tiny
+/// indeterminate spinner reads muddy/low-contrast on the warm-dark glass. Tinted
+/// `textTertiary`, never `lemon` (the one yellow is reserved for the primary
+/// action), so it stays a calm background signal.
+struct LemonSpinner: View {
+    var size: CGFloat = 12
+    @State private var spinning = false
+
+    var body: some View {
+        Circle()
+            .stroke(
+                AngularGradient(
+                    gradient: Gradient(colors: [LD.textTertiary.opacity(0), LD.textTertiary]),
+                    center: .center,
+                ),
+                style: StrokeStyle(lineWidth: 1.6, lineCap: .round),
+            )
+            .frame(width: size - 1, height: size - 1)
+            .rotationEffect(.degrees(spinning ? 360 : 0))
+            .animation(.linear(duration: 0.85).repeatForever(autoreverses: false), value: spinning)
+            .frame(width: size, height: size)
+            .onAppear { spinning = true }
+            .accessibilityLabel("Polling")
+    }
+}
 
 /// The standalone tinted-capsule status badge (detail header / standalone use).
 /// One tinted capsule per state — color-matched label over a 15% fill with a

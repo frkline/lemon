@@ -150,7 +150,7 @@ enum LemonMCPTools {
         // Claude probe what Gemma thinks of the current state on demand.
         server.register(LemonMCPServer.Tool(
             name: "force_classify",
-            description: "Run the Gemma classifier on a session's current pane log immediately, bypassing the silence-detector wait. Returns the GemmaResponse {state, summary, action} plus the input log lines that were sent for the classification.",
+            description: "Run the Gemma classifier on a session's current pane log immediately, bypassing the silence-detector wait. Returns the GemmaResponse {state, summary, action} plus the input log lines. With act=true, ALSO executes a send_keys verdict (sends the keys to the pane) — the on-demand 'analyze + act now' trigger, e.g. to clear a launch-time prompt without waiting for the silence timer.",
             inputSchema: [
                 "type": "object",
                 "properties": [
@@ -159,6 +159,11 @@ enum LemonMCPTools {
                         "type": "integer",
                         "description": "How many tail lines to feed Gemma (default 80, max 400). Mirrors what the silence detector normally sends.",
                         "default": 80,
+                    ],
+                    "act": [
+                        "type": "boolean",
+                        "description": "If true and Gemma returns a send_keys action, send those keys to the pane immediately (default false = observe only).",
+                        "default": false,
                     ],
                 ],
                 "required": ["id"],
@@ -197,11 +202,31 @@ enum LemonMCPTools {
                     if let k = a.keys { actionDict["keys"] = k }
                     if let m = a.message { actionDict["message"] = m }
                 }
+
+                // act=true: execute a send_keys verdict immediately (the on-demand
+                // "analyze + act" trigger — bypasses the silence timer to clear a
+                // launch-time prompt like folder-trust without waiting).
+                var acted = false
+                let shouldAct = (args["act"] as? Bool) ?? false
+                if shouldAct, verdict.action?.type == "send_keys",
+                   let keys = verdict.action?.keys, !keys.isEmpty
+                {
+                    let sessionName = "lemon-\(issue.pathSlug)"
+                    let specialKeys: Set = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
+                    let cmd = if specialKeys.contains(keys) {
+                        "tmux send-keys -t '\(sessionName)' \(keys)"
+                    } else {
+                        "tmux send-keys -t '\(sessionName)' '\(keys.replacingOccurrences(of: "'", with: "'\\''"))' Enter"
+                    }
+                    acted = runShell(cmd) == 0
+                }
+
                 let payload: [String: Any] = [
                     "identifier": issue.identifier,
                     "state": verdict.state,
                     "summary": verdict.summary,
                     "action": actionDict.isEmpty ? NSNull() : actionDict,
+                    "acted": acted,
                     "input_log_lines": tail,
                     "elapsed_ms": elapsedMs,
                 ]
@@ -309,6 +334,50 @@ enum LemonMCPTools {
                 }
                 guard let json else {
                     throw MCPError(code: -32004, message: "no active session matching '\(idArg)'")
+                }
+                return json
+            },
+        ))
+
+        // ── approve_gate ───────────────────────────────────────────────────
+        // Resolve a human gate (plan review / result review) remotely — the
+        // same action the popover's Approve button takes. Lets the scenario
+        // runner (and a remote operator) drive the plan/result gates.
+        server.register(LemonMCPServer.Tool(
+            name: "approve_gate",
+            description: "Resolve a session parked at a human gate (Plan Review or Result Review). decision='approve' sends the live claude approval (plan→auto, or open-PR); decision='request_changes' sends it back for revision. No-ops if the session isn't at a gate.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
+                    "decision": ["type": "string", "enum": ["approve", "request_changes"], "default": "approve", "description": "approve = let it proceed; request_changes = send back for revision"],
+                ],
+                "required": ["id"],
+                "additionalProperties": false,
+            ],
+            handler: { args in
+                guard let idArg = args["id"] as? String, !idArg.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'id' argument")
+                }
+                let decision: Orchestrator.GateDecision =
+                    (args["decision"] as? String) == "request_changes" ? .requestChanges : .approve
+                let json: String? = await MainActor.run { () -> String? in
+                    guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg),
+                          session.status.isGate
+                    else { return nil }
+                    let gate = session.status.displayLabel
+                    orchestrator.resolveGate(session: session, decision: decision)
+                    return LemonMCPServer.encode([
+                        "identifier": session.issue.identifier,
+                        "uuid": session.id.uuidString,
+                        "gate": gate,
+                        "decision": decision.rawValue,
+                        "new_status": session.status.displayLabel,
+                        "resolved": true,
+                    ])
+                }
+                guard let json else {
+                    throw MCPError(code: -32004, message: "no session at a gate matching '\(idArg)'")
                 }
                 return json
             },

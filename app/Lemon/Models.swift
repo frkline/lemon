@@ -7,6 +7,7 @@ struct LinearIssue: Identifiable, Codable, Equatable {
     let description: String?
     let labelNames: [String]
     let teamId: String
+    var creatorName: String? = nil // issue opener (trust boundary #13)
 
     var identifierPrefix: String {
         String(identifier.prefix(while: { $0.isLetter }))
@@ -53,6 +54,9 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
     let description: String?
     let labelNames: [String]
     let scope: IssueScope
+    /// Issue opener (GitHub login / Linear creator). nil = unknown. Used by
+    /// lockdown (#13) to trigger only on the user's own issues.
+    var authorLogin: String? = nil
 
     var source: IssueSource {
         switch scope {
@@ -97,10 +101,11 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
         self.description = i.description
         self.labelNames = i.labelNames
         self.scope = .linearTeam(id: i.teamId)
+        self.authorLogin = i.creatorName
     }
 
     init(id: String, identifier: String, title: String, description: String?,
-         labelNames: [String], scope: IssueScope)
+         labelNames: [String], scope: IssueScope, authorLogin: String? = nil)
     {
         self.id = id
         self.identifier = identifier
@@ -108,6 +113,7 @@ struct IssueRef: Identifiable, Codable, Equatable, Hashable {
         self.description = description
         self.labelNames = labelNames
         self.scope = scope
+        self.authorLogin = authorLogin
     }
 }
 
@@ -117,6 +123,10 @@ struct IssueComment: Identifiable, Equatable {
     let id: String
     let body: String
     let createdAt: Date
+    /// Commenter identity (GitHub login / Linear user name or id). nil = unknown.
+    /// Used by the trust boundary (#13): in lockdown only the user's own comments
+    /// re-trigger, and non-user content is wrapped/excluded in LEMON_CONTEXT.
+    var author: String?
 }
 
 // MARK: - Identity → Surface → Workspace
@@ -214,6 +224,12 @@ struct Workspace: Codable, Identifiable, Hashable {
     var allReposInFolder: Bool = false
     var homeRepo: String = ""
     var routing: Routing
+    /// Lockdown (the #13 trust boundary). When on, Lemon treats this workspace
+    /// as low-trust: only issues the user authored trigger, only the user's own
+    /// comments re-trigger, and any non-user content in LEMON_CONTEXT is excluded
+    /// (vs. delimiter-wrapped when off). Default on is offered for public GitHub
+    /// repos in onboarding. Decodes false for pre-lockdown configs.
+    var lockdown: Bool = false
 }
 
 // MARK: - Legacy WorkspacePair surface (migration source)
@@ -261,8 +277,10 @@ enum LemonState: String, CaseIterable, Equatable {
 
 enum SessionStatus: Equatable {
     case planning // worktree setup
+    case planReview // plan drafted, awaiting human approval (the plan gate)
     case executing // claude session running
     case waiting // claude paused, awaiting human input
+    case resultReview // build done, awaiting human go to open PR (the result gate)
     case reviewing // PR open, Lemon comment posted
     case done // issue moved to completed state
     case failed // worktree/process error
@@ -270,11 +288,21 @@ enum SessionStatus: Equatable {
     var displayLabel: String {
         switch self {
         case .planning: "Planning"
+        case .planReview: "Plan Review"
         case .executing: "Executing"
         case .waiting: "Waiting"
+        case .resultReview: "Result Review"
         case .reviewing: "Reviewing"
         case .done: "Done"
         case .failed: "Failed"
+        }
+    }
+
+    /// The two human gates — Lemon is parked awaiting an approve/feedback signal.
+    var isGate: Bool {
+        switch self {
+        case .planReview, .resultReview: true
+        default: false
         }
     }
 
@@ -283,6 +311,44 @@ enum SessionStatus: Equatable {
         case .done, .failed: true
         default: false
         }
+    }
+}
+
+/// Aggregate menu-bar state derived from all sessions, mapped to the design
+/// handoff's six glyph states (idle/working/waiting/done/error/disabled). The
+/// NSImage assets are the `MenuLemon*` template imagesets; loading lives in the
+/// AppKit layer (LemonApp) since Models stays Foundation-only.
+enum MenuBarGlyph: String, CaseIterable {
+    case idle, working, waiting, done, error, disabled
+
+    var assetName: String {
+        switch self {
+        case .idle: "MenuLemonIdle"
+        case .working: "MenuLemonWorking"
+        case .waiting: "MenuLemonWaiting"
+        case .done: "MenuLemonDone"
+        case .error: "MenuLemonError"
+        case .disabled: "MenuLemonDisabled"
+        }
+    }
+
+    /// Pure aggregate: which glyph for the current sessions. Priority reflects
+    /// what most needs the user's eye — a session awaiting human input (either
+    /// gate, or a mid-build question) wins, then active work, then a reviewing
+    /// session (finished, awaiting cleanup), then the most recent terminal
+    /// outcome. Disabled when nothing is configured. Pure so it's unit-testable
+    /// without AppKit or the Keychain.
+    static func aggregate(activeStatuses: [SessionStatus],
+                          lastRecentStatus: SessionStatus?,
+                          configured: Bool) -> MenuBarGlyph
+    {
+        guard configured else { return .disabled }
+        if activeStatuses.contains(where: { $0.isGate || $0 == .waiting }) { return .waiting }
+        if activeStatuses.contains(where: { $0 == .planning || $0 == .executing }) { return .working }
+        if activeStatuses.contains(.reviewing) { return .done }
+        if lastRecentStatus == .failed { return .error }
+        if lastRecentStatus == .done { return .done }
+        return .idle
     }
 }
 
@@ -327,6 +393,9 @@ final class Session: Identifiable {
     var endedAt: Date?
     var aiSummary: String?
     var pendingAction: String?
+    /// The plan Claude proposed, captured from the ExitPlanMode hook's
+    /// planFilePath. Shown in the `.planReview` gate card for approval.
+    var planMarkdown: String?
     /// Populated when handleComplete fires. The session moves to
     /// `.reviewing` and stays in the active list until the user clicks
     /// "Cleanup worktree" in the detail view, which fires

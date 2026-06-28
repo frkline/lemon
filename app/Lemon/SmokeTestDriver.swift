@@ -24,11 +24,46 @@
             // 1 — list (active + recent)
             await shot("01-list")
 
+            // 1b — header polling indicator (forced on; mock mode doesn't poll).
+            jump { orchestrator.isPolling = true }
+            try? await Task.sleep(for: .milliseconds(200))
+            await shot("01b-polling")
+            jump { orchestrator.isPolling = false }
+            try? await Task.sleep(for: .milliseconds(80))
+
             // 2 — first active session (executing, with AI summary)
             if let s = orchestrator.sessions.active.first(where: { $0.pendingAction == nil }) {
                 jump { nav.showDetail(s) }
                 try? await Task.sleep(for: .milliseconds(150))
                 await shot("02-detail-executing")
+                jump { nav.showList() }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+
+            // 2b — reviewing session (tallest detail: ready-for-review card +
+            // AI summary + console + footer). Guards against the footer clipping.
+            if let s = orchestrator.sessions.active.first(where: { $0.status == .reviewing }) {
+                jump { nav.showDetail(s) }
+                try? await Task.sleep(for: .milliseconds(150))
+                await shot("02b-detail-reviewing")
+                jump { nav.showList() }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+
+            // 2c — plan gate (the keystone state: plan card + Approve & run).
+            if let s = orchestrator.sessions.active.first(where: { $0.status == .planReview }) {
+                jump { nav.showDetail(s) }
+                try? await Task.sleep(for: .milliseconds(150))
+                await shot("02c-detail-plan-review")
+                jump { nav.showList() }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+
+            // 2d — result gate (approve before the PR opens).
+            if let s = orchestrator.sessions.active.first(where: { $0.status == .resultReview }) {
+                jump { nav.showDetail(s) }
+                try? await Task.sleep(for: .milliseconds(150))
+                await shot("02d-detail-result-review")
                 jump { nav.showList() }
                 try? await Task.sleep(for: .milliseconds(80))
             }

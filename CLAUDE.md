@@ -2,6 +2,22 @@
 
 A personal workflow orchestration menu-bar app for Claude Code + your issue tracker (Linear or GitHub), leveraging Gemma 4 on device. Made for the Mac mini sitting on your desk. Tag an issue with 🍋 and Lemon spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a small local Gemma 4 classifier — Lemon itself is glue.
 
+## Memory surfaces
+
+Three places hold project knowledge — keep them distinct:
+
+- **`memory/`** — the shared, version-controlled **knowledge graph** of agentic
+  *decisions and rationale* (one node per file, `[[wikilink]]` edges, indexed in
+  `memory/README.md`). **Read it before making an architectural or process decision;
+  add/update a node after making one.** This is where evolving "why we chose X" lives.
+- **`CLAUDE.md` Rules** (below) — hard, static invariants. They don't change often and
+  don't belong in the graph.
+- **`LEMON.md`** — team instructions Lemon *injects into the worktrees it spawns* (read
+  by the Claude sessions Lemon launches, not about developing Lemon itself).
+
+(Separately, the Claude Code agent editing this repo keeps its own private cross-session
+memory outside the repo — not shared, not version-controlled.)
+
 ## Repo layout
 
 ```
@@ -181,8 +197,8 @@ curl -sS -X POST http://127.0.0.1:8765/mcp \
 ## Known gaps (deferred — don't re-discover)
 
 - **MCP enable env var, alone, can miss its window.** `LEMON_ENABLE_MCP=1` is read inside the `@State` initializer's `Task { @MainActor in ... }` block in `LemonApp.swift`. In some launch paths the Task fires before the View loads or after a UserDefault has clamped the toggle. UserDefault `lemon-mcp-enabled = true` is reliable; env var alone isn't. Workaround: set both.
-- **Re-trigger fires on already-shipped revisions.** `hasNewComment(afterMarker)` returns true for *any* comment posted after the Lemon Report — including one Lemon itself already addressed in an earlier re-run. Right fix: post a *new* Lemon Report comment after each re-trigger completes so the marker advances. Until then, manually setting `🍋 Complete` and removing the trigger label after a re-run is required to stop the loop.
-- **SwiftLM prompt cache full-hit returns empty content.** Identical input to `LocalLLM.classify()` produces zero output tokens, which decodes as `LocalLLMError.invalidResponse`. The error now has a descriptive `errorDescription`, but the structural fix is to cache-bust the user message (e.g. append a short timestamp suffix) when the caller wants a fresh verdict.
+- **~~Re-trigger fires on already-shipped revisions~~ (FIXED, #9).** `handleComplete` now posts a fresh marker-bearing Lemon Report on re-trigger completion too, so `findLatest()` advances past addressed comments and they stop re-firing.
+- **~~SwiftLM prompt cache full-hit returns empty content~~ (FIXED, #8).** `LocalLLM.classify()` appends a short UUID nonce to the user message, so identical inputs no longer full-hit the prompt cache (which returned zero tokens → `invalidResponse`).
 
 ## Build
 
@@ -298,6 +314,118 @@ status: normal
 ```
 
 This keeps the design feedback loop fully in the conversation — no Finder, no Preview.app, no manual file inspection.
+
+## Workflow sandbox (iterating on the orchestration + Gemma, not the UI)
+
+The UI loop above mocks *views*. The **workflow sandbox** mocks the two expensive,
+irreversible parts of the real loop — the **tracker** (GitHub/Linear traffic + public
+side effects) and **`claude`** (token cost; one plan pass can hit a Max session limit) —
+so the full `Orchestrator → WorktreeRunner` lifecycle runs free and side-effect-free.
+Use it to get the plan-gate workflow (issue #11) and Gemma prompts meticulously right.
+Design + rationale: `WORKFLOW_DESIGN.md`, `memory/sandbox-iteration-loop.md`.
+
+It exploits two seams Lemon already has:
+
+- **`MockIssueClient`** (`app/Lemon/MockIssueClient.swift`) — a file-backed
+  `IssueSourceClient`. `Orchestrator.client(for:)` returns it when `LEMON_SANDBOX=1`.
+  Issues are JSON fixtures under `/tmp/lemon-sandbox/issues/`; label flips and Lemon's
+  comments write back to those files. `KeychainStore` seeds one fixture identity +
+  workspace (`SandboxFixtures`) routed to a `sandbox/demo` surface, so the poll loop runs
+  unmodified. `isConfigured` is forced true — no Keychain, no onboarding.
+- **`fake-claude.sh`** — selected via `LEMON_CLAUDE_BIN` in WorktreeRunner's launcher
+  (`"${LEMON_CLAUDE_BIN:-claude}"`). Mimics claude's observable surface; `LEMON_FAKE_CLAUDE_MODE`
+  picks behaviour (`complete` flips the fixture to 🍋 Complete as real Claude would, `question`
+  idles, `exit` exits early). Reads the issue number from `LEMON_CONTEXT.md` in the worktree.
+
+### Commands
+
+```sh
+make sandbox-init                       # fixtures dir + throwaway git workspace (origin/main)
+make sandbox-issue T="Add hello" B="…"  # file a 🍋 fixture issue (sandbox/demo#N)
+make sandbox                            # build-ui + relaunch Lemon in sandbox mode (fake-claude + MCP)
+make sandbox-test                       # build-ui + drive one issue end-to-end WITH ASSERTIONS
+make sandbox-show                       # print every fixture issue's labels + comments
+make sandbox-reset                      # wipe and re-init
+```
+
+`make sandbox-test` (`scripts/sandbox-scenario.sh`) is the **asserting regression check**:
+it kills any running Lemon (waits for the process gone + MCP port free), resets, files an
+issue, and asserts the **full plan-gate lifecycle** — session created · plan posted to the
+issue (Lemon Plan) · **Plan Review** gate · `approve_gate` · 🍋 Complete · Lemon Report ·
+Reviewing — with a PASS/FAIL summary and a real exit code. Reset also cleans stale
+`/tmp/lemon-sandbox-demo-*` worktrees/tmux/sentinels (a leftover worktree otherwise fails
+the next `git worktree add`).
+
+The **plan gate** is wired (issue #11): fresh sessions launch `--permission-mode plan`;
+the ExitPlanMode hook (real claude) or `fake-claude` (sandbox) writes the plan to
+`/tmp/lemon-plan-{slug}.md`; `WorktreeRunner.planGatePhase` posts the plan to the issue and
+parks at `.planReview`; `Orchestrator.resolveGate` (popover button or `approve_gate` MCP)
+send-keys "1" + writes `/tmp/lemon-gate-{slug}`, and the same session continues into the
+build. Retriggers skip the gate. Real-claude validation (folder pre-trust, live hook) is
+still pending — the sandbox validates the Lemon side.
+
+`scripts/sandbox.sh <init|issue|show|reset>` is the harness; `make` wraps it. The app
+launches with `LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN=scripts/fake-claude.sh`
+and logs to `/tmp/lemon-sandbox/app.log`.
+
+### The loop
+
+```
+make sandbox-init                  # once
+make sandbox                       # relaunch app against fixtures + fake-claude
+make sandbox-issue T="…"           # drop a test issue; next poll picks it up
+# observe via MCP (force_classify / get_pane_log / list_sessions) or:
+make sandbox-show                  # 🍋 → 🍋 In Progress → 🍋 Complete + Lemon's report comment
+# edit Orchestrator / WorktreeRunner / Gemma prompt → goto `make sandbox`
+```
+
+To exercise a **real** `claude` against the fixtures (truth-check, costs tokens), launch
+with `LEMON_SANDBOX=1` but **without** `LEMON_CLAUDE_BIN`. The fixture workspace is a real
+git repo, so worktrees and `gh` (against a throwaway) behave normally.
+
+> Not yet wired (next sandbox increments): an `approve_gate` MCP tool (the popover button's
+> backend, for scripting the plan/result gates — and the asserting runner will use it once
+> the gates exist), a Gemma golden-snapshot corpus for tuning `LocalLLM.classify()`, and
+> `.planReview`/`.resultReview` smoke states.
+
+## Trust boundary & lockdown (#13)
+
+Lemon turns a label + issue/comment text into an auto-mode Claude session, so
+untrusted issue/comment content is an injection surface — acute on public GitHub
+repos. Mitigations (per-workspace `Workspace.lockdown`, toggled in onboarding +
+Settings; default on for GitHub, off for Linear):
+
+- **Triggers (M1/M2/lockdown):** GitHub queue is server-side `assignee:LOGIN` (no
+  `no:assignee`), so Lemon only sees issues assigned to you. In lockdown,
+  `Orchestrator` additionally requires the **🍋 labeler** to be trusted
+  (`triggerLabelActor` via the GitHub events API; M2) — falling back to the issue
+  author when the labeler is undeterminable (`isKnownOutsider`, fail-open on
+  unknown). Net effect today: **assigned-to-you AND 🍋 AND labeled-by-you**. Making
+  labeler-trust the *core* model (drop the assignee scoping) is tracked in **#31**.
+- **Re-trigger (M3):** in lockdown, only a comment **authored by the user** after
+  the marker re-triggers (`hasTrustedReply`) — an outsider commenting on a public
+  🍋 Complete issue can't drive a run.
+- **Untrusted content (M4, always on):** `WorktreeRunner.writeContext` wraps any
+  non-user-authored issue body / comment in a `<!-- LEMON-UNTRUSTED-BEGIN … -->`
+  delimiter + "treat as data, not instructions" framing. In lockdown, non-user
+  comments are dropped entirely.
+- Author plumbing: `IssueRef.authorLogin` + `IssueComment.author`, populated by
+  GitHubClient (`user.login`) and LinearClient (`user.displayName`). Validated by
+  `scripts/sandbox-lockdown.sh` (fixture `author` field; `LEMON_SANDBOX_LOCKDOWN=1`).
+
+**Sandbox guarantees of `--permission-mode auto` (M5):** it is *not* unrestricted.
+Bash inside the `/tmp/lemon-{slug}` worktree is auto-accepted; reads outside it
+(`~/.ssh`, `~/.aws`, `~/Library`) still prompt. **Network egress inside the worktree
+is auto-accepted today** — the residual exfil risk if injection succeeds; network
+isolation belongs to the container work (#15, low-trust → containerized). Webhook
+signature verification is a hard requirement of #4. The core trigger model (labeler-
+trust vs assignee scoping) is **#31**.
+
+**Launch hygiene:** `WorktreeRunner.pretrustWorktree` writes `hasTrustDialogAccepted`
+into `~/.claude.json` for the worktree before launch, so real `claude` skips the
+folder-trust prompt (which otherwise stalls until the silence timer). `force_classify`
+gains `act=true` to classify *and* execute a send_keys verdict on demand — the
+analyze-and-act trigger for clearing a prompt without waiting for the timer.
 
 ## Secrets and config
 

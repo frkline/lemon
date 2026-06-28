@@ -31,6 +31,16 @@ struct SessionDetailView: View {
             .padding(.vertical, 10)
             .background(LD.textPrimary.opacity(0.03))
 
+            // Plan gate — Claude proposed a plan; awaiting human approval.
+            if session.status == .planReview {
+                planReviewCard(session: session)
+            }
+
+            // Result gate — build done; awaiting human go to open the PR.
+            if session.status == .resultReview {
+                resultReviewCard(session: session)
+            }
+
             // Ready-for-review card — landed Lemon Report awaiting cleanup.
             if session.status == .reviewing, let info = session.cleanupInfo {
                 readyForReviewCard(session: session, info: info)
@@ -78,6 +88,97 @@ struct SessionDetailView: View {
 
             inlineConsole(session)
             detailFooter(session)
+        }
+    }
+
+    // MARK: - Plan gate (the human approval before any code is written)
+
+    private func planReviewCard(session: Session) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(LD.statusWaiting)
+                    .frame(width: 6, height: 6)
+                Text("PLAN — AWAITING APPROVAL")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(LD.statusWaiting)
+                Spacer()
+            }
+            // The proposed plan, captured from the ExitPlanMode hook. Scrolls
+            // inside a short window so the card stays compact.
+            ScrollView(showsIndicators: true) {
+                Text(session.planMarkdown ?? "Drafting plan…")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(LD.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 132)
+            HStack(spacing: 7) {
+                // The one yellow on the gate: approve and let it build.
+                Button("Approve & run") {
+                    orchestrator.resolveGate(session: session, decision: .approve)
+                }
+                .buttonStyle(DetailPrimaryButtonStyle())
+                Button("Request changes") {
+                    orchestrator.resolveGate(session: session, decision: .requestChanges)
+                }
+                .buttonStyle(GhostButtonStyle())
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(LD.statusWaiting.opacity(0.06))
+        .overlay(alignment: .top) {
+            Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
+        }
+    }
+
+    // MARK: - Result gate (approve before the PR opens)
+
+    private func resultReviewCard(session: Session) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(LD.statusReviewing)
+                    .frame(width: 6, height: 6)
+                Text("RESULT — READY TO OPEN PR")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(LD.statusReviewing)
+                Spacer()
+            }
+            if let info = session.cleanupInfo {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10))
+                        .foregroundStyle(LD.textTertiary)
+                    Text("lemon/\(info.slug)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(LD.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            HStack(spacing: 7) {
+                Button("Open PR") {
+                    orchestrator.resolveGate(session: session, decision: .approve)
+                }
+                .buttonStyle(DetailPrimaryButtonStyle())
+                Button("Request changes") {
+                    orchestrator.resolveGate(session: session, decision: .requestChanges)
+                }
+                .buttonStyle(GhostButtonStyle())
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(LD.statusReviewing.opacity(0.06))
+        .overlay(alignment: .top) {
+            Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
         }
     }
 
@@ -158,7 +259,11 @@ struct SessionDetailView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: 230)
+            // Flexible filler with a bounded max: the console prefers up to 360
+            // (so short sessions stay compact, not a giant void) but shrinks down
+            // to minHeight when a tall session (reviewing card + summary + console
+            // + footer) would otherwise overflow the 620 cap and clip the footer.
+            .frame(minHeight: 160, maxHeight: 360)
             .frame(maxWidth: .infinity)
             // Solid, no blur — the machine surface needs visual gravity. r6 box
             // with a faint inset hairline, clipped so output respects the corner.
@@ -185,11 +290,16 @@ struct SessionDetailView: View {
             if !session.status.isTerminal {
                 // Primary action — the one yellow on this screen. Compact chip
                 // (30pt / pad 0-13 / 12-600) so the yellow stays a small,
-                // earned moment rather than a loud block.
-                Button(joinCopied ? "Copied!" : "Join") {
-                    joinSession(session)
+                // earned moment rather than a loud block. At a gate, the gate
+                // card owns the yellow, so Join steps down to a ghost chip to
+                // keep one earned yellow per screen.
+                if session.status.isGate {
+                    Button(joinCopied ? "Copied!" : "Join") { joinSession(session) }
+                        .buttonStyle(GhostButtonStyle())
+                } else {
+                    Button(joinCopied ? "Copied!" : "Join") { joinSession(session) }
+                        .buttonStyle(DetailPrimaryButtonStyle())
                 }
-                .buttonStyle(DetailPrimaryButtonStyle())
 
                 // Quiet-but-unmistakable: coral text on a faint neutral fill,
                 // not a loud filled coral block (spec `.btn.stop`).

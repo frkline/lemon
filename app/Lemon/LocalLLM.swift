@@ -304,7 +304,12 @@ final class LocalLLM: @unchecked Sendable {
         let issueCtx = "Issue: \(issue.identifier) — \(issue.title)\n" +
             (issue.description.map { String($0.prefix(400)) } ?? "")
         let terminal = logLines.isEmpty ? "(no output yet)" : logLines.joined(separator: "\n")
-        let userMsg = "\(issueCtx)\n\nLast terminal output:\n\(terminal)"
+        // #8: cache-bust the user message. Two identical inputs full-hit SwiftLM's
+        // prompt cache (4810/4810 tokens reused), which returns zero generated
+        // tokens → empty content → GemmaResponse.parse fails as invalidResponse.
+        // A short unique suffix forces a fresh generation on every call.
+        let nonce = UUID().uuidString.prefix(8)
+        let userMsg = "\(issueCtx)\n\nLast terminal output:\n\(terminal)\n\n[poll \(nonce)]"
 
         let body: [String: Any] = [
             "model": "local-model",

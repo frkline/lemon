@@ -115,6 +115,7 @@ final class GitHubClient: Sendable {
         let labels: [LabelDTO]
         let repository_url: String?
         let html_url: String?
+        let user: UserDTO? // issue opener (trust boundary #13)
 
         struct LabelDTO: Decodable { let name: String }
     }
@@ -128,6 +129,7 @@ final class GitHubClient: Sendable {
         let id: Int
         let body: String?
         let created_at: String
+        let user: UserDTO? // commenter (trust boundary #13)
     }
 
     // MARK: - Search
@@ -169,6 +171,7 @@ final class GitHubClient: Sendable {
                 description: dto.body,
                 labelNames: dto.labels.map { Self.normalizeIncomingLabel($0.name) },
                 scope: .githubRepo(owner: owner, repo: repo, number: dto.number),
+                authorLogin: dto.user?.login,
             )
         }
     }
@@ -337,8 +340,39 @@ final class GitHubClient: Sendable {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return dtos.compactMap { dto in
             guard let date = iso.date(from: dto.created_at) ?? ISO8601DateFormatter().date(from: dto.created_at) else { return nil }
-            return IssueComment(id: String(dto.id), body: dto.body ?? "", createdAt: date)
+            return IssueComment(id: String(dto.id), body: dto.body ?? "", createdAt: date, author: dto.user?.login)
         }
+    }
+
+    // MARK: - Trigger-label actor (#13 M2)
+
+    private struct EventDTO: Decodable {
+        let event: String
+        let actor: UserDTO?
+        let label: LabelName?
+        struct LabelName: Decodable { let name: String }
+    }
+
+    /// Login of whoever most recently applied the 🍋 trigger label, via the
+    /// issue events timeline. Returns nil if undeterminable (caller falls back
+    /// to the issue author). Events come oldest-first, so the last matching
+    /// `labeled` event is the most recent.
+    func triggerLabelActor(ref: IssueRef, auth: SourceAuth) async throws -> String? {
+        guard case let .github(token, _, host) = auth,
+              case let .githubRepo(owner, repo, number) = ref.scope else { return nil }
+        let req = authedRequest(
+            "GET",
+            path: "/repos/\(owner)/\(repo)/issues/\(number)/events",
+            query: [URLQueryItem(name: "per_page", value: "100")],
+            token: token,
+            host: host,
+        )
+        let (_, data) = try await send(req)
+        let events = try decode(data, as: [EventDTO].self)
+        let trigger = LemonState.trigger.labelName
+        return events.reversed().first {
+            $0.event == "labeled" && Self.normalizeIncomingLabel($0.label?.name ?? "") == trigger
+        }?.actor?.login
     }
 }
 

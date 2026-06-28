@@ -45,6 +45,18 @@ final class Orchestrator {
         workspaceStatuses[workspaceId]
     }
 
+    /// Aggregate state for the menu-bar status glyph. Priority reflects what most
+    /// needs the user's eye: a session awaiting human input (plan/result gate or
+    /// a mid-build question) wins, then active work, then the most recent
+    /// outcome (error/done), else idle. Disabled when nothing is configured.
+    var menuBarGlyph: MenuBarGlyph {
+        MenuBarGlyph.aggregate(
+            activeStatuses: sessions.active.map(\.status),
+            lastRecentStatus: sessions.recent.first?.status,
+            configured: KeychainStore.shared.isConfigured,
+        )
+    }
+
     /// Back-compat readers for any view still keyed on the old pair shape.
     var pairStatuses: [UUID: WorkspaceStatus] {
         workspaceStatuses
@@ -57,6 +69,9 @@ final class Orchestrator {
     // Per-source clients, lazily created on first use per process.
     private let linearClient = LinearClient()
     private let githubClient = GitHubClient()
+    // Sandbox iteration mode: a single file-backed client replaces both, so the
+    // poll loop runs against /tmp/lemon-sandbox fixtures. See SandboxFixtures.
+    private let mockClient = MockIssueClient()
     private var pollTask: Task<Void, Never>?
     private var runners: [UUID: WorktreeRunner] = [:]
 
@@ -67,9 +82,10 @@ final class Orchestrator {
     /// Public client resolver — used by the editor when adding a new identity
     /// (verify + list surfaces) before the identity is persisted.
     func client(for kind: IdentityKind) -> any IssueSourceClient {
+        if KeychainStore.isSandbox { return mockClient }
         switch kind {
-        case .linear: linearClient
-        case .github: githubClient
+        case .linear: return linearClient
+        case .github: return githubClient
         }
     }
 
@@ -343,6 +359,23 @@ final class Orchestrator {
 
             for ref in newIssues {
                 guard !sessions.isTracking(ref: ref) else { continue }
+                // Lockdown (#13): trust who APPLIED the 🍋 (M2) — you can authorize
+                // an outsider's issue by labeling it yourself, and an outsider
+                // labeling your issue is caught. If the labeler is undeterminable,
+                // fall back to the issue author (fail-open on unknown so a source
+                // that exposes neither doesn't silently drop everything).
+                if workspace.lockdown {
+                    let labeler = try? await client.triggerLabelActor(ref: ref, auth: auth)
+                    let allowed = if let labeler {
+                        TrustPolicy.isTrusted(author: labeler, trustedAuthor: identity.handle)
+                    } else {
+                        !isKnownOutsider(ref.authorLogin, identity: identity)
+                    }
+                    if !allowed {
+                        Logger.orchestrator.info("Lockdown: skip \(ref.identifier) — labeler=\(labeler ?? "?") author=\(ref.authorLogin ?? "?") not trusted (\(identity.handle))")
+                        continue
+                    }
+                }
                 guard sessions.active.count < maxConcurrent else {
                     Logger.orchestrator.info("At max concurrent sessions, skipping \(ref.identifier)")
                     break
@@ -383,6 +416,17 @@ final class Orchestrator {
                     Logger.orchestrator.info("Retrigger skip \(ref.identifier): no new comment after marker \(marker.commentId)")
                     continue
                 }
+                // Lockdown (#13, M3): re-trigger only on the USER's own reply.
+                // An outsider commenting on a public 🍋 Complete issue must not
+                // be able to drive a new Claude run.
+                if workspace.lockdown {
+                    let trusted = await (try? hasTrustedReply(ref: ref, after: marker.commentId,
+                                                              identity: identity, client: client, auth: auth)) ?? false
+                    if !trusted {
+                        Logger.orchestrator.info("Lockdown: skip retrigger \(ref.identifier) — newest replies not authored by \(identity.handle)")
+                        continue
+                    }
+                }
                 Logger.orchestrator.info("Re-triggering \(ref.identifier) from reply")
                 await startSession(ref: ref, workspace: workspace, identity: identity,
                                    client: client, auth: auth, retrigger: marker)
@@ -395,6 +439,27 @@ final class Orchestrator {
         }
         status.lastPolledAt = Date()
         workspaceStatuses[workspace.id] = status
+    }
+
+    // MARK: - Lockdown trust helpers (#13)
+
+    private func authoredByUser(_ author: String?, identity: Identity) -> Bool {
+        TrustPolicy.isTrusted(author: author, trustedAuthor: identity.handle)
+    }
+
+    private func isKnownOutsider(_ author: String?, identity: Identity) -> Bool {
+        TrustPolicy.isKnownOutsider(author: author, me: identity.handle)
+    }
+
+    /// True if any comment AFTER the marker was authored by the user — the
+    /// trusted-commenter gate for re-trigger in lockdown (M3).
+    private func hasTrustedReply(ref: IssueRef, after commentId: String, identity: Identity,
+                                 client: any IssueSourceClient, auth: SourceAuth) async throws -> Bool
+    {
+        let comments = try await client.fetchComments(ref: ref, auth: auth)
+        guard let idx = comments.firstIndex(where: { $0.id == commentId }) else { return false }
+        let after = comments[comments.index(after: idx)...]
+        return after.contains { authoredByUser($0.author, identity: identity) }
     }
 
     /// Build the per-call SourceConfig from an identity + the surface the
@@ -503,6 +568,14 @@ final class Orchestrator {
         runner.onPRUrl = { [weak session] url in
             DispatchQueue.main.async { session?.prUrl = url }
         }
+        runner.onPlanReady = { [weak session] plan in
+            DispatchQueue.main.async { session?.planMarkdown = plan }
+        }
+        runner.onResultReady = { [weak session] summary in
+            DispatchQueue.main.async {
+                session?.aiSummary = summary.split(separator: "\n").first.map(String.init) ?? "Ready for review"
+            }
+        }
         runner.onAiSummary = { [weak session] summary in
             DispatchQueue.main.async { session?.aiSummary = summary }
         }
@@ -527,8 +600,11 @@ final class Orchestrator {
             ),
         )
 
+        let lockdown = workspace.lockdown
+        let trustedAuthor = identity.handle
         Task.detached(priority: .background) {
-            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger)
+            await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger,
+                             lockdown: lockdown, trustedAuthor: trustedAuthor)
         }
     }
 
@@ -543,6 +619,82 @@ final class Orchestrator {
         runners[session.id]?.cancelPendingAction()
         // Clear directly — covers mock sessions that have no backing runner.
         session.pendingAction = nil
+    }
+
+    // MARK: - Gates (plan / result human approval)
+
+    enum GateDecision: String { case approve, requestChanges }
+
+    /// Resolve a human gate (plan review or result review). Backs both the
+    /// popover buttons and the `approve_gate` MCP tool, so approval reaches a
+    /// session whether the user is at the desk or remote. The keystroke maps to
+    /// the live `claude` UI: the ExitPlanMode picker's "1. Yes, and use auto
+    /// mode" / "4. Tell Claude what to change". No-ops with a log if the session
+    /// isn't actually parked at a gate.
+    func resolveGate(session: Session, decision: GateDecision) {
+        let gate = session.status
+        guard gate.isGate else {
+            Logger.orchestrator.info("resolveGate \(session.issue.identifier): not at a gate (\(String(describing: gate)))")
+            return
+        }
+        let sessionName = "lemon-\(session.issue.pathSlug)"
+        // The runner's planGatePhase parks on this sentinel; it's the cross-task
+        // signal that the human resolved the gate (the keystroke drives claude).
+        let gateSentinel = "/tmp/lemon-gate-\(session.issue.pathSlug)"
+        switch (gate, decision) {
+        case (.planReview, .approve):
+            sendTmuxKeys(to: sessionName, keys: "1") // "Yes, and use auto mode"
+            try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+            session.planMarkdown = nil
+            session.aiSummary = "Plan approved — building"
+            session.status = .executing
+        case (.planReview, .requestChanges):
+            sendTmuxKeys(to: sessionName, keys: "4") // "Tell Claude what to change"
+            try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+        case (.resultReview, .approve):
+            sendTmuxLine(to: sessionName, text: "Approved — open the PR now.")
+            try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+            session.status = .executing
+        case (.resultReview, .requestChanges):
+            sendTmuxLine(to: sessionName, text: "Please revise before opening the PR.")
+            try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+            session.status = .executing
+        default:
+            break
+        }
+        Logger.orchestrator.info("resolveGate \(session.issue.identifier) \(gate.displayLabel) -> \(decision.rawValue)")
+    }
+
+    /// Resolve a gate by issue id/identifier — the path the MCP `approve_gate`
+    /// tool and remote/comment approvals take. Returns false if no session at a gate.
+    @discardableResult
+    func resolveGate(idOrIdentifier: String, decision: GateDecision) -> Bool {
+        let all = sessions.active + sessions.recent
+        guard let session = all.first(where: {
+            $0.issue.id == idOrIdentifier || $0.issue.identifier == idOrIdentifier
+        }), session.status.isGate else { return false }
+        resolveGate(session: session, decision: decision)
+        return true
+    }
+
+    private func sendTmuxKeys(to sessionName: String, keys: String) {
+        _ = runShellCommand("tmux send-keys -t '\(sessionName)' '\(keys)' Enter")
+    }
+
+    private func sendTmuxLine(to sessionName: String, text: String) {
+        let esc = text.replacingOccurrences(of: "'", with: "'\\''")
+        _ = runShellCommand("tmux send-keys -t '\(sessionName)' '\(esc)' Enter")
+    }
+
+    @discardableResult
+    private func runShellCommand(_ command: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = ["-lc", command]
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 }
+        catch { return false }
     }
 
     /// User clicked "Cleanup worktree" in the Ready-for-review card.
@@ -652,8 +804,97 @@ final class Orchestrator {
             recent.endedAt = now.addingTimeInterval(-3600)
             recent.aiSummary = "Migration complete — backfill ran in 4m, all FK constraints updated"
 
+            // Reviewing — the tall detail state: ready-for-review card + AI
+            // summary + console + footer all present at once. This is the layout
+            // that clipped its footer before the console was made flexible.
+            let reviewing = Session(issue: IssueRef(
+                id: "mock-4", identifier: "sandbox/demo#1",
+                title: "Add a hello function with a test",
+                description: "Add hello(name) and a test.",
+                labelNames: ["🍋 Complete"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 1),
+            ), startedAt: now.addingTimeInterval(-900))
+            reviewing.status = .reviewing
+            reviewing.prUrl = "https://github.com/sandbox/demo/pull/1"
+            reviewing.aiSummary = "Starting work on sandbox/demo#1"
+            reviewing.cleanupInfo = WorktreeCleanupInfo(
+                sessionPath: "/tmp/lemon-sandbox-demo-1",
+                isMultiRepo: false,
+                repos: [.init(name: "demo", repoPath: "/tmp/lemon-sandbox/workspace")],
+                slug: "sandbox-demo-1",
+            )
+            for line in [
+                "[lemon] starting session for sandbox/demo#1",
+                "[lemon] tmux session started — join: tmux attach -t lemon-sandbox-demo-1",
+                "[lemon] 🍋 Complete detected for sandbox/demo#1",
+                "[gemma] Starting work on sandbox/demo#1",
+                "[lemon] posted Lemon comment c1",
+                "[lemon] ready for review — worktree at /tmp/lemon-sandbox-demo-1. Click Cleanup to tear down.",
+            ] {
+                reviewing.appendLog(line)
+            }
+
+            // Plan gate — a proposed plan awaiting approval (the keystone state).
+            let planGate = Session(issue: IssueRef(
+                id: "mock-5", identifier: "sandbox/demo#2",
+                title: "Add CSV export to the reports page",
+                description: "Users want to export the reports table as CSV.",
+                labelNames: ["🍋 Waiting"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 2),
+            ), startedAt: now.addingTimeInterval(-90))
+            planGate.status = .planReview
+            planGate.planMarkdown = """
+            # Plan: CSV export for the reports page
+
+            ## Context
+            ReportsView renders a table but offers no export. Add an "Export CSV"
+            action that serializes the current rows and writes via a save panel.
+
+            ## Changes
+            1. CSVEncoder.swift (new) — encode [ReportRow] → RFC-4180 CSV
+            2. ReportsView.swift — toolbar "Export CSV" button → NSSavePanel
+            3. ReportsViewModel.swift — expose `rows` for the encoder
+
+            ## Verification
+            - Unit-test CSVEncoder against a known fixture (commas, quotes, newlines)
+            - Manual: export, open in Numbers, confirm column alignment
+            """
+            planGate.aiSummary = "Plan ready — awaiting your approval"
+            for line in [
+                "[lemon] starting session for sandbox/demo#2",
+                "[lemon] launched in plan mode — tmux: lemon-sandbox-demo-2",
+                "[gemma] plan ready — holding for human approval",
+                "[lemon] posted plan to sandbox/demo#2, label → 🍋 Waiting",
+            ] {
+                planGate.appendLog(line)
+            }
+
+            // Result gate — build done, awaiting approval to open the PR.
+            let resultGate = Session(issue: IssueRef(
+                id: "mock-6", identifier: "sandbox/demo#3",
+                title: "Cache avatar images on the profile page",
+                description: "Avatars re-fetch on every render.",
+                labelNames: ["🍋 Waiting"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 3),
+            ), startedAt: now.addingTimeInterval(-300))
+            resultGate.status = .resultReview
+            resultGate.aiSummary = "Built — 3 files changed, tests green. Ready to open the PR."
+            resultGate.cleanupInfo = WorktreeCleanupInfo(
+                sessionPath: "/tmp/lemon-sandbox-demo-3", isMultiRepo: false,
+                repos: [.init(name: "demo", repoPath: "/tmp/lemon-sandbox/workspace")],
+                slug: "sandbox-demo-3",
+            )
+            for line in [
+                "[lemon] plan approved — building",
+                "[gemma] implementing avatar cache",
+                "✓ tests passed",
+                "[lemon] build ready for review — awaiting approval to open PR",
+            ] {
+                resultGate.appendLog(line)
+            }
+
             sessions.add(active1)
             sessions.add(active2)
+            sessions.add(planGate)
+            sessions.add(resultGate)
+            sessions.add(reviewing)
             sessions.finish(recent)
 
             // Seed pairs + per-pair statuses so Settings renders a mixed-source

@@ -35,6 +35,30 @@ make loop   # build-ui + test + smoke — full local validation (~30s)
 The UI smoke test (`--smoke-test`) screenshots every UI state without touching the
 Keychain, Linear, or a running tmux session — use it to iterate on views.
 
+### Workflow sandbox — iterate on the orchestration itself
+
+To work on the *orchestration* (poll loop, the plan/result gates, Gemma routing)
+rather than views, use the **workflow sandbox**: a file-backed tracker
+(`MockIssueClient`, enabled by `LEMON_SANDBOX=1`) plus a scripted `claude`
+stand-in (`scripts/fake-claude.sh`, injected via `LEMON_CLAUDE_BIN`) run the
+entire plan→gate→build→gate→PR lifecycle against `/tmp/lemon-sandbox` fixtures —
+**no GitHub/Linear calls, no Claude tokens, no public side effects.**
+
+```sh
+make sandbox-init                 # throwaway git workspace + fixtures
+make sandbox                      # relaunch Lemon in sandbox mode (fake-claude + MCP)
+make sandbox-issue T="Add hello"  # file a 🍋 fixture issue → next poll picks it up
+make sandbox-show                 # inspect fixture labels + comments
+make sandbox-test                 # drive one issue end-to-end WITH ASSERTIONS
+```
+
+`make sandbox-test` (`scripts/sandbox-scenario.sh`) is the asserting regression
+check for the two-gate lifecycle; `scripts/sandbox-retrigger.sh` covers re-trigger.
+Edit orchestration code → `make sandbox-test` → green or a precise failure. To
+truth-check against the **real** `claude` CLI, launch `LEMON_SANDBOX=1` *without*
+`LEMON_CLAUDE_BIN` (uses tokens; runs against the throwaway workspace). Full map:
+`CLAUDE.md` → "Workflow sandbox".
+
 ## Pull requests
 
 1. Branch off `main` (e.g. `feat/...`, `fix/...`, `chore/...`).
