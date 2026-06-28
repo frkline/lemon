@@ -1818,7 +1818,14 @@ private struct ReadyStep: View {
             backAction: onBack,
             nextLabel: "Start Lemon",
             nextEnabled: canStart,
-            nextAction: onFinish,
+            // Trigger the Terminal-automation TCC prompt on Start (not on view
+            // appear) — otherwise it fires mid-onboarding, before the user has
+            // committed, and dismissing it drops them out. finish() swaps to the
+            // main popover first, so the prompt lands on the running app.
+            nextAction: {
+                preauthorizeTerminalAutomation()
+                onFinish()
+            },
         ) {
             VStack(spacing: 9) {
                 // Claude auth status
@@ -1855,7 +1862,9 @@ private struct ReadyStep: View {
         .onAppear {
             detectClaudeAuth()
             createLabels()
-            preauthorizeTerminalAutomation()
+            // NB: Terminal-automation pre-auth is deliberately NOT here — it
+            // fires on the "Start Lemon" action so the TCC prompt lands after
+            // onboarding finishes, not mid-step.
         }
     }
 
