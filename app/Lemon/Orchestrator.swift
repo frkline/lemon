@@ -359,20 +359,25 @@ final class Orchestrator {
 
             for ref in newIssues {
                 guard !sessions.isTracking(ref: ref) else { continue }
-                // Lockdown (#13): trust who APPLIED the 🍋 (M2) — you can authorize
-                // an outsider's issue by labeling it yourself, and an outsider
-                // labeling your issue is caught. If the labeler is undeterminable,
-                // fall back to the issue author (fail-open on unknown so a source
-                // that exposes neither doesn't silently drop everything).
-                if workspace.lockdown {
-                    let labeler = try? await client.triggerLabelActor(ref: ref, auth: auth)
-                    let allowed = if let labeler {
-                        TrustPolicy.isTrusted(author: labeler, trustedAuthor: identity.handle)
-                    } else {
-                        !isKnownOutsider(ref.authorLogin, identity: identity)
+                // Belt-and-suspenders trigger (#31): require BOTH "this is me"
+                // signals — assignee == you (already enforced by the source's
+                // fetchTriggerQueue) AND the 🍋-labeler == you. The labeler check
+                // (M2, #13) is now ALWAYS on, not gated by lockdown:
+                //  - GitHub exposes the labeler via the events API, so it's
+                //    authoritative — must be you, lockdown or not.
+                //  - Linear can't cheaply query the labeler (nil) → fail-open: the
+                //    assignee/userId queue stays the gate. Lockdown then adds the
+                //    author-trust fallback as a stricter extra for that case.
+                // Lockdown otherwise governs only M3 (re-trigger) and M4 (content).
+                let labeler = try? await client.triggerLabelActor(ref: ref, auth: auth)
+                if let labeler {
+                    if !TrustPolicy.isTrusted(author: labeler, trustedAuthor: identity.handle) {
+                        Logger.orchestrator.info("Skip \(ref.identifier) — 🍋-labeler \(labeler) != \(identity.handle)")
+                        continue
                     }
-                    if !allowed {
-                        Logger.orchestrator.info("Lockdown: skip \(ref.identifier) — labeler=\(labeler ?? "?") author=\(ref.authorLogin ?? "?") not trusted (\(identity.handle))")
+                } else if workspace.lockdown {
+                    if isKnownOutsider(ref.authorLogin, identity: identity) {
+                        Logger.orchestrator.info("Lockdown: skip \(ref.identifier) — labeler undeterminable, author=\(ref.authorLogin ?? "?") not trusted (\(identity.handle))")
                         continue
                     }
                 }
