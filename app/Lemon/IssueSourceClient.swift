@@ -70,7 +70,9 @@ extension IssueSourceClient {
     /// (#13 M2): you can authorize an outsider's issue by labeling it yourself,
     /// and an outsider labeling your issue is caught. nil = undeterminable;
     /// callers fall back to the issue author. Default nil (sources opt in).
-    func triggerLabelActor(ref _: IssueRef, auth _: SourceAuth) async throws -> String? { nil }
+    func triggerLabelActor(ref _: IssueRef, auth _: SourceAuth) async throws -> String? {
+        nil
+    }
 }
 
 /// Per-source credential.

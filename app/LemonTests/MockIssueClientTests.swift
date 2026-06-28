@@ -8,17 +8,19 @@ import XCTest
 final class MockIssueClientTests: XCTestCase {
     private let auth = SandboxFixtures.auth
     private let num = 99
-    private var path: String { "\(SandboxFixtures.issuesDir)/\(num).json" }
+    private var path: String {
+        "\(SandboxFixtures.issuesDir)/\(num).json"
+    }
 
-    private func writeFixture(comments: [(String, String, Double)], labels: [String]) {
+    private func writeFixture(comments: [(String, String, Double)], labels: [String]) throws {
         try? FileManager.default.createDirectory(atPath: SandboxFixtures.issuesDir, withIntermediateDirectories: true)
         let cs = comments.map { ["id": $0.0, "body": $0.1, "createdAt": $0.2] as [String: Any] }
         let fixture: [String: Any] = [
             "number": num, "title": "Greeting helper", "description": "Add hello().",
             "labelNames": labels, "comments": cs, "commentSeq": comments.count,
         ]
-        let data = try! JSONSerialization.data(withJSONObject: fixture)
-        try! data.write(to: URL(fileURLWithPath: path))
+        let data = try JSONSerialization.data(withJSONObject: fixture)
+        try data.write(to: URL(fileURLWithPath: path))
     }
 
     override func tearDown() {
@@ -46,7 +48,7 @@ final class MockIssueClientTests: XCTestCase {
     }
 
     func testReTriggerDetectedWhenReplyFollowsMarker() async throws {
-        writeFixture(
+        try writeFixture(
             comments: [("c1", reportBody(), 1000), ("h1", "Please also greet by time of day.", 2000)],
             labels: ["🍋 Complete"],
         )
@@ -68,7 +70,7 @@ final class MockIssueClientTests: XCTestCase {
 
     func testNoReTriggerWhenMarkerIsLatest() async throws {
         // After the #9 fix, a fresh report is the newest comment → nothing after it.
-        writeFixture(
+        try writeFixture(
             comments: [("c1", reportBody(), 1000), ("h1", "revise", 2000), ("c2", reportBody(), 3000)],
             labels: ["🍋 Complete"],
         )

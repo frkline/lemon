@@ -213,7 +213,7 @@ enum LemonMCPTools {
                 {
                     let sessionName = "lemon-\(issue.pathSlug)"
                     let specialKeys: Set = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right", "PageUp", "PageDown", "Home", "End"]
-                    let cmd: String = if specialKeys.contains(keys) {
+                    let cmd = if specialKeys.contains(keys) {
                         "tmux send-keys -t '\(sessionName)' \(keys)"
                     } else {
                         "tmux send-keys -t '\(sessionName)' '\(keys.replacingOccurrences(of: "'", with: "'\\''"))' Enter"

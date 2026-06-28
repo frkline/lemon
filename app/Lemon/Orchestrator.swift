@@ -420,7 +420,7 @@ final class Orchestrator {
                 // An outsider commenting on a public 🍋 Complete issue must not
                 // be able to drive a new Claude run.
                 if workspace.lockdown {
-                    let trusted = (try? await hasTrustedReply(ref: ref, after: marker.commentId,
+                    let trusted = await (try? hasTrustedReply(ref: ref, after: marker.commentId,
                                                               identity: identity, client: client, auth: auth)) ?? false
                     if !trusted {
                         Logger.orchestrator.info("Lockdown: skip retrigger \(ref.identifier) — newest replies not authored by \(identity.handle)")

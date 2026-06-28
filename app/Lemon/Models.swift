@@ -126,7 +126,7 @@ struct IssueComment: Identifiable, Equatable {
     /// Commenter identity (GitHub login / Linear user name or id). nil = unknown.
     /// Used by the trust boundary (#13): in lockdown only the user's own comments
     /// re-trigger, and non-user content is wrapped/excluded in LEMON_CONTEXT.
-    var author: String? = nil
+    var author: String?
 }
 
 // MARK: - Identity → Surface → Workspace

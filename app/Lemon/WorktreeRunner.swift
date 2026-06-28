@@ -405,7 +405,7 @@ final class WorktreeRunner: @unchecked Sendable {
         devPort: Int,
         revisionComments: [RevisionComment] = [],
         trustedAuthor: String? = nil,
-        lockdown: Bool = false,
+        lockdown _: Bool = false,
     ) {
         var content = ""
 
@@ -537,16 +537,22 @@ final class WorktreeRunner: @unchecked Sendable {
     /// Written by the ExitPlanMode hook (real claude) or fake-claude (sandbox)
     /// when a plan is ready. Contains the plan markdown; its presence is the
     /// signal that the session has reached the plan gate.
-    func planReadyPath(slug: String) -> String { "/tmp/lemon-plan-\(slug).md" }
+    func planReadyPath(slug: String) -> String {
+        "/tmp/lemon-plan-\(slug).md"
+    }
 
     /// Written by Orchestrator.resolveGate when the human approves/rejects a
     /// gate ("approve" or "changes"). Both gate park-loops watch for it.
-    func gateSentinelPath(slug: String) -> String { "/tmp/lemon-gate-\(slug)" }
+    func gateSentinelPath(slug: String) -> String {
+        "/tmp/lemon-gate-\(slug)"
+    }
 
     /// Optional result gate: if the build writes this (instead of opening the PR
     /// directly), Lemon parks at .resultReview until the human approves. Absent
     /// → the existing 🍋 Complete → handleComplete path runs unchanged.
-    func resultReadyPath(slug: String) -> String { "/tmp/lemon-result-\(slug).md" }
+    func resultReadyPath(slug: String) -> String {
+        "/tmp/lemon-result-\(slug).md"
+    }
 
     /// Pre-trust the worktree in `~/.claude.json` so real `claude` skips the
     /// "Is this a project you trust?" prompt on launch — otherwise the session
