@@ -164,7 +164,8 @@ final class WorktreeRunner: @unchecked Sendable {
         if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
 
         let sessionLabel = WorktreeRunner.remoteControlName(
-            identifier: identifier, title: ref.title)
+            identifier: identifier, title: ref.title,
+        )
         guard launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
                          sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
                          planMode: planMode)
@@ -758,7 +759,7 @@ final class WorktreeRunner: @unchecked Sendable {
             ? String(trimmed.prefix(40)).trimmingCharacters(in: .whitespaces) + "…"
             : trimmed
         let raw = shortTitle.isEmpty ? "\(identifier) (\(host))"
-                                     : "\(identifier) \(shortTitle) (\(host))"
+            : "\(identifier) \(shortTitle) (\(host))"
         return raw
             .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "\n", with: " ")

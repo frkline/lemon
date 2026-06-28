@@ -371,7 +371,8 @@ struct SessionDetailView: View {
         let script = "#!/bin/bash\nexec tmux attach -t \(name)\n"
         if (try? script.write(toFile: cmdPath, atomically: true, encoding: .utf8)) != nil {
             try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: cmdPath)
+                [.posixPermissions: 0o755], ofItemAtPath: cmdPath,
+            )
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             p.arguments = [cmdPath]
