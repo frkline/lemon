@@ -2,6 +2,8 @@
 
 A personal workflow orchestration menu-bar app for Claude Code + your issue tracker (Linear or GitHub), leveraging Gemma 4 on device. Made for the Mac mini sitting on your desk. Tag an issue with 🍋 and Lemon spins up a git worktree, launches the user's own `claude` CLI in Terminal, monitors progress via labels, and posts a report when the PR is ready. The intelligence is Claude Code (your login) and a small local Gemma 4 classifier — Lemon itself is glue.
 
+> **Dogfooding Lemon on its own issues (tag & monitor)?** Read **`DOGFOOD.md`** first — the operator handoff for a fresh session: pre-flight, how to trigger under lockdown, monitor via MCP/tmux, the gates, known failure modes, and the salvage pattern.
+
 ## Memory surfaces
 
 Three places hold project knowledge — keep them distinct:
