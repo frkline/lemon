@@ -74,8 +74,8 @@ echo "── sandbox plan-gate scenario ─────────────�
 
 # 1. Stop any running Lemon; wait for process gone + MCP port free.
 echo "[setup] stopping any running Lemon"
-pkill -f 'Lemon.app/Contents/MacOS/Lemon' 2>/dev/null || true
-for _ in $(seq 1 20); do pgrep -f 'Lemon.app/Contents/MacOS/Lemon' >/dev/null || break; sleep 0.5; done
+pkill -f "$APP" 2>/dev/null || true
+for _ in $(seq 1 20); do pgrep -f "$APP" >/dev/null || break; sleep 0.5; done
 for _ in $(seq 1 20); do curl -sS -m1 "$MCP" -o /dev/null 2>/dev/null && sleep 0.5 || break; done
 
 # 2. Clean slate (also wipes stale worktrees) + seed one issue.

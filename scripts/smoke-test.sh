@@ -24,7 +24,7 @@ if [ -L /tmp/lemon-smoke/latest ]; then
   PREV_LATEST="$(readlink /tmp/lemon-smoke/latest)"
 fi
 
-pkill -x Lemon 2>/dev/null || true
+pkill -f "$APP/Contents/MacOS/Lemon" 2>/dev/null || true
 sleep 0.3
 
 "$APP/Contents/MacOS/Lemon" --mock --smoke-test &

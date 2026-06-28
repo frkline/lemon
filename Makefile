@@ -80,7 +80,7 @@ sandbox-reset:
 	@scripts/sandbox.sh reset
 
 sandbox: build-ui
-	@pkill -f 'Lemon.app/Contents/MacOS/Lemon' 2>/dev/null; sleep 1 || true
+	@pkill -f '$(UI_APP)/Contents/MacOS/Lemon' 2>/dev/null; sleep 1 || true
 	@[ -d /tmp/lemon-sandbox/workspace ] || scripts/sandbox.sh init
 	@echo "Launching Lemon in sandbox mode (fake-claude, MCP on 127.0.0.1:8765)…"
 	@LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN="$(FAKE_CLAUDE)" \

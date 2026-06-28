@@ -294,10 +294,10 @@ struct SessionDetailView: View {
                 // card owns the yellow, so Join steps down to a ghost chip to
                 // keep one earned yellow per screen.
                 if session.status.isGate {
-                    Button(joinCopied ? "Copied!" : "Join") { joinSession(session) }
+                    Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
                         .buttonStyle(GhostButtonStyle())
                 } else {
-                    Button(joinCopied ? "Copied!" : "Join") { joinSession(session) }
+                    Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
                         .buttonStyle(DetailPrimaryButtonStyle())
                 }
 
@@ -359,43 +359,30 @@ struct SessionDetailView: View {
 
     private func joinSession(_ session: Session) {
         let name = "lemon-\(session.issue.pathSlug)"
-        // The user explicitly clicked Join — they want the window to appear AND
-        // come to the front. Try iTerm2 first (tmux -CC native tabs), then
-        // Terminal.app (always present), and only fall back to clipboard if
-        // both osascript calls error out.
-        let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
-        if hasITerm, runOsascript("""
-        tell application "iTerm"
-            activate
-            create window with default profile command "tmux -CC attach -t \(name)"
-        end tell
-        """) {
-            return
+        // Open a real terminal attached to the tmux session. We write a small
+        // `.command` launcher and `open` it: this goes through LaunchServices, so
+        // it needs NO Automation/AppleEvents TCC permission and brings the
+        // terminal to the front. The old `osascript … do script` path required
+        // "control Terminal" automation consent — when that wasn't granted it
+        // silently failed and dropped to the clipboard, leaving the user staring
+        // at a confusing "Copied!" with no window (and no window at all now that
+        // sessions launch headless).
+        let cmdPath = "/tmp/lemon-join-\(session.issue.pathSlug).command"
+        let script = "#!/bin/bash\nexec tmux attach -t \(name)\n"
+        if (try? script.write(toFile: cmdPath, atomically: true, encoding: .utf8)) != nil {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: cmdPath,
+            )
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            p.arguments = [cmdPath]
+            if (try? p.run()) != nil { return }
         }
-        if runOsascript("""
-        tell application "Terminal"
-            activate
-            do script "tmux attach -t \(name)"
-        end tell
-        """) {
-            return
-        }
-        // Last resort — copy the command for the user to paste themselves.
+        // Last resort — copy the attach command so the user can paste it.
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString("tmux attach -t \(name)", forType: .string)
         joinCopied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { joinCopied = false }
-    }
-
-    @discardableResult
-    private func runOsascript(_ script: String) -> Bool {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", script]
-        p.standardOutput = Pipe()
-        p.standardError = Pipe()
-        do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 }
-        catch { return false }
     }
 }
 

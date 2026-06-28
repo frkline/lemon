@@ -163,7 +163,10 @@ final class WorktreeRunner: @unchecked Sendable {
         pretrustWorktree(path: launchPath) // skip claude's folder-trust prompt
         if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
 
-        guard launchTmux(sessionPath: launchPath, slug: slug,
+        let sessionLabel = WorktreeRunner.remoteControlName(
+            identifier: identifier, title: ref.title,
+        )
+        guard launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
                          sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
                          planMode: planMode)
         else {
@@ -744,14 +747,32 @@ final class WorktreeRunner: @unchecked Sendable {
         }
     }
 
+    /// A human-readable name for the remote-control session — shown in the Claude
+    /// mobile app / claude.ai/code list (and `/resume`) instead of a random
+    /// "host-adjective-noun". Shape: "<issue> <short title> (<host>)". Single-
+    /// quoted in the launcher, so apostrophes/newlines are stripped.
+    static func remoteControlName(identifier: String, title: String) -> String {
+        let host = ProcessInfo.processInfo.hostName
+            .replacingOccurrences(of: ".local", with: "")
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shortTitle = trimmed.count > 40
+            ? String(trimmed.prefix(40)).trimmingCharacters(in: .whitespaces) + "…"
+            : trimmed
+        let raw = shortTitle.isEmpty ? "\(identifier) (\(host))"
+            : "\(identifier) \(shortTitle) (\(host))"
+        return raw
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
     // MARK: - tmux launch
 
-    /// Creates a named tmux session running Claude, pipes output to a log file,
-    /// and opens the session in iTerm2 (tmux -CC for native tabs) if available.
+    /// Creates a named tmux session running Claude and pipes output to a log file.
+    /// Headless — no terminal window is auto-opened (use Join to attach on demand).
     /// The launcher script writes sentinelPath when claude exits so pollUntilDone
     /// can detect early exits without waiting for the 8h deadline.
     @discardableResult
-    private func launchTmux(sessionPath: String, slug: String,
+    private func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
                             sentinelPath: String, mcpConfigPath: String? = nil,
                             planMode: Bool = false) -> Bool
     {
@@ -771,12 +792,15 @@ final class WorktreeRunner: @unchecked Sendable {
         // (correctly) returns state=running/action=null on every classify.
         // Pointing Claude at LEMON_CONTEXT.md makes the session self-starting.
         //
-        // The `--` matters: `--remote-control [name]` takes an *optional*
-        // positional argument. Without the separator, the kickoff prompt
-        // gets gobbled as the remote-control session name, leaving Claude
-        // at an empty REPL with the prompt mis-bound. Live-test caught this
-        // on HRP-37 — Gemma classified the resulting silence as state=stuck.
-        // Single-quoted in bash, so no apostrophes in the prompt body.
+        // `--remote-control [name]` takes an *optional* positional argument. We
+        // pass an explicit name (issue + short title + host) so the session shows
+        // up meaningfully in remote control / the phone app instead of a random
+        // "host-adjective-noun". The `--` separator still matters: it splits that
+        // name from the trailing kickoff prompt. Without it the prompt gets
+        // gobbled as the name, leaving Claude at an empty REPL with the prompt
+        // mis-bound — live-test caught this on HRP-37 (Gemma saw the silence as
+        // state=stuck). Both are single-quoted in bash, so neither the name nor
+        // the prompt body may carry apostrophes.
         // Plan-gate flow: launch in plan mode so Claude proposes a plan and
         // parks at the ExitPlanMode approval picker. Lemon surfaces the plan for
         // human approval, then send-keys "1" ("Yes, and use auto mode") to let
@@ -793,12 +817,20 @@ final class WorktreeRunner: @unchecked Sendable {
         // somewhere non-default-bash PATH won't find. Without this the launch
         // dies immediately with "claude: command not found" the moment tmux
         // boots the launcher.
+        // Bake the resolved claude binary into the launcher so it doesn't depend
+        // on `LEMON_CLAUDE_BIN` being inherited into the tmux pane. When
+        // `tmux new-session` attaches to a PRE-EXISTING server (e.g. the caller is
+        // itself inside tmux), the pane gets that server's global environment —
+        // which may lack the var — and would silently fall back to real `claude`
+        // (a sandbox stall, diagnosed on the #31 run). We still honour a
+        // pane-level override if one is present, but default to what Lemon saw.
+        let claudeBin = ProcessInfo.processInfo.environment["LEMON_CLAUDE_BIN"] ?? "claude"
         let launcher = """
         #!/bin/bash
         [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"
         [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile"
         [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
-        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-claude}" \(mcpFlag) --permission-mode \(permissionMode) --remote-control -- '\(kickoffPrompt)'
+        cd '\(sessionPath)' && "${LEMON_CLAUDE_BIN:-\(claudeBin)}" \(mcpFlag) --permission-mode \(permissionMode) --remote-control '\(sessionLabel)' -- '\(kickoffPrompt)'
         echo $? > '\(sentinelPath)'
         """
         do {
@@ -821,47 +853,15 @@ final class WorktreeRunner: @unchecked Sendable {
         // Pipe all pane output to the log file for Gemma to read.
         runSync("tmux pipe-pane -t '\(sessionName)' -o 'cat >> \(logPath(slug: slug))'")
 
-        // Sandbox runs are headless: the detached tmux session + pipe-pane log is
-        // all the scenario/MCP driver needs, so DON'T pop a Terminal window per
-        // session (dozens of scenario runs would otherwise pile up windows — and a
-        // killed tmux server strands them on "[server exited]"). Join a real
-        // session via the popover's Join button instead.
-        if KeychainStore.isSandbox {
-            log("[lemon] sandbox: headless tmux (no terminal window opened)")
-            return true
-        }
-
-        // Open a visible terminal so the user can watch and join. Prefer iTerm2
-        // (native tmux control mode via tmux -CC) and fall back to Terminal.app,
-        // which is present on every macOS install. The tmux session is detached
-        // either way — the visible window is for human eyes only.
-        let hasITerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
-        if hasITerm {
-            let ok = runSync("""
-            osascript -e 'tell application "iTerm" to create window with default profile \
-            command "tmux -CC attach -t \(sessionName)"' 2>/dev/null
-            """)
-            if !ok {
-                Logger.worktree.warning("iTerm window open failed for \(sessionName); falling back to Terminal.app")
-                openInTerminalApp(sessionName: sessionName)
-            }
-        } else {
-            openInTerminalApp(sessionName: sessionName)
-        }
-
+        // Headless by design. The tmux session is detached and the pane is piped
+        // to the log for Gemma; we do NOT auto-open a terminal window. With the
+        // plan gate + remote-control, the user drives from the popover/phone and
+        // attaches on demand via the Join button (SessionDetailView.joinSession),
+        // which opens + activates iTerm2/Terminal only when explicitly clicked.
+        // Auto-popping a window per session was stale friction (sandbox was
+        // already headless to avoid piling up scenario windows).
+        log("[lemon] tmux session ready — headless; use Join to attach")
         return true
-    }
-
-    /// Auto-launch path: the user didn't ask for this window — Lemon decided to
-    /// open it. So we deliberately omit `activate` to avoid stealing focus from
-    /// whatever they were typing in. Terminal.app's window still appears in the
-    /// window list and Mission Control; the user can switch to it when ready.
-    /// The Join button (PopoverView) uses an activate-ing variant for the case
-    /// where the user explicitly clicked Join.
-    private func openInTerminalApp(sessionName: String) {
-        runSync("""
-        osascript -e 'tell application "Terminal" to do script "tmux attach -t \(sessionName)"' 2>/dev/null || true
-        """)
     }
 
     // MARK: - Gemma orchestration
