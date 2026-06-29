@@ -27,6 +27,16 @@
 	<!-- Hide from Dock — menu bar only -->
 	<key>LSUIElement</key>
 	<true/>
+	<!--
+	  Deliberately NO Downloads / Desktop / Documents / Photos / Music / Movies /
+	  Camera / Contacts / Calendars NS*UsageDescription keys (#86). Lemon never
+	  legitimately touches the user's personal-data folders, and a spawned session's
+	  subprocess straying into one (a broad `find ~`) would otherwise prompt — and a
+	  reflexive "Allow" would grant every future session permanent access. With no
+	  usage string, macOS DENIES the access outright instead of prompting. Keep this
+	  list empty; LemonTests/InfoPlistPrivacyTests enforces it. (cf. #80, where we
+	  DID add an honest string for the loopback network use.)
+	-->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Lemon uses Terminal to launch Claude sessions.</string>
 	<!--
