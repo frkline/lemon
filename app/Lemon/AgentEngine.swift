@@ -128,6 +128,19 @@ struct OpenCodeEngine: AgentEngine {
         guard openCode.models.hasAllConfigured else {
             return .launchError("OpenCode model slots are incomplete (set plan/code/review models)")
         }
+        let malformed = openCode.models.malformedConfiguredModels
+        guard malformed.isEmpty else {
+            let joined = malformed.joined(separator: ", ")
+            return .launchError("OpenCode model IDs must use provider/model format; invalid: \(joined)")
+        }
+
+        let authValidation = OpenCodeAuthInspector.validateProviderCredentials(
+            requiredProviders: openCode.models.requiredProviders,
+            authPath: authPath,
+        )
+        if case let .missing(providers) = authValidation {
+            return .launchError("OpenCode auth is missing credentials for provider(s): \(providers.joined(separator: ", "))")
+        }
 
         let daemon = OpenCodeDaemonManager.shared
         let ensure = await daemon.ensureRunning(config: openCode.daemon)
@@ -175,6 +188,12 @@ struct OpenCodeEngine: AgentEngine {
         let hasAuth = FileManager.default.fileExists(atPath: authPath)
         let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
         let hasModels = openCode.models.hasAllConfigured
+        let malformedModels = openCode.models.malformedConfiguredModels
+        let requiredProviders = openCode.models.requiredProviders
+        let providerAuth = OpenCodeAuthInspector.validateProviderCredentials(
+            requiredProviders: requiredProviders,
+            authPath: authPath,
+        )
         let daemonURL = "http://\(openCode.daemon.host):\(openCode.daemon.port)/doc"
         let daemonReachable = AgentEngineShell.httpReachable(url: daemonURL)
 
@@ -198,8 +217,45 @@ struct OpenCodeEngine: AgentEngine {
             .init(
                 id: "opencode-models",
                 title: "Plan/Code/Review models",
-                detail: hasModels ? "All three model slots are set." : "Set all three model slots (provider/model).",
-                status: hasModels ? .pass : .fail,
+                detail: {
+                    if !hasModels {
+                        return "Set all three model slots (provider/model)."
+                    }
+                    if !malformedModels.isEmpty {
+                        return "Invalid model format: \(malformedModels.joined(separator: ", "))."
+                    }
+                    return "All three model slots are set."
+                }(),
+                status: hasModels && malformedModels.isEmpty ? .pass : .fail,
+            ),
+            .init(
+                id: "opencode-provider-auth",
+                title: "Provider keys for selected models",
+                detail: {
+                    guard hasAuth else {
+                        return "Run `opencode auth login` first."
+                    }
+                    guard hasModels, malformedModels.isEmpty else {
+                        return "Set valid provider/model IDs to verify provider keys."
+                    }
+                    switch providerAuth {
+                    case .allPresent:
+                        return "Credentials found for: \(requiredProviders.joined(separator: ", "))."
+                    case let .missing(providers):
+                        return "Missing credentials for: \(providers.joined(separator: ", "))."
+                    case let .unverifiable(reason):
+                        return "Could not verify provider keys from auth.json (\(reason))."
+                    }
+                }(),
+                status: {
+                    guard hasAuth, hasModels, malformedModels.isEmpty else { return .fail }
+                    switch providerAuth {
+                    case .allPresent, .unverifiable:
+                        return .pass
+                    case .missing:
+                        return .fail
+                    }
+                }(),
             ),
             .init(
                 id: "opencode-daemon",
@@ -239,6 +295,89 @@ struct OpenCodeEngine: AgentEngine {
         case .terminal:
             return false
         }
+    }
+}
+
+enum OpenCodeAuthValidation: Equatable {
+    case allPresent
+    case missing([String])
+    case unverifiable(String)
+}
+
+enum OpenCodeAuthInspector {
+    static func validateProviderCredentials(requiredProviders: [String], authPath: String) -> OpenCodeAuthValidation {
+        guard !requiredProviders.isEmpty else { return .allPresent }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: authPath)) else {
+            return .missing(requiredProviders)
+        }
+        return validateProviderCredentials(requiredProviders: requiredProviders, authData: data)
+    }
+
+    static func validateProviderCredentials(requiredProviders: [String], authData: Data) -> OpenCodeAuthValidation {
+        guard !requiredProviders.isEmpty else { return .allPresent }
+        guard let json = try? JSONSerialization.jsonObject(with: authData) else {
+            return .unverifiable("invalid json")
+        }
+
+        let missing = requiredProviders.filter { !providerHasCredential($0, in: json, inProviderContext: false) }
+        return missing.isEmpty ? .allPresent : .missing(missing)
+    }
+
+    private static let credentialKeyHints = [
+        "api_key", "apikey", "token", "access_token", "key", "secret", "pat",
+    ]
+
+    private static func providerHasCredential(_ provider: String,
+                                              in node: Any,
+                                              inProviderContext: Bool) -> Bool
+    {
+        switch node {
+        case let dict as [String: Any]:
+            for (key, value) in dict {
+                let lowered = key.lowercased()
+                let keyMentionsProvider = lowered == provider || lowered.contains(provider)
+                let providerContext = inProviderContext || keyMentionsProvider
+
+                if providerContext,
+                   isCredentialKey(lowered),
+                   hasNonEmptyCredentialScalar(value)
+                {
+                    return true
+                }
+
+                if keyMentionsProvider,
+                   isCredentialKey(lowered),
+                   hasNonEmptyCredentialScalar(value)
+                {
+                    return true
+                }
+
+                if providerHasCredential(provider, in: value, inProviderContext: providerContext) {
+                    return true
+                }
+            }
+            return false
+
+        case let array as [Any]:
+            return array.contains { providerHasCredential(provider, in: $0, inProviderContext: inProviderContext) }
+
+        default:
+            return false
+        }
+    }
+
+    private static func isCredentialKey(_ key: String) -> Bool {
+        credentialKeyHints.contains(where: { key.contains($0) })
+    }
+
+    private static func hasNonEmptyCredentialScalar(_ value: Any) -> Bool {
+        if let text = value as? String {
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if let number = value as? NSNumber {
+            return number.doubleValue != 0
+        }
+        return false
     }
 }
 

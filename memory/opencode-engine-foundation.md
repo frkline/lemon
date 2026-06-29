@@ -17,7 +17,8 @@ engine interface instead of calling Claude launch wiring directly.
 
 Settings/workspace editing now also includes **engine readiness checks** keyed by
 engine kind: Claude probes `claude` + `tmux` + `gh` + `hf` + `claude whoami`, and
-OpenCode probes `opencode`, auth.json, model slots, and daemon `/doc` reachability.
+OpenCode probes `opencode`, auth.json, model slots, provider-key coverage for the
+selected models, and daemon `/doc` reachability.
 
 Runtime scaffolding for OpenCode now has a first execution path: `OpenCodeEngine`
 ensures the daemon, creates a session via `/session`, and sends the kickoff
@@ -35,6 +36,10 @@ Follow-on hardening:
 - Gate/chat controls in `Orchestrator` now branch by engine kind: Claude keeps tmux
   send-keys, while OpenCode routes free-form text (including gate change notes) via
   daemon `sendMessage` when a session id is available.
+- Model IDs now parse provider slugs (`provider/model`) and readiness performs a
+  provider-specific auth check against `~/.local/share/opencode/auth.json` for the
+  exact providers referenced by plan/code/review slots. Launch also fails early if
+  selected providers are clearly missing credentials.
 
 **Why:** the workspace is Lemon's execution boundary already (routing + lockdown +
 filesystem mapping). Engine choice and model policy belong at that same boundary,

@@ -260,6 +260,33 @@ struct OpenCodeModelConfig: Codable, Hashable {
             && !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !review.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    var malformedConfiguredModels: [String] {
+        [plan, code, review]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { Self.providerSlug(for: $0) == nil }
+    }
+
+    var requiredProviders: [String] {
+        let parsed = [plan, code, review]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .compactMap(Self.providerSlug(for:))
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for provider in parsed where seen.insert(provider).inserted {
+            ordered.append(provider)
+        }
+        return ordered
+    }
+
+    static func providerSlug(for modelID: String) -> String? {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let slash = trimmed.firstIndex(of: "/") else { return nil }
+        let provider = String(trimmed[..<slash]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return provider.isEmpty ? nil : provider
+    }
 }
 
 struct OpenCodeDaemonConfig: Codable, Hashable {
