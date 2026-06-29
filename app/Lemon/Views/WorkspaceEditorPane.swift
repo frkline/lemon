@@ -32,6 +32,12 @@ struct WorkspaceEditorPane: View {
     @State private var typingCustomKey: Bool = false
     @State private var reseedState: ReseedState = .idle
 
+    private static let defaultOpenCodeModels: [String] = [
+        "anthropic/claude-opus-4",
+        "anthropic/claude-sonnet-4",
+        "openai/gpt-4.1-mini",
+    ]
+
     enum ReseedState: Equatable {
         case idle, working
         case success(Int)
@@ -126,12 +132,9 @@ struct WorkspaceEditorPane: View {
 
                 if engineKind == .openCode {
                     VStack(alignment: .leading, spacing: 8) {
-                        modelField("Plan model", text: $openCodePlanModel,
-                                   placeholder: "provider/model")
-                        modelField("Code model", text: $openCodeCodeModel,
-                                   placeholder: "provider/model")
-                        modelField("Review model", text: $openCodeReviewModel,
-                                   placeholder: "provider/model")
+                        openCodeModelField("Plan model", text: $openCodePlanModel)
+                        openCodeModelField("Code model", text: $openCodeCodeModel)
+                        openCodeModelField("Review model", text: $openCodeReviewModel)
 
                         HStack(spacing: 8) {
                             Text("Auto-open")
@@ -158,7 +161,7 @@ struct WorkspaceEditorPane: View {
                         }
 
                         HStack(spacing: 8) {
-                            modelField("Host", text: $openCodeHost, placeholder: "127.0.0.1")
+                            labeledField("Host", text: $openCodeHost, placeholder: "127.0.0.1")
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Port")
                                     .font(.system(size: 8, weight: .bold))
@@ -213,7 +216,56 @@ struct WorkspaceEditorPane: View {
         .buttonStyle(.plain)
     }
 
-    private func modelField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+    private func openCodeModelField(_ title: String, text: Binding<String>) -> some View {
+        let choices = modelChoices(current: text.wrappedValue)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            HStack(spacing: 8) {
+                TextField("provider/model", text: text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+
+                Menu {
+                    if choices.isEmpty {
+                        Button("No model suggestions yet") {}
+                            .disabled(true)
+                    } else {
+                        ForEach(choices, id: \.self) { choice in
+                            Button(choice) {
+                                text.wrappedValue = choice
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Clear") {
+                        text.wrappedValue = ""
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(LD.textSecondary)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: LD.r6)
+                                .fill(LD.textPrimary.opacity(0.08)),
+                        )
+                }
+                .menuStyle(.borderlessButton)
+                .help("Pick from recent or suggested model IDs")
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 9)
+            .background(
+                RoundedRectangle(cornerRadius: LD.r6)
+                    .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+            )
+        }
+    }
+
+    private func labeledField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.uppercased())
                 .font(.system(size: 8, weight: .bold))
@@ -229,6 +281,35 @@ struct WorkspaceEditorPane: View {
                         .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
                 )
         }
+    }
+
+    private var knownOpenCodeModelChoices: [String] {
+        let saved: [String] = KeychainStore.shared.workspaces
+            .flatMap { (workspace: Workspace) -> [String] in
+                guard workspace.engine.kind == .openCode,
+                      let models = workspace.engine.openCode?.models
+                else { return [] }
+                return [models.plan, models.code, models.review]
+            }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let merged = Self.defaultOpenCodeModels + saved
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for model in merged where seen.insert(model).inserted {
+            ordered.append(model)
+        }
+        return ordered
+    }
+
+    private func modelChoices(current: String) -> [String] {
+        let trimmedCurrent = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCurrent.isEmpty else { return knownOpenCodeModelChoices }
+        if knownOpenCodeModelChoices.contains(trimmedCurrent) {
+            return knownOpenCodeModelChoices
+        }
+        return [trimmedCurrent] + knownOpenCodeModelChoices
     }
 
     private var engineReadinessBlock: some View {
