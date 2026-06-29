@@ -217,7 +217,7 @@ struct SessionDetailView: View {
                 if let pr = session.prUrl, let url = URL(string: pr) {
                     // The one yellow on the reviewing screen: open the shipped PR.
                     Link(destination: url) {
-                        Label("Open PR", systemImage: "arrow.up.right.square")
+                        Label("View PR", systemImage: "arrow.up.right.square")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .buttonStyle(.plain)

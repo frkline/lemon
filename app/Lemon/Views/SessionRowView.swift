@@ -24,7 +24,7 @@ struct SessionRowView: View {
                     // the primary action only (and each list row can carry a PR).
                     // Neutral warm secondary, matching the detail-footer PR link.
                     Link(destination: url) {
-                        Label("Open PR", systemImage: "arrow.up.right.square")
+                        Label("View PR", systemImage: "arrow.up.right.square")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(LD.textSecondary)
                     }
@@ -52,7 +52,17 @@ struct SessionRowView: View {
         }
         // Resting leans on the popover's thick glass; hover thickens to the
         // regular-glass warm fill — depth from the material swap, not a stroke.
-        .background(hovered ? LD.glassRegularFill : Color.clear)
+        // The fill is an inset rounded rectangle (not a full-bleed hard edge), so
+        // the highlight reads as a soft sidebar-selection pill and the row
+        // hairlines stay visible above/below it.
+        .background {
+            if hovered {
+                RoundedRectangle(cornerRadius: LD.r10, style: .continuous)
+                    .fill(LD.glassRegularFill)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+            }
+        }
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
         .animation(LD.smooth, value: hovered)
