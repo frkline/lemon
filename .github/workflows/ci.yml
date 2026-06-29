@@ -56,6 +56,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: No CRLF in tracked text files
+        run: |
+          if git ls-files --eol | grep -E '\sw/crlf\s'; then
+            echo "::error::CRLF found in tracked text file(s) — convert to LF"
+            exit 1
+          fi
+
       - name: Install linters
         run: brew install swiftformat swiftlint
 
