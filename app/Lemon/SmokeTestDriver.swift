@@ -156,6 +156,79 @@
             NSApp.terminate(nil)
         }
 
+        // MARK: - Film (lemon.living "THE LOOP" autoplay loop)
+
+        /// Walk ONE issue through its whole lifecycle — picked up → plan gate →
+        /// approved → building → result gate → PR opened → back in the queue,
+        /// shipped — capturing a frame per beat. `scripts/loop-clip.sh` ffmpeg-
+        /// crossfades the frames into docs/img/loop.mp4. Deterministic + uses the
+        /// real views, so the demo regenerates instead of rotting (like the smoke loop).
+        func film() async {
+            let dir = "/tmp/lemon-film"
+            try? FileManager.default.removeItem(atPath: dir)
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            var idx = 0
+            func frame() async {
+                guard let w = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 100 }) else { return }
+                writePNG(of: w, to: String(format: "%@/frame-%04d.png", dir, idx))
+                idx += 1
+            }
+            /// jump() settles layout with animations off so each beat is crisp;
+            /// ffmpeg supplies the motion (crossfades) between beats. Each beat
+            /// resizes the window to the popover's natural fitting height (340-wide
+            /// envelope, like the real menu-bar popover) so frames aren't padded to
+            /// a non-representative fixed height — ffmpeg pads them uniformly later.
+            func beat(_ body: () -> Void) async {
+                jump(body)
+                try? await Task.sleep(for: .milliseconds(200))
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 100 }),
+                   let host = w.contentView
+                {
+                    let fit = host.fittingSize
+                    if fit.height > 50 { w.setContentSize(NSSize(width: 340, height: fit.height)) }
+                }
+                try? await Task.sleep(for: .milliseconds(240))
+                await frame()
+            }
+
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let s = orchestrator.sessions.active.first(where: { $0.status == .planReview })
+                ?? orchestrator.sessions.active.first
+            else {
+                Logger.orchestrator.warning("[film] no session to film")
+                NSApp.terminate(nil); return
+            }
+
+            await beat { nav.showList() } // 0 — the queue: issue picked up
+            await beat { nav.showDetail(s) } // 1 — plan gate (Approve & run)
+            await beat { // 2 — approved → building in auto mode
+                s.status = .executing
+                s.planMarkdown = nil
+                s.aiSummary = "Plan approved — building"
+                s.appendLog("[lemon] plan approved — building in auto mode")
+            }
+            await beat { // 3 — result gate (review before the PR)
+                s.status = .resultReview
+                s.aiSummary = "Built — 3 files changed, tests green. Ready to open the PR."
+                s.appendLog("[lemon] build ready for review — awaiting approval to open PR")
+            }
+            await beat { // 4 — PR opened, report posted
+                s.status = .reviewing
+                s.prUrl = "https://github.com/sandbox/demo/pull/2"
+                s.cleanupInfo = WorktreeCleanupInfo(
+                    sessionPath: "/tmp/lemon-sandbox-demo-2", isMultiRepo: false,
+                    repos: [.init(name: "demo", repoPath: "/tmp/lemon-sandbox/workspace")],
+                    slug: "sandbox-demo-2",
+                )
+                s.appendLog("[lemon] PR opened — posted Lemon report")
+            }
+            await beat { nav.showList() } // 5 — back in the queue, shipped
+
+            print("[film] \(idx) frames → \(dir)")
+            Logger.orchestrator.info("[film] \(idx) frames → \(dir)")
+            NSApp.terminate(nil)
+        }
+
         // MARK: - Onboarding
 
         private func runOnboarding() async {
@@ -221,21 +294,27 @@
         }
 
         private func shotWindow(_ window: NSWindow, name: String) async {
-            let path = "\(outputDir)/\(name).png"
-            guard let view = window.contentView else {
-                Logger.orchestrator.warning("[smoke] No contentView for \(name)")
-                return
+            if writePNG(of: window, to: "\(outputDir)/\(name).png") {
+                Logger.orchestrator.info("[smoke] → \(name).png")
+            } else {
+                Logger.orchestrator.warning("[smoke] capture failed for \(name)")
             }
+        }
+
+        /// In-process bitmap grab of a window's contentView → PNG at `path`.
+        /// Shared by the screenshot suite and the film capture.
+        @discardableResult
+        private func writePNG(of window: NSWindow, to path: String) -> Bool {
+            guard let view = window.contentView else { return false }
             let bounds = view.bounds
-            guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return }
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
             view.cacheDisplay(in: bounds, to: rep)
             let img = NSImage(size: rep.size)
             img.addRepresentation(rep)
             guard let tiff = img.tiffRepresentation,
                   let bmp = NSBitmapImageRep(data: tiff),
-                  let png = bmp.representation(using: .png, properties: [:]) else { return }
-            try? png.write(to: URL(fileURLWithPath: path))
-            Logger.orchestrator.info("[smoke] → \(name).png")
+                  let png = bmp.representation(using: .png, properties: [:]) else { return false }
+            return (try? png.write(to: URL(fileURLWithPath: path))) != nil
         }
 
         private func printResults() {

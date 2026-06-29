@@ -21,6 +21,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     let state = MockAppState.shared
                     state.orchestrator.seedMockSessions()
 
+                    // Film mode: drive the lifecycle walkthrough for the site's
+                    // autoplay loop, then exit. Shares the smoke window + capture.
+                    if KeychainStore.isFilmMode {
+                        openSmokeWindow(state: state)
+                        try? await Task.sleep(for: .milliseconds(800))
+                        await SmokeTestDriver(nav: state.nav, orchestrator: state.orchestrator).film()
+                        return
+                    }
+
                     guard KeychainStore.isSmokeTesting else { return }
                     openSmokeWindow(state: state)
                     try? await Task.sleep(for: .milliseconds(800))

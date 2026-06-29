@@ -1,4 +1,4 @@
-.PHONY: build-image open smoke-test help ui build-ui smoke watch test integration-test loop \
+.PHONY: build-image open smoke-test help ui build-ui smoke watch test integration-test loop loop-clip \
         sandbox sandbox-init sandbox-issue sandbox-show sandbox-reset sandbox-test
 
 UI_BUILD_DIR := /tmp/lemon-build
@@ -45,6 +45,11 @@ smoke:
 	@scripts/smoke-test.sh
 
 ui: build-ui smoke
+
+# Regenerate the lemon.living "THE LOOP" autoplay video from the real UI
+# (film-mode walkthrough → ffmpeg crossfade). Needs ffmpeg + an Apple-silicon GUI session.
+loop-clip: build-ui
+	@scripts/loop-clip.sh
 
 test:
 	@xcodebuild \

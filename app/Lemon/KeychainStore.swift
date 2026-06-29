@@ -15,6 +15,10 @@ final class KeychainStore: @unchecked Sendable {
     /// Pass --smoke-test (alongside --mock) to auto-navigate and screenshot all UI states.
     static let isSmokeTesting: Bool = ProcessInfo.processInfo.arguments.contains("--smoke-test")
 
+    /// Pass --film (alongside --mock) to walk one issue through its lifecycle and
+    /// capture a frame per beat for the lemon.living "THE LOOP" autoplay video.
+    static let isFilmMode: Bool = ProcessInfo.processInfo.arguments.contains("--film")
+
     /// Sandbox iteration mode: swaps the tracker for MockIssueClient and seeds a
     /// single fixture workspace/identity so the full poll loop runs against
     /// /tmp/lemon-sandbox with no GitHub/Linear traffic. See SandboxFixtures.

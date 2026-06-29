@@ -530,6 +530,13 @@ em{font-style:italic;color:var(--ink)}
   .macscene{zoom:.42}
   .nav{gap:10px}
 }
+/* THE LOOP autoplay demo — the real popover walking one issue plan→PR. Portrait
+   like the menu-bar popover; floats on the page so it reads as the live app. */
+.loopdemo{display:flex;flex-direction:column;align-items:center;gap:11px;margin:6px auto 34px}
+.loopvid{width:300px;max-width:78vw;height:auto;border-radius:16px;display:block;
+  box-shadow:0 28px 70px -28px rgba(0,0,0,.72), inset 0 0 0 .5px var(--panelRing)}
+.loopdemo figcaption{font-size:11px;color:var(--ink3);letter-spacing:.02em}
+@media (prefers-reduced-motion:reduce){.loopvid{}}
 </style>
 </head>
 <body>
@@ -643,6 +650,14 @@ em{font-style:italic;color:var(--ink)}
       <h2>Two gates, not a leap of faith.</h2>
       <p class="sub">This isn't fire-and-forget. Lemon parks the work at two human gates — once on the plan, once on the result — and Gemma keeps the session moving in between. Read along, drop into the live terminal, and steer the moments that matter while Claude grinds through the parts that don't. It pauses for you; it doesn't merge for you.</p>
     </div>
+    <figure class="loopdemo">
+      <video class="loopvid" autoplay loop muted playsinline preload="metadata"
+             poster="img/loop-poster.png" width="300"
+             aria-label="Lemon picking up an issue, approving the plan, and opening the PR">
+        <source src="img/loop.mp4" type="video/mp4">
+      </video>
+      <figcaption class="mono">one issue · picked up → plan → approve → PR</figcaption>
+    </figure>
     <ol class="steps">
       <li>
         <div class="num mono">01</div>
@@ -1032,6 +1047,12 @@ em{font-style:italic;color:var(--ink)}
     })
     .catch(function () {});
 })();
+// Respect reduced-motion: freeze the loop demo on its poster frame.
+if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.querySelectorAll('.loopvid').forEach(function (v) {
+    v.autoplay = false; v.pause(); v.currentTime = 0;
+  });
+}
 </script>
 </body>
 </html>
