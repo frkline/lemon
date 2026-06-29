@@ -229,8 +229,10 @@ struct OpenCodeEngine: AgentEngine {
 
         let liveness = await client.sessionLiveness(sessionID: sessionID)
         switch liveness {
-        case .active, .unknown:
+        case .active:
             return true
+        case .unknown:
+            return false
         case .terminal:
             return false
         }

@@ -37,7 +37,7 @@ struct OpenCodePermissionResponse: Codable {
     var decision: String
 }
 
-enum OpenCodeSessionLiveness {
+enum OpenCodeSessionLiveness: Equatable {
     case active
     case terminal
     case unknown
@@ -83,30 +83,66 @@ final class OpenCodeClient: Sendable {
             let data = try await request("GET", path: "/session/\(sessionID)")
             let object = try JSONSerialization.jsonObject(with: data)
             guard let dict = object as? [String: Any] else { return .unknown }
-            let probes = [
-                dict["status"],
-                dict["state"],
-                (dict["session"] as? [String: Any])?["status"],
-                (dict["session"] as? [String: Any])?["state"],
-            ]
-            let values = probes
-                .compactMap { $0 as? String }
-                .map { $0.lowercased() }
-            let terminalStates = [
-                "done", "completed", "stopped", "failed",
-                "error", "crashed", "cancelled", "aborted",
-            ]
-            if values.contains(where: { terminalStates.contains($0) }) {
-                return .terminal
-            }
-            let activeStates = ["running", "active", "queued", "working", "processing"]
-            if values.contains(where: { activeStates.contains($0) }) {
-                return .active
-            }
-            return .unknown
+            return Self.classifyLiveness(payload: dict)
+        } catch let OpenCodeClientError.http(code, _) where code == 404 || code == 410 {
+            // Session not found / gone is terminal for Lemon tracking.
+            return .terminal
         } catch {
             return .unknown
         }
+    }
+
+    static func classifyLiveness(payload: [String: Any]) -> OpenCodeSessionLiveness {
+        func boolProbe(_ key: String, in dict: [String: Any]) -> Bool? {
+            dict[key] as? Bool
+        }
+        let nested = payload["session"] as? [String: Any]
+
+        let terminalBooleans = [
+            boolProbe("done", in: payload),
+            boolProbe("completed", in: payload),
+            boolProbe("stopped", in: payload),
+            boolProbe("failed", in: payload),
+            boolProbe("done", in: nested ?? [:]),
+            boolProbe("completed", in: nested ?? [:]),
+            boolProbe("stopped", in: nested ?? [:]),
+            boolProbe("failed", in: nested ?? [:]),
+        ]
+        if terminalBooleans.contains(true) {
+            return .terminal
+        }
+
+        let activeBooleans = [
+            boolProbe("running", in: payload),
+            boolProbe("active", in: payload),
+            boolProbe("running", in: nested ?? [:]),
+            boolProbe("active", in: nested ?? [:]),
+        ]
+        if activeBooleans.contains(true) {
+            return .active
+        }
+
+        let probes = [
+            payload["status"],
+            payload["state"],
+            nested?["status"],
+            nested?["state"],
+        ]
+        let values = probes
+            .compactMap { $0 as? String }
+            .map { $0.lowercased() }
+        let terminalStates = [
+            "done", "completed", "stopped", "failed",
+            "error", "crashed", "cancelled", "aborted",
+        ]
+        if values.contains(where: { terminalStates.contains($0) }) {
+            return .terminal
+        }
+        let activeStates = ["running", "active", "queued", "working", "processing"]
+        if values.contains(where: { activeStates.contains($0) }) {
+            return .active
+        }
+        return .unknown
     }
 
     private func request(_ method: String, path: String, body: Data? = nil) async throws -> Data {

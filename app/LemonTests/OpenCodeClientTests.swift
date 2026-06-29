@@ -11,4 +11,23 @@ final class OpenCodeClientTests: XCTestCase {
         let client = OpenCodeClient(host: "localhost", port: 5001)
         XCTAssertEqual(client.baseURL.absoluteString, "http://localhost:5001")
     }
+
+    func testClassifyLivenessTerminalByStatusString() {
+        let payload: [String: Any] = ["status": "completed"]
+        XCTAssertEqual(OpenCodeClient.classifyLiveness(payload: payload), .terminal)
+    }
+
+    func testClassifyLivenessTerminalByBoolean() {
+        let payload: [String: Any] = ["session": ["done": true]]
+        XCTAssertEqual(OpenCodeClient.classifyLiveness(payload: payload), .terminal)
+    }
+
+    func testClassifyLivenessActiveByStatusString() {
+        let payload: [String: Any] = ["state": "running"]
+        XCTAssertEqual(OpenCodeClient.classifyLiveness(payload: payload), .active)
+    }
+
+    func testClassifyLivenessUnknownForEmptyPayload() {
+        XCTAssertEqual(OpenCodeClient.classifyLiveness(payload: [:]), .unknown)
+    }
 }
