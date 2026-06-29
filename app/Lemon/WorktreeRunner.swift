@@ -625,11 +625,14 @@ final class WorktreeRunner: @unchecked Sendable {
         1. Write a concise summary of what you changed and how you verified it to BOTH:
            - `.lemon-summary.md` in this worktree, and
            - the result-review sentinel `\(resultPath)` — creating that file signals Lemon your build is ready for review.
-           Then STOP and wait. Do NOT open the PR yet.
-        2. A human reviews and replies via Lemon:
-           - **"Approved — open the PR now."** → open the PR (`gh pr create …`), then \(completeInstruction)
-           - **change requests** → address them, re-commit and push, then write `\(resultPath)` again to request another review.
-        3. Kill any dev servers, background tasks, or external resources you started.
+        2. Then **present the decision as a selectable choice** using the **AskUserQuestion tool** (do NOT just stop and idle, and do NOT open the PR yet). Ask one question — e.g. "Open the PR for \(ref.identifier)?" — with these two options, in this exact order:
+           1. **Approve — open the PR now**
+           2. **Request changes**
+           This renders as a tappable choice on the reviewer's phone (remote-control) and in Lemon's popover. The reviewer may tap an option, or use the free-text / "Other" field to type specific feedback. Wait for the selection.
+        3. Act on the selection:
+           - **Approve** → open the PR (`gh pr create …`), then \(completeInstruction)
+           - **Request changes** (or any typed feedback) → address it, re-commit and push, write `\(resultPath)` again, and **ask the same AskUserQuestion again** for another review.
+        4. Kill any dev servers, background tasks, or external resources you started.
 
         If you need human input mid-build, apply the label **🍋 Waiting** and pause.
         If the issue's team LEMON.md above gave you extra steps, do those too.

@@ -847,8 +847,10 @@ final class Orchestrator {
     /// Resolve a human gate (plan review or result review). Backs both the
     /// popover buttons and the `approve_gate` MCP tool, so approval reaches a
     /// session whether the user is at the desk or remote. The keystroke maps to
-    /// the live `claude` UI: the ExitPlanMode picker's "1. Yes, and use auto
-    /// mode" / "4. Tell Claude what to change". No-ops with a log if the session
+    /// the live `claude` picker: at the plan gate, ExitPlanMode's "1. Yes, and
+    /// use auto mode" / "4. Tell Claude what to change"; at the result gate, the
+    /// AskUserQuestion picker claude raises per LEMON_CONTEXT — "1. Approve —
+    /// open the PR now" / "2. Request changes". No-ops with a log if the session
     /// isn't actually parked at a gate.
     func resolveGate(session: Session, decision: GateDecision) {
         let gate = session.status
@@ -871,11 +873,11 @@ final class Orchestrator {
             sendTmuxKeys(to: sessionName, keys: "4") // "Tell Claude what to change"
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
         case (.resultReview, .approve):
-            sendTmuxLine(to: sessionName, text: "Approved — open the PR now.")
+            sendTmuxKeys(to: sessionName, keys: "1") // "Approve — open the PR now"
             try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.status = .executing
         case (.resultReview, .requestChanges):
-            sendTmuxLine(to: sessionName, text: "Please revise before opening the PR.")
+            sendTmuxKeys(to: sessionName, keys: "2") // "Request changes"
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.status = .executing
         default:
@@ -900,11 +902,6 @@ final class Orchestrator {
 
     private func sendTmuxKeys(to sessionName: String, keys: String) {
         _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(keys)' Enter")
-    }
-
-    private func sendTmuxLine(to sessionName: String, text: String) {
-        let esc = text.replacingOccurrences(of: "'", with: "'\\''")
-        _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(esc)' Enter")
     }
 
     @discardableResult
