@@ -438,6 +438,22 @@ private struct StepShell<Content: View>: View {
 // second pair shows your existing Linear identity at the top of the
 // "Route through" list and skips the credential field entirely.
 
+/// The Verify pill's surface: the page's single lemon-yellow capsule while
+/// Verify is the live primary action, otherwise the resting neutral glass that
+/// brightens its ring when armed. Kept as one branch so the color swap never
+/// changes the capsule geometry.
+private struct VerifyPillSurface: ViewModifier {
+    let isPrimary: Bool
+    let armed: Bool
+    func body(content: Content) -> some View {
+        if isPrimary {
+            content.background(LD.lemon, in: Capsule())
+        } else {
+            content.lemonGlass(armed ? .regular : .thin, cornerRadius: 999)
+        }
+    }
+}
+
 private struct TrackersStep: View {
     @Binding var savedPairs: [DraftPair]
     @Binding var verifiedIdentities: [DraftPair.VerifiedSnapshot]
@@ -897,6 +913,12 @@ private struct TrackersStep: View {
 
     private var verifyRow: some View {
         let canVerify = !draft.newIdentityToken.isEmpty && verifyState != .verifying
+        // Verify wears the page's single yellow only while it is the genuine
+        // live next action — armed, and the footer Continue can't proceed yet
+        // (no saved pair AND this draft unverified). The instant verify
+        // succeeds, canContinue flips true and the yellow hands back to the
+        // footer CTA, so the screen never shows two yellows at once.
+        let verifyIsPrimary = canVerify && !canContinue
         return HStack(spacing: 10) {
             Button {
                 Task { await verify() }
@@ -911,16 +933,14 @@ private struct TrackersStep: View {
                     Text(verifyState == .verifying ? "Verifying…" : "Verify & sync")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                // Neutral glass affordance — yellow is reserved for the footer
-                // CTA, so Verify reads as a quiet inline action that brightens
-                // its text when armed.
-                .foregroundStyle(canVerify ? LD.textPrimary : LD.textTertiary)
+                .foregroundStyle(verifyIsPrimary ? LD.citrus : (canVerify ? LD.textPrimary : LD.textTertiary))
                 .padding(.horizontal, 14).padding(.vertical, 7)
-                .lemonGlass(canVerify ? .regular : .thin, cornerRadius: 999)
+                .modifier(VerifyPillSurface(isPrimary: verifyIsPrimary, armed: canVerify))
             }
             .buttonStyle(.plain)
             .disabled(!canVerify)
             .animation(LD.smooth, value: canVerify)
+            .animation(LD.smooth, value: verifyIsPrimary)
 
             verifyStateChip
             Spacer()

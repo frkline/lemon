@@ -237,6 +237,10 @@ struct IdentityEditorPane: View {
 
     private var verifyRow: some View {
         let canVerify = !token.isEmpty && verifyState != .verifying
+        // While Verify is armed but not yet verified it is the genuine next
+        // action, so it wears the page's single yellow; once verified, the
+        // yellow hands back to Save and Verify settles to a warm neutral.
+        let verifyIsPrimary = canVerify && !verified
         return HStack(spacing: 10) {
             Button {
                 Task { await runVerify() }
@@ -251,21 +255,15 @@ struct IdentityEditorPane: View {
                     Text(verifyButtonLabel)
                 }
                 .font(.system(size: 12, weight: .semibold))
-                // Yellow is reserved for Save — verify is a warm neutral.
-                .foregroundStyle(canVerify ? LD.textPrimary : LD.textQuaternary)
+                .foregroundStyle(verifyIsPrimary ? LD.citrus : (canVerify ? LD.textPrimary : LD.textQuaternary))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(LD.glassRegularFill, in: Capsule())
-                .overlay(
-                    Capsule().strokeBorder(
-                        canVerify ? LD.hairlineRegular : LD.hairlineThin,
-                        lineWidth: LD.hairlineWidth,
-                    ),
-                )
+                .modifier(VerifyPillSurface(isPrimary: verifyIsPrimary, armed: canVerify))
             }
             .buttonStyle(.plain)
             .disabled(!canVerify)
             .animation(LD.smooth, value: canVerify)
+            .animation(LD.smooth, value: verifyIsPrimary)
 
             verifyStateChip
             Spacer(minLength: 0)
@@ -648,6 +646,29 @@ struct IdentityEditorPane: View {
                     .foregroundStyle(LD.textQuaternary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+/// The Verify pill's surface: the page's single lemon-yellow capsule while
+/// Verify is the live primary action (armed, not yet verified), otherwise the
+/// resting warm-neutral capsule that firms its ring when armed. One branch so
+/// the color swap never changes the capsule geometry.
+private struct VerifyPillSurface: ViewModifier {
+    let isPrimary: Bool
+    let armed: Bool
+    func body(content: Content) -> some View {
+        if isPrimary {
+            content.background(LD.lemon, in: Capsule())
+        } else {
+            content
+                .background(LD.glassRegularFill, in: Capsule())
+                .overlay(
+                    Capsule().strokeBorder(
+                        armed ? LD.hairlineRegular : LD.hairlineThin,
+                        lineWidth: LD.hairlineWidth,
+                    ),
+                )
         }
     }
 }
