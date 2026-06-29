@@ -16,6 +16,16 @@ struct SettingsView: View {
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var maxConcurrent = KeychainStore.defaultMaxConcurrent
     @State private var aiTestState: AITestState = .idle
+    @State private var openCodePlanModel = ""
+    @State private var openCodeCodeModel = ""
+    @State private var openCodeReviewModel = ""
+    @State private var openCodeAutoOpenThreshold: OpenCodeAutoOpenThreshold = .highConfidenceOnly
+    @State private var openCodeHost = "127.0.0.1"
+    @State private var openCodePort = 4096
+    @State private var openCodeCatalog: [String] = []
+    @State private var openCodeCatalogLoading = false
+    @State private var openCodeReadiness: AgentEngineReadiness?
+    @State private var openCodeTask: Task<Void, Never>?
 
     // MCP server state — mirrors UserDefaults but lets the toggle drive
     // start/stop on change. The port text field is also a UserDefault.
@@ -38,6 +48,7 @@ struct SettingsView: View {
                     generalSection
                     identitiesPanel
                     workspacesPanel
+                    agentEnginesSection
                     localAISection
                     mcpSection
                 }
@@ -51,7 +62,10 @@ struct SettingsView: View {
         // gets a bounded frame and scrolls its content instead of forcing the
         // window taller than the screen. (Was minHeight: 780, which overflowed.)
         .frame(maxHeight: .infinity)
-        .onAppear { load() }
+        .onAppear {
+            load()
+            refreshOpenCodeDefaultsStatus()
+        }
     }
 
     // MARK: - Sections
@@ -493,6 +507,276 @@ struct SettingsView: View {
             .padding(.vertical, 2)
             .background(Capsule().fill(tint.opacity(0.08)))
             .overlay(Capsule().strokeBorder(tint.opacity(0.20), lineWidth: 0.5))
+    }
+
+    // MARK: - Agent engines
+
+    private var agentEnginesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                sectionLabel("Agent Engines")
+                Spacer()
+                eyebrowBadge("Claude default · OpenCode fallback")
+            }
+
+            VStack(spacing: 0) {
+                openCodeDefaultsHeader
+                Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 56)
+                VStack(alignment: .leading, spacing: 9) {
+                    settingsOpenCodeModelField("Plan", text: $openCodePlanModel)
+                    settingsOpenCodeModelField("Code", text: $openCodeCodeModel)
+                    settingsOpenCodeModelField("Review", text: $openCodeReviewModel)
+                    HStack(spacing: 8) {
+                        settingsOpenCodeMenu
+                        settingsOpenCodeHostField
+                        settingsOpenCodePortField
+                    }
+                    openCodeReadinessMiniBlock
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+            .lemonGlass(.thick, cornerRadius: LD.r14)
+        }
+    }
+
+    private var openCodeDefaultsHeader: some View {
+        HStack(spacing: 12) {
+            rowIconCell("switch.2", on: openCodeReadiness?.isReady == true)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("OpenCode defaults")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(LD.textPrimary)
+                    Spacer()
+                    openCodeStatusChip
+                }
+                Text(openCodeDefaultsDetail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(openCodeCatalog.isEmpty ? LD.textTertiary : LD.statusDone)
+                    .lineLimit(2)
+            }
+            if openCodeCatalogLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.75)
+            } else {
+                Button("Refresh") { refreshOpenCodeDefaultsStatus() }
+                    .buttonStyle(GhostButtonStyle())
+                    .font(.system(size: 11, weight: .semibold))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    @ViewBuilder
+    private var openCodeStatusChip: some View {
+        if openCodeReadiness?.isReady == true {
+            HStack(spacing: 3) {
+                Circle().fill(LD.statusDone).frame(width: 4, height: 4)
+                Text("ready")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.statusDone)
+            }
+        } else {
+            HStack(spacing: 3) {
+                Circle().fill(LD.coral).frame(width: 4, height: 4)
+                Text("setup needed")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.coral)
+            }
+        }
+    }
+
+    private var openCodeDefaultsDetail: String {
+        if openCodeCatalogLoading {
+            return "Starting opencode serve and loading the model catalog..."
+        }
+        if !openCodeCatalog.isEmpty {
+            return "Catalog loaded from \(resolvedOpenCodeDefaultsHost):\(openCodePort) · \(openCodeCatalog.count) models."
+        }
+        return "Global defaults for OpenCode workspaces. Provider keys stay in OpenCode auth.json."
+    }
+
+    private func settingsOpenCodeModelField(_ title: String, text: Binding<String>) -> some View {
+        let choices = settingsOpenCodeModelChoices(current: text.wrappedValue)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(title.uppercased()) MODEL")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            HStack(spacing: 8) {
+                TextField("provider/model", text: text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                Menu {
+                    ForEach(choices, id: \.self) { choice in
+                        Button(choice) { text.wrappedValue = choice }
+                    }
+                    Divider()
+                    Button("Clear") { text.wrappedValue = "" }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(LD.textSecondary)
+                        .frame(width: 18, height: 18)
+                        .background(RoundedRectangle(cornerRadius: LD.r6).fill(LD.textPrimary.opacity(0.08)))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 9)
+            .background(RoundedRectangle(cornerRadius: LD.r6).strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
+        }
+    }
+
+    private var settingsOpenCodeMenu: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("AUTO-OPEN")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            Menu {
+                ForEach(OpenCodeAutoOpenThreshold.allCases, id: \.self) { threshold in
+                    Button(threshold.displayName) { openCodeAutoOpenThreshold = threshold }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(openCodeAutoOpenThreshold.displayName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(LD.textPrimary)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(LD.textTertiary)
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: LD.r6).strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
+    }
+
+    private var settingsOpenCodeHostField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("HOST")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            TextField("127.0.0.1", text: $openCodeHost)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .frame(width: 118)
+                .background(RoundedRectangle(cornerRadius: LD.r6).strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
+        }
+    }
+
+    private var settingsOpenCodePortField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PORT")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            TextField("4096", text: settingsOpenCodePortBinding)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .frame(width: 66)
+                .background(RoundedRectangle(cornerRadius: LD.r6).strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
+        }
+    }
+
+    private var openCodeReadinessMiniBlock: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let openCodeReadiness {
+                ForEach(openCodeReadiness.checks.prefix(5)) { check in
+                    HStack(alignment: .top, spacing: 6) {
+                        Circle()
+                            .fill(check.status == .pass ? LD.statusDone : LD.coral)
+                            .frame(width: 5, height: 5)
+                            .padding(.top, 4)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(check.title)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(LD.textPrimary)
+                            Text(check.detail)
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(LD.textTertiary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var settingsOpenCodePortBinding: Binding<String> {
+        Binding(
+            get: { String(openCodePort) },
+            set: { rawValue in
+                let digits = rawValue.filter(\.isNumber)
+                guard let parsed = Int(digits) else { return }
+                openCodePort = max(1, min(parsed, 65535))
+            },
+        )
+    }
+
+    private var resolvedOpenCodeDefaultsHost: String {
+        let host = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        return host.isEmpty ? "127.0.0.1" : host
+    }
+
+    private var openCodeDefaultsConfig: OpenCodeWorkspaceConfig {
+        OpenCodeWorkspaceConfig(
+            models: OpenCodeModelConfig(
+                plan: openCodePlanModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                code: openCodeCodeModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                review: openCodeReviewModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            ),
+            autoOpenThreshold: openCodeAutoOpenThreshold,
+            daemon: OpenCodeDaemonConfig(host: resolvedOpenCodeDefaultsHost, port: max(1, min(openCodePort, 65535))),
+        )
+    }
+
+    private func settingsOpenCodeModelChoices(current: String) -> [String] {
+        let saved = KeychainStore.shared.workspaces
+            .flatMap { workspace -> [String] in
+                guard let models = workspace.engine.openCode?.models else { return [] }
+                return [models.plan, models.code, models.review]
+            }
+        let current = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let merged = openCodeCatalog + WorkspaceEditorPane.defaultOpenCodeModels + saved + (current.isEmpty ? [] : [current])
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for model in merged.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !model.isEmpty && seen.insert(model).inserted {
+            ordered.append(model)
+        }
+        return ordered
+    }
+
+    private func refreshOpenCodeDefaultsStatus() {
+        openCodeTask?.cancel()
+        openCodeCatalogLoading = true
+        let config = openCodeDefaultsConfig
+        openCodeTask = Task {
+            _ = await OpenCodeDaemonManager.shared.ensureRunning(config: config.daemon)
+            let catalog = await OpenCodeClient(host: config.daemon.host, port: config.daemon.port).availableModelIDs()
+            let readiness = await Task.detached(priority: .utility) {
+                AgentEngineFactory.make(kind: .openCode).readiness(config: WorkspaceEngineConfig(kind: .openCode, openCode: config))
+            }.value
+            guard !Task.isCancelled else { return }
+            openCodeCatalog = catalog
+            openCodeReadiness = readiness
+            openCodeCatalogLoading = false
+        }
     }
 
     // MARK: - Local AI
@@ -985,6 +1269,13 @@ struct SettingsView: View {
         githubUser = k.githubUser
         pairs = k.pairs
         maxConcurrent = k.maxConcurrentSessions
+        let openCode = k.openCodeDefaults
+        openCodePlanModel = openCode.models.plan
+        openCodeCodeModel = openCode.models.code
+        openCodeReviewModel = openCode.models.review
+        openCodeAutoOpenThreshold = openCode.autoOpenThreshold
+        openCodeHost = openCode.daemon.host
+        openCodePort = openCode.daemon.port
     }
 
     private func save() {
@@ -993,6 +1284,7 @@ struct SettingsView: View {
         if !githubToken.isEmpty { k.githubToken = githubToken }
         if !githubUser.isEmpty { k.githubUser = githubUser }
         k.pairs = pairs
+        k.openCodeDefaults = openCodeDefaultsConfig
         withAnimation { saved = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             withAnimation { saved = false }

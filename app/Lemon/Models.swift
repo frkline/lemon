@@ -287,6 +287,15 @@ struct OpenCodeModelConfig: Codable, Hashable {
         let provider = String(trimmed[..<slash]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return provider.isEmpty ? nil : provider
     }
+
+    static func splitProviderModel(_ modelID: String) -> (providerID: String, modelID: String)? {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let slash = trimmed.firstIndex(of: "/") else { return nil }
+        let provider = String(trimmed[..<slash]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let model = String(trimmed[trimmed.index(after: slash)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !provider.isEmpty, !model.isEmpty else { return nil }
+        return (provider, model)
+    }
 }
 
 struct OpenCodeDaemonConfig: Codable, Hashable {

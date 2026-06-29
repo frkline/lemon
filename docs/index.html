@@ -553,9 +553,6 @@ em{font-style:italic;color:var(--ink)}
   <header class="nav">
     <div class="brand"><span class="lemon">🍋</span> Lemon</div>
     <nav class="navlinks">
-      <a href="#loop">The loop</a>
-      <a href="#how">How it works</a>
-      <a href="#setup">Setup</a>
       <a href="/llms.txt">llms.txt</a>
     </nav>
     <span class="spacer"></span>
@@ -578,7 +575,7 @@ em{font-style:italic;color:var(--ink)}
         <a class="btn primary" href="https://github.com/frkline/lemon/releases" target="_blank" rel="noopener">Download for Apple silicon</a>
         <a class="btn ghost" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">View source</a>
       </div>
-      <p class="fineprint mono">macOS 26 · Claude Code today · OpenCode in progress · Gemma 4 on-device</p>
+      <p class="fineprint mono">macOS 26 · built for Claude Code · supports OpenCode · Gemma 4 on-device</p>
     </div>
     <div class="hero-visual">
       <div class="macscene">
@@ -935,9 +932,9 @@ em{font-style:italic;color:var(--ink)}
   <!-- SETUP -->
   <section class="band setup" id="setup">
     <div class="copycol">
-      <span class="eyebrow"><i></i>Setup</span>
-      <h2>Two commands and a wizard.</h2>
-      <p class="sub">Install, launch, and Lemon walks you through connecting Linear and GitHub. The model downloads itself.</p>
+      <span class="eyebrow"><i></i>Engines</span>
+      <h2>Open Code, now open.</h2>
+      <p class="sub">Lemon is Claude Code-biased by default because Claude Code is excellent. But when you hit a session cap, a weekly limit, or just want your own OpenAI, Anthropic, Ollama, or Models.dev provider, flip a workspace to OpenCode and keep shipping.</p>
     </div>
     <div class="vizcol">
       <div class="appui" style="width:100%">
@@ -949,17 +946,18 @@ em{font-style:italic;color:var(--ink)}
             <span class="t mono">zsh — lemon</span>
           </div>
           <div class="body mono">
-            <div><span class="dim"># runtime prereqs</span></div>
+            <div><span class="dim"># default path: Claude Code</span></div>
             <div><span class="pr">›</span> <span class="cm">brew install</span> hf tmux gh claude-code</div>
             <div style="height:10px"></div>
-            <div><span class="dim"># grab the signed .app from GitHub Releases, drag to /Applications</span></div>
-            <div><span class="pr">›</span> <span class="cm">open</span> https://github.com/frkline/lemon/releases</div>
+            <div><span class="dim"># limit hit? switch that workspace to OpenCode</span></div>
+            <div><span class="pr">›</span> <span class="cm">brew install</span> anomalyco/tap/opencode</div>
+            <div><span class="pr">›</span> <span class="cm">opencode</span> auth login</div>
             <div style="height:10px"></div>
-            <div><span class="dim"># first launch — the onboarding wizard handles the rest</span></div>
-            <div><span class="dim">  ✓ connected Linear · 6 teams</span></div>
-            <div><span class="dim">  ✓ connected GitHub · acme/web</span></div>
-            <div><span class="dim">  ✓ pulled supervisor model · gemma-4-e2b-it-4bit</span></div>
-            <div><span class="dim">  ✓ Lemon is in your menu bar →</span></div>
+            <div><span class="dim"># Lemon discovers the daemon catalog</span></div>
+            <div><span class="dim">  ✓ opencode serve · 127.0.0.1:4096</span></div>
+            <div><span class="dim">  ✓ models · openai/gpt-5.3-codex</span></div>
+            <div><span class="dim">  ✓ plan/code/review slots per workspace</span></div>
+            <div><span class="dim">  ✓ your provider keys stay with OpenCode</span></div>
           </div>
         </div>
       </div>

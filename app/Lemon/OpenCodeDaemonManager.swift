@@ -14,7 +14,7 @@ actor OpenCodeDaemonManager {
     private var config: OpenCodeDaemonConfig?
 
     func ensureRunning(config: OpenCodeDaemonConfig) async -> EnsureResult {
-        if await OpenCodeClient(host: config.host, port: config.port).docReachable() {
+        if await OpenCodeClient(host: config.host, port: config.port).daemonReachable() {
             self.config = config
             return .ready
         }
@@ -26,7 +26,8 @@ actor OpenCodeDaemonManager {
         stopIfNeeded()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lc", "cd /tmp && opencode serve"]
+        let host = AgentEngineShell.shellQuote(config.host)
+        p.arguments = ["-lc", "cd /tmp && opencode serve --hostname \(host) --port \(config.port)"]
         p.standardOutput = Pipe()
         p.standardError = Pipe()
         do {
@@ -38,7 +39,7 @@ actor OpenCodeDaemonManager {
         }
 
         for _ in 0 ..< 15 {
-            if await OpenCodeClient(host: config.host, port: config.port).docReachable() {
+            if await OpenCodeClient(host: config.host, port: config.port).daemonReachable() {
                 return .ready
             }
             try? await Task.sleep(for: .milliseconds(200))

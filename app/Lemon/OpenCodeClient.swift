@@ -18,19 +18,42 @@ enum OpenCodeClientError: LocalizedError {
     }
 }
 
-struct OpenCodeSessionCreateRequest: Codable {
-    var model: String?
+struct OpenCodeModelReference: Codable, Equatable {
+    var id: String
+    var providerID: String
+}
+
+struct OpenCodeSessionCreateRequest: Encodable {
+    var model: OpenCodeModelReference?
     var dir: String?
     var agent: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model, agent
+    }
 }
 
 struct OpenCodeSessionCreateResponse: Codable {
     var id: String
 }
 
-struct OpenCodeMessageRequest: Codable {
+struct OpenCodeMessageRequest: Encodable {
     var content: String
     var prompt_async: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case parts
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode([OpenCodeTextPartInput(text: content)], forKey: .parts)
+    }
+}
+
+private struct OpenCodeTextPartInput: Encodable {
+    var type = "text"
+    var text: String
 }
 
 struct OpenCodePermissionResponse: Codable {
@@ -61,8 +84,16 @@ final class OpenCodeClient: Sendable {
         }
     }
 
+    func daemonReachable() async -> Bool {
+        let paths = ["/doc", "/config/providers", "/provider", "/api/model"]
+        for path in paths {
+            guard await (try? request("GET", path: path)) == nil else { return true }
+        }
+        return false
+    }
+
     func availableModelIDs() async -> [String] {
-        let paths = ["/models", "/v1/models", "/doc"]
+        let paths = ["/config/providers", "/provider", "/api/model", "/api/provider", "/doc"]
         var seen = Set<String>()
         var ordered: [String] = []
 
@@ -80,7 +111,8 @@ final class OpenCodeClient: Sendable {
     @discardableResult
     func createSession(_ requestBody: OpenCodeSessionCreateRequest) async throws -> OpenCodeSessionCreateResponse {
         let body = try JSONEncoder().encode(requestBody)
-        let data = try await request("POST", path: "/session", body: body)
+        let query = requestBody.dir.map { [URLQueryItem(name: "directory", value: $0)] } ?? []
+        let data = try await request("POST", path: "/session", queryItems: query, body: body)
         return try decode(data, as: OpenCodeSessionCreateResponse.self)
     }
 
@@ -174,6 +206,57 @@ final class OpenCodeClient: Sendable {
         var seen = Set<String>()
         var ordered: [String] = []
 
+        func append(providerID: String?, modelID rawModelID: String) {
+            let modelID = rawModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelID.isEmpty else { return }
+            let provider = providerID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let display = if let provider, !provider.isEmpty {
+                "\(provider)/\(modelID)"
+            } else {
+                modelID
+            }
+            guard OpenCodeModelConfig.providerSlug(for: display) != nil else { return }
+            if seen.insert(display).inserted {
+                ordered.append(display)
+            }
+        }
+
+        func visitModelList(_ node: Any) {
+            switch node {
+            case let dict as [String: Any]:
+                let providerID = dict["providerID"] as? String
+                    ?? dict["providerId"] as? String
+                if let id = dict["id"] as? String, let providerID {
+                    append(providerID: providerID, modelID: id)
+                }
+
+                if let models = dict["models"] as? [String: Any] {
+                    let ownerProvider = dict["id"] as? String ?? providerID
+                    for (key, value) in models {
+                        if let model = value as? [String: Any], let id = model["id"] as? String {
+                            append(providerID: ownerProvider, modelID: id)
+                        } else {
+                            append(providerID: ownerProvider, modelID: key)
+                        }
+                    }
+                }
+
+                for value in dict.values {
+                    visitModelList(value)
+                }
+
+            case let array as [Any]:
+                for value in array {
+                    visitModelList(value)
+                }
+
+            default:
+                break
+            }
+        }
+
+        visitModelList(json)
+
         func visit(_ node: Any, keyHint: String?) {
             switch node {
             case let dict as [String: Any]:
@@ -229,8 +312,17 @@ final class OpenCodeClient: Sendable {
         return lowered.contains("model") || lowered == "id" || lowered.contains("name")
     }
 
-    private func request(_ method: String, path: String, body: Data? = nil) async throws -> Data {
-        var req = URLRequest(url: baseURL.appendingPathComponent(path))
+    private func request(_ method: String, path: String, queryItems: [URLQueryItem] = [], body: Data? = nil) async throws -> Data {
+        let normalizedPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        var components = URLComponents(url: baseURL.appendingPathComponent(normalizedPath), resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+        guard let url = components?.url else {
+            throw OpenCodeClientError.invalidResponse
+        }
+
+        var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
@@ -242,9 +334,9 @@ final class OpenCodeClient: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw OpenCodeClientError.invalidResponse
         }
-        let bodyText = String(data: data, encoding: .utf8) ?? "<non-utf8>"
-        Logger.opencode.debug("[opencode] \(method) \(path) -> \(http.statusCode) \(bodyText.prefix(200))")
+        Logger.opencode.debug("[opencode] \(method) \(path) -> \(http.statusCode)")
         guard (200 ... 299).contains(http.statusCode) else {
+            let bodyText = String(data: data, encoding: .utf8) ?? "<non-utf8>"
             throw OpenCodeClientError.http(http.statusCode, bodyText)
         }
         return data

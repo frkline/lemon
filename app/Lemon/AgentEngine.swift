@@ -117,7 +117,7 @@ struct OpenCodeEngine: AgentEngine {
     func launch(request: WorktreeRunner.EngineLaunchRequest,
                 runner _: WorktreeRunner) async -> WorktreeRunner.LaunchFailure?
     {
-        let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
+        let openCode = config.openCode ?? KeychainStore.shared.openCodeDefaults
         guard AgentEngineShell.commandExists("opencode") else {
             return .binaryMissing("opencode")
         }
@@ -161,18 +161,27 @@ struct OpenCodeEngine: AgentEngine {
 
         let client = OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port)
         do {
+            guard let modelRef = OpenCodeModelConfig.splitProviderModel(openCode.models.code) else {
+                return .launchError("OpenCode code model must use provider/model format")
+            }
             let created = try await client.createSession(.init(
-                model: openCode.models.code,
+                model: .init(id: modelRef.modelID, providerID: modelRef.providerID),
                 dir: request.sessionPath,
                 agent: nil,
             ))
-            try await client.sendMessage(
-                sessionID: created.id,
-                body: .init(content: kickoffPrompt, prompt_async: true),
-            )
             try? created.id.write(toFile: WorktreeRunner.openCodeSessionPath(slug: request.slug),
                                   atomically: true,
                                   encoding: .utf8)
+            Task.detached(priority: .utility) {
+                do {
+                    try await client.sendMessage(
+                        sessionID: created.id,
+                        body: .init(content: kickoffPrompt, prompt_async: true),
+                    )
+                } catch {
+                    Logger.opencode.error("[opencode] kickoff message failed for \(request.slug, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
             Logger.opencode.info("[opencode] launched session \(created.id, privacy: .public) for \(request.slug, privacy: .public)")
             return nil
         } catch {
@@ -186,7 +195,7 @@ struct OpenCodeEngine: AgentEngine {
         let version = hasOpenCode ? AgentEngineShell.firstLine(of: "opencode --version 2>/dev/null") : ""
         let authPath = NSHomeDirectory() + "/.local/share/opencode/auth.json"
         let hasAuth = FileManager.default.fileExists(atPath: authPath)
-        let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
+        let openCode = config.openCode ?? KeychainStore.shared.openCodeDefaults
         let hasModels = openCode.models.hasAllConfigured
         let malformedModels = openCode.models.malformedConfiguredModels
         let requiredProviders = openCode.models.requiredProviders
@@ -194,8 +203,13 @@ struct OpenCodeEngine: AgentEngine {
             requiredProviders: requiredProviders,
             authPath: authPath,
         )
-        let daemonURL = "http://\(openCode.daemon.host):\(openCode.daemon.port)/doc"
-        let daemonReachable = AgentEngineShell.httpReachable(url: daemonURL)
+        let daemonProbeURLs = [
+            "http://\(openCode.daemon.host):\(openCode.daemon.port)/doc",
+            "http://\(openCode.daemon.host):\(openCode.daemon.port)/config/providers",
+            "http://\(openCode.daemon.host):\(openCode.daemon.port)/provider",
+            "http://\(openCode.daemon.host):\(openCode.daemon.port)/api/model",
+        ]
+        let daemonReachable = AgentEngineShell.httpReachable(urls: daemonProbeURLs)
 
         return AgentEngineReadiness(checks: [
             .init(
@@ -260,7 +274,9 @@ struct OpenCodeEngine: AgentEngine {
             .init(
                 id: "opencode-daemon",
                 title: "Daemon health",
-                detail: daemonReachable ? "`/doc` responded at \(daemonURL)." : "No `/doc` response at \(daemonURL).",
+                detail: daemonReachable
+                    ? "Daemon responded at \(daemonProbeURLs.joined(separator: ", "))."
+                    : "No daemon response at \(daemonProbeURLs.joined(separator: ", ")).",
                 status: daemonReachable ? .pass : .fail,
             ),
             .init(
@@ -273,9 +289,9 @@ struct OpenCodeEngine: AgentEngine {
     }
 
     func executionHealthy(slug: String) async -> Bool {
-        let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
+        let openCode = config.openCode ?? KeychainStore.shared.openCodeDefaults
         let client = OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port)
-        guard await client.docReachable() else { return false }
+        guard await client.daemonReachable() else { return false }
 
         let sessionPath = WorktreeRunner.openCodeSessionPath(slug: slug)
         guard let sessionID = try? String(contentsOfFile: sessionPath, encoding: .utf8)
@@ -397,6 +413,13 @@ enum AgentEngineShell {
         run("curl -fsS --max-time 2 \(shellQuote(url)) >/dev/null 2>&1").ok
     }
 
+    static func httpReachable(urls: [String]) -> Bool {
+        for url in urls where httpReachable(url: url) {
+            return true
+        }
+        return false
+    }
+
     static func run(_ command: String) -> (ok: Bool, output: String) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -415,7 +438,7 @@ enum AgentEngineShell {
         }
     }
 
-    private static func shellQuote(_ input: String) -> String {
+    static func shellQuote(_ input: String) -> String {
         "'\(input.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

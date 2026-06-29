@@ -25,6 +25,8 @@ struct WorkspaceEditorPane: View {
     @State private var readinessTask: Task<Void, Never>?
     @State private var modelChoicesTask: Task<Void, Never>?
     @State private var daemonModelChoices: [String] = []
+    @State private var daemonModelChoicesLoading = false
+    @State private var daemonModelChoicesChecked = false
     @State private var identityId: UUID? = nil
     @State private var surfaceId: String = ""
     @State private var deleteArmed = false
@@ -34,7 +36,7 @@ struct WorkspaceEditorPane: View {
     @State private var typingCustomKey: Bool = false
     @State private var reseedState: ReseedState = .idle
 
-    private static let defaultOpenCodeModels: [String] = [
+    static let defaultOpenCodeModels: [String] = [
         "openai/gpt-5.3-codex",
         "anthropic/claude-opus-4",
         "anthropic/claude-sonnet-4",
@@ -148,6 +150,7 @@ struct WorkspaceEditorPane: View {
                         openCodeModelField("Plan model", text: $openCodePlanModel)
                         openCodeModelField("Code model", text: $openCodeCodeModel)
                         openCodeModelField("Review model", text: $openCodeReviewModel)
+                        modelCatalogStatus
 
                         HStack(spacing: 8) {
                             Text("Auto-open")
@@ -165,30 +168,18 @@ struct WorkspaceEditorPane: View {
                                     Text(openCodeAutoOpenThreshold.displayName)
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundStyle(LD.textPrimary)
-                                    Image(systemName: "chevron.up.chevron.down")
+                                    Image(systemName: "chevron.down")
                                         .font(.system(size: 9))
                                         .foregroundStyle(LD.textTertiary)
                                 }
                             }
                             .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
                         }
 
                         HStack(spacing: 8) {
                             labeledField("Host", text: $openCodeHost, placeholder: "127.0.0.1")
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Port")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .kerning(1.2)
-                                    .foregroundStyle(LD.textTertiary)
-                                HStack(spacing: 6) {
-                                    Text("\(openCodePort)")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(LD.textPrimary)
-                                    Stepper("", value: $openCodePort, in: 1 ... 65535)
-                                        .labelsHidden()
-                                }
-                            }
-                            .frame(width: 118, alignment: .leading)
+                            portField
                         }
                     }
                     .padding(.top, 4)
@@ -267,6 +258,7 @@ struct WorkspaceEditorPane: View {
                         )
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .help("Pick from recent or suggested model IDs")
             }
             .padding(.vertical, 6)
@@ -296,6 +288,68 @@ struct WorkspaceEditorPane: View {
         }
     }
 
+    private var portField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PORT")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            TextField("4096", text: openCodePortBinding)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: LD.r6)
+                        .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+                )
+        }
+        .frame(width: 96, alignment: .leading)
+    }
+
+    private var openCodePortBinding: Binding<String> {
+        Binding(
+            get: { String(openCodePort) },
+            set: { rawValue in
+                let digits = rawValue.filter(\.isNumber)
+                guard let parsed = Int(digits) else { return }
+                openCodePort = max(1, min(parsed, 65535))
+            },
+        )
+    }
+
+    private var modelCatalogStatus: some View {
+        HStack(spacing: 5) {
+            if daemonModelChoicesLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.65)
+            } else {
+                Circle()
+                    .fill(daemonModelChoices.isEmpty ? LD.textQuaternary : LD.statusDone)
+                    .frame(width: 5, height: 5)
+            }
+
+            Text(modelCatalogStatusText)
+                .font(.system(size: 9))
+                .foregroundStyle(daemonModelChoices.isEmpty ? LD.textQuaternary : LD.statusDone)
+        }
+        .padding(.top, 1)
+    }
+
+    private var modelCatalogStatusText: String {
+        if daemonModelChoicesLoading {
+            return "Starting OpenCode daemon and loading model catalog..."
+        }
+        if !daemonModelChoices.isEmpty {
+            return "Daemon catalog loaded: \(daemonModelChoices.count) model\(daemonModelChoices.count == 1 ? "" : "s")."
+        }
+        if daemonModelChoicesChecked {
+            return "Using saved/default suggestions; daemon catalog unavailable at \(resolvedOpenCodeHost):\(openCodePort)."
+        }
+        return "Model catalog will load from the configured daemon."
+    }
+
     private var knownOpenCodeModelChoices: [String] {
         let saved: [String] = KeychainStore.shared.workspaces
             .flatMap { (workspace: Workspace) -> [String] in
@@ -320,18 +374,30 @@ struct WorkspaceEditorPane: View {
         modelChoicesTask?.cancel()
         guard engineKind == .openCode else {
             daemonModelChoices = []
+            daemonModelChoicesLoading = false
+            daemonModelChoicesChecked = false
             return
         }
 
-        let host = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedHost = host.isEmpty ? "127.0.0.1" : host
+        let resolvedHost = resolvedOpenCodeHost
         let resolvedPort = max(1, min(openCodePort, 65535))
+        daemonModelChoicesLoading = true
 
         modelChoicesTask = Task {
+            let config = OpenCodeDaemonConfig(host: resolvedHost, port: resolvedPort)
+            _ = await OpenCodeDaemonManager.shared.ensureRunning(config: config)
             let discovered = await OpenCodeClient(host: resolvedHost, port: resolvedPort).availableModelIDs()
             guard !Task.isCancelled else { return }
             daemonModelChoices = discovered
+            daemonModelChoicesLoading = false
+            daemonModelChoicesChecked = true
+            refreshReadiness()
         }
+    }
+
+    private var resolvedOpenCodeHost: String {
+        let host = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        return host.isEmpty ? "127.0.0.1" : host
     }
 
     private func modelChoices(current: String) -> [String] {
@@ -935,6 +1001,7 @@ struct WorkspaceEditorPane: View {
     private func hydrate() {
         switch target {
         case .new:
+            applyOpenCodeConfig(KeychainStore.shared.openCodeDefaults)
             if let firstIdentity = identities.first {
                 identityId = firstIdentity.id
                 // Default lockdown ON for GitHub (often public/community repos);
@@ -951,15 +1018,18 @@ struct WorkspaceEditorPane: View {
                 surfaceId = ws.routing.surfaceId
                 lockdown = ws.lockdown
                 engineKind = ws.engine.kind
-                let openCode = ws.engine.openCode
-                openCodePlanModel = openCode?.models.plan ?? ""
-                openCodeCodeModel = openCode?.models.code ?? ""
-                openCodeReviewModel = openCode?.models.review ?? ""
-                openCodeAutoOpenThreshold = openCode?.autoOpenThreshold ?? .highConfidenceOnly
-                openCodeHost = openCode?.daemon.host ?? "127.0.0.1"
-                openCodePort = openCode?.daemon.port ?? 4096
+                applyOpenCodeConfig(ws.engine.openCode ?? KeychainStore.shared.openCodeDefaults)
             }
         }
+    }
+
+    private func applyOpenCodeConfig(_ config: OpenCodeWorkspaceConfig) {
+        openCodePlanModel = config.models.plan
+        openCodeCodeModel = config.models.code
+        openCodeReviewModel = config.models.review
+        openCodeAutoOpenThreshold = config.autoOpenThreshold
+        openCodeHost = config.daemon.host
+        openCodePort = config.daemon.port
     }
 
     private func pickFolder() {
@@ -1052,7 +1122,9 @@ struct WorkspaceEditorPane: View {
         )
         working.engine = WorkspaceEngineConfig(
             kind: engineKind,
-            openCode: engineKind == .openCode ? openCodeConfig : nil,
+            openCode: engineKind == .openCode && openCodeConfig != KeychainStore.shared.openCodeDefaults
+                ? openCodeConfig
+                : nil,
         )
 
         var all = keychain.workspaces

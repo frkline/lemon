@@ -1166,7 +1166,7 @@ final class Orchestrator {
         else {
             return nil
         }
-        let openCode = workspace.engine.openCode ?? OpenCodeWorkspaceConfig()
+        let openCode = workspace.engine.openCode ?? KeychainStore.shared.openCodeDefaults
         let sessionPath = WorktreeRunner.openCodeSessionPath(slug: session.issue.pathSlug)
         guard let sessionID = try? String(contentsOfFile: sessionPath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
