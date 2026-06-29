@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/readme-hero-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/img/readme-hero-light.png">
-  <img alt="Lemon — Claude Code, no cruft. Tag an issue with 🍋; Lemon spins the worktree, runs your own claude, and ships the PR." src="docs/img/readme-hero-dark.png" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-light.png">
+  <img alt="Lemon — Claude Code, no cruft. Tag an issue with 🍋; Lemon spins the worktree, runs your own claude, and ships the PR." src="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-dark.png" width="900">
 </picture>
 
 <sub><i>Made for the Mac mini sitting on your desk.</i></sub>
