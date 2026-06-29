@@ -238,6 +238,8 @@ The Lemon binary talks to your configured issue tracker — Linear's GraphQL or 
 
 Credentials live in the macOS Keychain, not a file. Workspace paths live in UserDefaults. Session logs land in `/tmp/lemon-log-{id}.txt` and are wiped on cleanup.
 
+On first use macOS may show a **"Local Network"** prompt — it's safe to deny. Lemon does no LAN discovery; the prompt is triggered by the on-device Gemma classifier (SwiftLM), which binds `127.0.0.1` only, so it's the Mac talking to itself over loopback. Classification works whether you allow or deny.
+
 </details>
 
 <details>
