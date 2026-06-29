@@ -33,6 +33,7 @@ struct WorkspaceEditorPane: View {
     @State private var reseedState: ReseedState = .idle
 
     private static let defaultOpenCodeModels: [String] = [
+        "openai/gpt-5.3-codex",
         "anthropic/claude-opus-4",
         "anthropic/claude-sonnet-4",
         "openai/gpt-4.1-mini",
