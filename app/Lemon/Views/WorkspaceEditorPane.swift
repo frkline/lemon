@@ -23,6 +23,8 @@ struct WorkspaceEditorPane: View {
     @State private var readiness: AgentEngineReadiness?
     @State private var readinessLoading = false
     @State private var readinessTask: Task<Void, Never>?
+    @State private var modelChoicesTask: Task<Void, Never>?
+    @State private var daemonModelChoices: [String] = []
     @State private var identityId: UUID? = nil
     @State private var surfaceId: String = ""
     @State private var deleteArmed = false
@@ -106,13 +108,23 @@ struct WorkspaceEditorPane: View {
         .onAppear {
             hydrate()
             refreshReadiness()
+            refreshDaemonModelChoices()
         }
-        .onChange(of: engineKind) { _, _ in refreshReadiness() }
+        .onChange(of: engineKind) { _, _ in
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
         .onChange(of: openCodePlanModel) { _, _ in refreshReadiness() }
         .onChange(of: openCodeCodeModel) { _, _ in refreshReadiness() }
         .onChange(of: openCodeReviewModel) { _, _ in refreshReadiness() }
-        .onChange(of: openCodeHost) { _, _ in refreshReadiness() }
-        .onChange(of: openCodePort) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeHost) { _, _ in
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
+        .onChange(of: openCodePort) { _, _ in
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
     }
 
     // MARK: - Engine
@@ -295,13 +307,31 @@ struct WorkspaceEditorPane: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        let merged = Self.defaultOpenCodeModels + saved
+        let merged = daemonModelChoices + Self.defaultOpenCodeModels + saved
         var seen = Set<String>()
         var ordered: [String] = []
         for model in merged where seen.insert(model).inserted {
             ordered.append(model)
         }
         return ordered
+    }
+
+    private func refreshDaemonModelChoices() {
+        modelChoicesTask?.cancel()
+        guard engineKind == .openCode else {
+            daemonModelChoices = []
+            return
+        }
+
+        let host = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedHost = host.isEmpty ? "127.0.0.1" : host
+        let resolvedPort = max(1, min(openCodePort, 65535))
+
+        modelChoicesTask = Task {
+            let discovered = await OpenCodeClient(host: resolvedHost, port: resolvedPort).availableModelIDs()
+            guard !Task.isCancelled else { return }
+            daemonModelChoices = discovered
+        }
     }
 
     private func modelChoices(current: String) -> [String] {

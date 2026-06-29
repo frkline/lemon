@@ -61,6 +61,22 @@ final class OpenCodeClient: Sendable {
         }
     }
 
+    func availableModelIDs() async -> [String] {
+        let paths = ["/models", "/v1/models", "/doc"]
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for path in paths {
+            guard let data = try? await request("GET", path: path) else { continue }
+            let models = Self.extractModelIDs(from: data)
+            for model in models where seen.insert(model).inserted {
+                ordered.append(model)
+            }
+        }
+
+        return ordered
+    }
+
     @discardableResult
     func createSession(_ requestBody: OpenCodeSessionCreateRequest) async throws -> OpenCodeSessionCreateResponse {
         let body = try JSONEncoder().encode(requestBody)
@@ -143,6 +159,74 @@ final class OpenCodeClient: Sendable {
             return .active
         }
         return .unknown
+    }
+
+    static func extractModelIDs(from data: Data) -> [String] {
+        if let json = try? JSONSerialization.jsonObject(with: data) {
+            return extractModelIDs(fromJSON: json)
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        return extractModelIDs(fromText: text)
+    }
+
+    static func extractModelIDs(fromJSON json: Any) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        func visit(_ node: Any, keyHint: String?) {
+            switch node {
+            case let dict as [String: Any]:
+                for (key, value) in dict {
+                    visit(value, keyHint: key)
+                }
+            case let array as [Any]:
+                for value in array {
+                    visit(value, keyHint: keyHint)
+                }
+            case let value as String:
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if isLikelyModelID(trimmed, keyHint: keyHint), seen.insert(trimmed).inserted {
+                    ordered.append(trimmed)
+                }
+            default:
+                break
+            }
+        }
+
+        visit(json, keyHint: nil)
+        return ordered
+    }
+
+    static func extractModelIDs(fromText text: String) -> [String] {
+        let pattern = #"\b[a-zA-Z0-9][a-zA-Z0-9._-]*/[a-zA-Z0-9][a-zA-Z0-9._:-]*\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let full = NSRange(text.startIndex ..< text.endIndex, in: text)
+        let matches = regex.matches(in: text, options: [], range: full)
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for match in matches {
+            guard let range = Range(match.range, in: text) else { continue }
+            let candidate = String(text[range])
+            if isLikelyModelID(candidate, keyHint: "model"), seen.insert(candidate).inserted {
+                ordered.append(candidate)
+            }
+        }
+        return ordered
+    }
+
+    private static func isLikelyModelID(_ value: String, keyHint: String?) -> Bool {
+        guard let provider = OpenCodeModelConfig.providerSlug(for: value) else { return false }
+
+        let blockedProviders: Set = [
+            "application", "audio", "font", "image", "message",
+            "multipart", "text", "video",
+        ]
+        if blockedProviders.contains(provider) { return false }
+
+        guard let keyHint else { return true }
+        let lowered = keyHint.lowercased()
+        return lowered.contains("model") || lowered == "id" || lowered.contains("name")
     }
 
     private func request(_ method: String, path: String, body: Data? = nil) async throws -> Data {

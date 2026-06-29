@@ -40,6 +40,10 @@ Follow-on hardening:
   provider-specific auth check against `~/.local/share/opencode/auth.json` for the
   exact providers referenced by plan/code/review slots. Launch also fails early if
   selected providers are clearly missing credentials.
+- Workspace model dropdowns now merge static fallbacks + saved selections +
+  **daemon-discovered models** by querying OpenCode (`/models`, `/v1/models`, then
+  `/doc` as fallback) and extracting likely `provider/model` IDs. This keeps the UI
+  aligned with whichever model catalog the local OpenCode daemon currently exposes.
 
 **Why:** the workspace is Lemon's execution boundary already (routing + lockdown +
 filesystem mapping). Engine choice and model policy belong at that same boundary,

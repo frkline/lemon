@@ -30,4 +30,31 @@ final class OpenCodeClientTests: XCTestCase {
     func testClassifyLivenessUnknownForEmptyPayload() {
         XCTAssertEqual(OpenCodeClient.classifyLiveness(payload: [:]), .unknown)
     }
+
+    func testExtractModelIDsFromV1ModelsPayload() throws {
+        let json = """
+        {
+          "data": [
+            { "id": "openai/gpt-5.3-codex" },
+            { "id": "anthropic/claude-sonnet-4" }
+          ]
+        }
+        """
+        let ids = try OpenCodeClient.extractModelIDs(from: XCTUnwrap(json.data(using: .utf8)))
+        XCTAssertEqual(ids, ["openai/gpt-5.3-codex", "anthropic/claude-sonnet-4"])
+    }
+
+    func testExtractModelIDsSkipsMimeTypes() throws {
+        let json = """
+        {
+          "contentType": "application/json",
+          "models": [
+            { "name": "openai/gpt-4.1-mini" },
+            { "name": "text/plain" }
+          ]
+        }
+        """
+        let ids = try OpenCodeClient.extractModelIDs(from: XCTUnwrap(json.data(using: .utf8)))
+        XCTAssertEqual(ids, ["openai/gpt-4.1-mini"])
+    }
 }
