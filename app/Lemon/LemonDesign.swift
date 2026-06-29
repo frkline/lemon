@@ -150,6 +150,7 @@ extension Color {
 extension SessionStatus {
     var color: Color {
         switch self {
+        case .queued: LD.statusPlanning
         case .planning: LD.statusPlanning
         case .planReview: LD.statusWaiting
         case .executing: LD.statusExecuting
@@ -163,6 +164,7 @@ extension SessionStatus {
 
     var symbol: String {
         switch self {
+        case .queued: "clock"
         case .planning: "brain"
         case .planReview: "list.clipboard"
         case .executing: "hammer.fill"

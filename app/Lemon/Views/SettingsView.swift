@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var pairs: [WorkspacePair] = []
     @State private var saved = false
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    @State private var maxConcurrent = KeychainStore.defaultMaxConcurrent
     @State private var aiTestState: AITestState = .idle
 
     // MCP server state — mirrors UserDefaults but lets the toggle drive
@@ -82,6 +83,32 @@ struct SettingsView: View {
                             } catch {
                                 launchAtLogin = (SMAppService.mainApp.status == .enabled)
                             }
+                        }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 11)
+
+                Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth).padding(.leading, 56)
+
+                // #46: how many 🍋 issues run at once. Overflow triggers queue.
+                HStack(spacing: 12) {
+                    rowIconCell("square.stack.3d.up", on: true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Concurrent sessions")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(LD.textPrimary)
+                        Text("How many 🍋 issues run at once. Extra triggers queue.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(LD.textTertiary)
+                    }
+                    Spacer()
+                    Text("\(maxConcurrent)")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(LD.textPrimary)
+                        .frame(minWidth: 18)
+                    Stepper("", value: $maxConcurrent, in: 1 ... KeychainStore.maxPairs)
+                        .labelsHidden()
+                        .onChange(of: maxConcurrent) { _, v in
+                            KeychainStore.shared.maxConcurrentSessions = v
                         }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11)
@@ -955,6 +982,7 @@ struct SettingsView: View {
         githubToken = k.githubToken
         githubUser = k.githubUser
         pairs = k.pairs
+        maxConcurrent = k.maxConcurrentSessions
     }
 
     private func save() {

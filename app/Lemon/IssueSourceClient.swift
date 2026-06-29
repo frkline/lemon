@@ -57,6 +57,12 @@ protocol IssueSourceClient: Sendable {
     /// proof that the credential reaches actual work — replaces the
     /// abstract "surfaces" count in the UI.
     func countAssignedOpenIssues(token: String, host: String?, principalId: String) async throws -> Int
+
+    /// True if the issue is closed/completed/cancelled on the source. Secondary
+    /// auto-retire trigger for a `.reviewing` session (#54) — the primary is a
+    /// merged PR (`WorktreeRunner.isPRMerged`). Default false (sources opt in)
+    /// so a source that can't cheaply answer simply leans on the PR signal.
+    func isIssueClosed(ref: IssueRef, auth: SourceAuth) async throws -> Bool
 }
 
 extension IssueSourceClient {
@@ -72,6 +78,12 @@ extension IssueSourceClient {
     /// callers fall back to the issue author. Default nil (sources opt in).
     func triggerLabelActor(ref _: IssueRef, auth _: SourceAuth) async throws -> String? {
         nil
+    }
+
+    /// Default: undeterminable → false, so auto-retire (#54) leans on the merged-PR
+    /// signal. GitHub overrides this with a cheap issue-state GET.
+    func isIssueClosed(ref _: IssueRef, auth _: SourceAuth) async throws -> Bool {
+        false
     }
 }
 

@@ -96,6 +96,12 @@ struct LemonApp: App {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 LocalLLM.shared.stop()
+                // #55: deliberately do NOT tear down -L lemon tmux/claude on
+                // quit. Long-running sessions must survive a Lemon restart
+                // (auto-update, crash) so a relaunch re-adopts in-flight work
+                // (#35/#38). The leak is bounded instead by the startup sweep
+                // (Orchestrator.reconcileOrphans). Manual escape hatch if Lemon
+                // is uninstalled with the server still up: `tmux -L lemon kill-server`.
             }
             .onChange(of: onboardingComplete) { _, complete in
                 // Wizard just transitioned to complete — orchestrator

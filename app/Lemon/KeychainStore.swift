@@ -122,6 +122,24 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
+    /// Concurrency ceiling for in-flight sessions (#46). Stored as a plain
+    /// UserDefaults int; 0/unset means "use the default" (2). Orchestrator
+    /// clamps the effective value to ≥ 1. Editable via Settings.
+    static let defaultMaxConcurrent = 2
+    var maxConcurrentSessions: Int {
+        get {
+            let raw = memory != nil
+                ? Int(memory?["maxConcurrentSessions"] ?? "") ?? 0
+                : UserDefaults.standard.integer(forKey: "lemon-max-concurrent")
+            return raw > 0 ? raw : Self.defaultMaxConcurrent
+        }
+        set {
+            let clamped = max(1, min(newValue, Self.maxPairs))
+            if memory != nil { memory?["maxConcurrentSessions"] = String(clamped); return }
+            UserDefaults.standard.set(clamped, forKey: "lemon-max-concurrent")
+        }
+    }
+
     var workspaceConfig: String {
         get {
             if memory != nil { return memory?["workspaceConfig"] ?? "" }

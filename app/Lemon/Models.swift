@@ -276,6 +276,7 @@ enum LemonState: String, CaseIterable, Equatable {
 }
 
 enum SessionStatus: String, Codable, Equatable {
+    case queued // triggered but over the concurrency limit — awaiting a free slot (#46)
     case planning // worktree setup
     case planReview // plan drafted, awaiting human approval (the plan gate)
     case executing // claude session running
@@ -287,6 +288,7 @@ enum SessionStatus: String, Codable, Equatable {
 
     var displayLabel: String {
         switch self {
+        case .queued: "Queued"
         case .planning: "Planning"
         case .planReview: "Plan Review"
         case .executing: "Executing"
@@ -332,21 +334,36 @@ enum MenuBarGlyph: String, CaseIterable {
         }
     }
 
+    /// How long a freshly-failed session keeps the glyph red (#48). An error is
+    /// only worth the user's eye while it's actionable; past this window the
+    /// glyph decays so an idle app reads idle, not stuck on a stale failure.
+    static let errorWindow: TimeInterval = 5 * 60
+
     /// Pure aggregate: which glyph for the current sessions. Priority reflects
     /// what most needs the user's eye — a session awaiting human input (either
     /// gate, or a mid-build question) wins, then active work, then a reviewing
     /// session (finished, awaiting cleanup), then the most recent terminal
     /// outcome. Disabled when nothing is configured. Pure so it's unit-testable
-    /// without AppKit or the Keychain.
+    /// without AppKit or the Keychain (pass an explicit `now` for determinism).
     static func aggregate(activeStatuses: [SessionStatus],
                           lastRecentStatus: SessionStatus?,
+                          lastRecentEndedAt: Date? = nil,
+                          now: Date = Date(),
                           configured: Bool) -> MenuBarGlyph
     {
         guard configured else { return .disabled }
         if activeStatuses.contains(where: { $0.isGate || $0 == .waiting }) { return .waiting }
-        if activeStatuses.contains(where: { $0 == .planning || $0 == .executing }) { return .working }
+        if activeStatuses.contains(where: { $0 == .planning || $0 == .executing || $0 == .queued }) { return .working }
         if activeStatuses.contains(.reviewing) { return .done }
-        if lastRecentStatus == .failed { return .error }
+        if lastRecentStatus == .failed {
+            // #48: only stay red while the failure is fresh. With no timestamp
+            // (mock/legacy) or once the window has elapsed, decay to idle so a
+            // single past failure doesn't pin the glyph to error forever.
+            if let endedAt = lastRecentEndedAt, now.timeIntervalSince(endedAt) < errorWindow {
+                return .error
+            }
+            return .idle
+        }
         if lastRecentStatus == .done { return .done }
         return .idle
     }

@@ -9,9 +9,12 @@ struct WorkspaceStatus: Equatable {
     var lastPolledAt: Date?
     var triggerCount: Int = 0
     var completeCount: Int = 0
+    /// In-app sessions parked at `.queued` (over the concurrency limit, #46).
+    var queuedCount: Int = 0
     var error: String?
 
-    /// One-line settings subtitle: "polled 12s ago · 0 queued · 1 complete".
+    /// One-line settings subtitle: "polled 12s ago · 2 triggered · 1 complete"
+    /// (+ " · 1 queued" when the concurrency limit is holding work back).
     /// Returns nil pre-first-poll so the row stays editorial-quiet.
     var subtitle: String? {
         guard let t = lastPolledAt else { return nil }
@@ -21,7 +24,8 @@ struct WorkspaceStatus: Equatable {
         if let err = error {
             return "polled \(rel) · \(err.prefix(80))"
         }
-        return "polled \(rel) · \(triggerCount) queued · \(completeCount) complete"
+        let queuedPart = queuedCount > 0 ? " · \(queuedCount) queued" : ""
+        return "polled \(rel) · \(triggerCount) triggered\(queuedPart) · \(completeCount) complete"
     }
 }
 
@@ -53,6 +57,8 @@ final class Orchestrator {
         MenuBarGlyph.aggregate(
             activeStatuses: sessions.active.map(\.status),
             lastRecentStatus: sessions.recent.first?.status,
+            lastRecentEndedAt: sessions.recent.first?.endedAt,
+            now: Date(),
             configured: KeychainStore.shared.isConfigured,
         )
     }
@@ -190,6 +196,21 @@ final class Orchestrator {
             // fresh launch, but guards a double-restore).
             if sessions.isTracking(ref: p.issue) { restoredSlugs.insert(p.slug); continue }
 
+            // Queued pre-relaunch (#46): no tmux/worktree to probe — re-adopt as
+            // queued; promoteQueued() launches it when a slot frees. An
+            // unrunnable one (workspace gone) is failed there, not here.
+            if p.status == .queued {
+                let s = Session(issue: p.issue)
+                s.status = .queued
+                s.workspaceId = p.workspaceId
+                s.branch = p.branch
+                s.retrigger = p.retrigger
+                s.worktreePath = "/tmp/lemon-\(p.slug)"
+                sessions.add(s)
+                restoredSlugs.insert(p.slug)
+                continue
+            }
+
             // Workspace or credentials gone → can't manage it; leave the worktree
             // for the GC sweep and drop the entry (it won't be re-persisted).
             guard let ws = byId[p.workspaceId],
@@ -238,8 +259,62 @@ final class Orchestrator {
         await reconstructUnindexedWorktrees(workspaces: workspaces, probe: probe,
                                             skip: restoredSlugs)
 
+        // #55: GC stale worktree registrations + un-adoptable orphan tmux that
+        // nothing tracks (incl. leftovers from Failed sessions, which drop out of
+        // the index). Runs last so everything we restored above is protected.
+        await reconcileOrphans(workspaces: workspaces, probe: probe, keepSlugs: restoredSlugs)
+
         // Rewrite the index to reflect exactly what we restored into `active`.
         sessions.persist()
+    }
+
+    /// Startup leak GC (#55). Two leaks: (1) stale `git worktree list`
+    /// registrations for terminal/Failed sessions that break a later
+    /// `git worktree add` for the same slug; (2) orphan `-L lemon` tmux sessions
+    /// nothing tracks. We prune dead+untracked worktree registrations (+ their
+    /// branch) and kill un-adoptable orphan tmux, while LEAVING live worktrees a
+    /// re-trigger could still adopt (#38). Clean-quit policy is deliberately
+    /// no-teardown (guaranteed re-adopt suits the unattended Mac-mini); this
+    /// startup sweep is what bounds the leak.
+    @MainActor
+    private func reconcileOrphans(workspaces: [Workspace], probe: WorktreeRunner,
+                                  keepSlugs: Set<String>) async
+    {
+        // Protect everything currently tracked, not just index-restored slugs:
+        // reconstructed .reviewing sessions live in `active` but aren't in
+        // restoredSlugs, and pruning their worktree would delete work awaiting
+        // the user's review.
+        var keep = keepSlugs
+        for s in sessions.active {
+            keep.insert(s.issue.pathSlug)
+            if let cs = s.cleanupInfo?.slug { keep.insert(cs) }
+        }
+
+        var repoPaths: [String] = []
+        for ws in workspaces {
+            if ws.allReposInFolder {
+                repoPaths.append(contentsOf: probe.discoverRepoPaths(in: ws.path))
+            } else {
+                repoPaths.append(ws.path)
+            }
+        }
+        let pruned = await probe.gcStaleWorktrees(repoPaths: Array(Set(repoPaths)), keepSlugs: keep)
+        if !pruned.isEmpty {
+            Logger.orchestrator.info("[gc] pruned stale worktrees: \(pruned.joined(separator: ", "))")
+        }
+
+        // Orphan tmux: a live -L lemon session nothing tracks. Un-adoptable
+        // (slug matches no configured workspace) → kill so a live claude can't
+        // run forever detached; matchable → leave for a re-trigger to adopt.
+        let liveSlugs = await probe.lemonTmuxSlugs()
+        for slug in liveSlugs where !keep.contains(slug) {
+            if matchSlugToWorkspace(slug: slug, sessionPath: "/tmp/lemon-\(slug)", workspaces: workspaces) == nil {
+                Logger.orchestrator.info("[gc] killing un-adoptable orphan tmux \(slug)")
+                probe.killTmuxSession(slug: slug)
+            } else {
+                Logger.orchestrator.info("[gc] live orphan tmux \(slug) matches a workspace — leaving for re-adopt")
+            }
+        }
     }
 
     /// Restore a still-alive session: rebuild its pair, wire the same callbacks
@@ -459,6 +534,10 @@ final class Orchestrator {
             let cli = client(for: identity)
             await pollWorkspace(workspace: workspace, identity: identity, client: cli, auth: auth)
         }
+
+        // Promote queued sessions into freed slots (#46). Runs after all
+        // workspaces poll so freshly-completed sessions release their slots first.
+        await promoteQueued()
     }
 
     @MainActor
@@ -498,9 +577,14 @@ final class Orchestrator {
                         continue
                     }
                 }
-                guard sessions.active.count < maxConcurrent else {
-                    Logger.orchestrator.info("At max concurrent sessions, skipping \(ref.identifier)")
-                    break
+                guard runningCount < maxConcurrent else {
+                    // #46: don't silently drop the overflow — enqueue it as a
+                    // tracked .queued session (visible in the popover, FIFO) and
+                    // keep scanning so ALL over-limit triggers get queued, not
+                    // just up to the first. promoteQueued() launches them as
+                    // slots free. isTracking suppresses re-queue next poll.
+                    enqueueSession(ref: ref, workspace: workspace, retrigger: nil)
+                    continue
                 }
                 Logger.orchestrator.info("Starting session for \(ref.identifier): \(ref.title)")
                 await startSession(ref: ref, workspace: workspace, identity: identity,
@@ -549,6 +633,12 @@ final class Orchestrator {
                         continue
                     }
                 }
+                guard runningCount < maxConcurrent else {
+                    // #46: re-triggers respect the concurrency limit too (they
+                    // didn't before) — queue the overflow instead of bypassing it.
+                    enqueueSession(ref: ref, workspace: workspace, retrigger: marker)
+                    continue
+                }
                 Logger.orchestrator.info("Re-triggering \(ref.identifier) from reply")
                 await startSession(ref: ref, workspace: workspace, identity: identity,
                                    client: client, auth: auth, retrigger: marker)
@@ -558,26 +648,41 @@ final class Orchestrator {
             // crash mid-clearState can leave stragglers — issue #31 saw 🍋 In
             // Progress + 🍋 Waiting + 🍋 Complete all set at once. Lemon is the
             // sole writer of state labels, so we converge them every poll (#35).
-            for session in sessions.active where session.workspaceId == workspace.id {
+            // Skip .queued sessions: they haven't started, still carry their 🍋
+            // trigger label, and must keep it so the issue stays in the trigger
+            // queue until promoteQueued() launches it (#46).
+            for session in sessions.active
+                where session.workspaceId == workspace.id && session.status != .queued
+            {
                 await reconcileLabels(ref: session.issue, building: session.status == .executing,
                                       client: client, auth: auth)
             }
+            status.queuedCount = sessions.active.count(where: {
+                $0.workspaceId == workspace.id && $0.status == .queued
+            })
 
-            // 4. Surface merged PRs on reviewing sessions (#54). The runner has
-            // already returned by .reviewing, so the poll loop is what notices the
-            // PR landed. Confirm-first: flag it for the card; the user still clicks
-            // Cleanup to tear down (we never auto-delete the worktree).
+            // 4. Auto-retire reviewing sessions whose work has truly landed (#54).
+            // The runner has already returned by .reviewing, so the poll loop is
+            // what notices the PR merged (primary signal) or the issue closed
+            // (secondary). On either, auto-tear-down: a merged PR means the work
+            // is done, and the unattended "Mac mini on your desk" goal wants a
+            // real terminal state without a human click. `prMerged` doubles as the
+            // "cleanup already kicked off" guard so we don't re-fire mid-teardown.
             for session in sessions.active
                 where session.workspaceId == workspace.id
                 && session.status == .reviewing && !session.prMerged
             {
-                guard let url = session.prUrl else { continue }
-                let runner = runnerOrThrowaway(sessionId: session.id)
-                if await runner.isPRMerged(prUrl: url, cwd: session.worktreePath) {
-                    session.prMerged = true
-                    session.aiSummary = "PR merged — ready to clean up"
-                    Logger.orchestrator.info("reviewing \(session.issue.identifier): PR merged — ready to clean up")
-                }
+                let merged = await {
+                    guard let url = session.prUrl else { return false }
+                    let runner = runnerOrThrowaway(sessionId: session.id)
+                    return await runner.isPRMerged(prUrl: url, cwd: session.worktreePath)
+                }()
+                let closed = await merged ? false : ((try? client.isIssueClosed(ref: session.issue, auth: auth)) ?? false)
+                guard merged || closed else { continue }
+                session.prMerged = true
+                session.aiSummary = merged ? "PR merged — cleaning up" : "Issue closed — cleaning up"
+                Logger.orchestrator.info("reviewing \(session.issue.identifier): \(merged ? "PR merged" : "issue closed") — auto-cleanup")
+                cleanupSession(session)
             }
             status.error = nil
         } catch {
@@ -671,8 +776,17 @@ final class Orchestrator {
         }
     }
 
+    /// Concurrency ceiling (#46). User-configurable in Settings; defaults to 2,
+    /// clamped ≥ 1 so the runner can never be starved to zero.
     private var maxConcurrent: Int {
-        2
+        max(1, KeychainStore.shared.maxConcurrentSessions)
+    }
+
+    /// Sessions actually running (or setting up) — everything except `.queued`.
+    /// The capacity check counts THIS, not `active.count`: counting queued
+    /// sessions as occupied slots would deadlock the queue (#46).
+    private var runningCount: Int {
+        sessions.active.count(where: { $0.status != .queued })
     }
 
     // MARK: - Label bootstrapping
@@ -736,16 +850,48 @@ final class Orchestrator {
                               client: any IssueSourceClient, auth: SourceAuth,
                               retrigger: LemonMarker?) async
     {
+        let session = makeSession(ref: ref, workspace: workspace, retrigger: retrigger)
+        sessions.add(session)
+        launchSession(session: session, ref: ref, workspace: workspace, identity: identity,
+                      client: client, auth: auth, retrigger: retrigger)
+    }
+
+    /// Build a Session with the fields the persisted index (issue #35) needs to
+    /// reattach — stamped BEFORE add() so the first persist captures them. Shared
+    /// by the run path and the queue path; the worktree/branch are just strings
+    /// here (no git work happens until launchSession).
+    @MainActor
+    private func makeSession(ref: IssueRef, workspace: Workspace,
+                             retrigger: LemonMarker?) -> Session
+    {
         let session = Session(issue: ref)
         session.worktreePath = "/tmp/lemon-\(ref.pathSlug)"
         session.terminalWindowName = "Lemon · \(ref.identifier)"
-        // Stash the fields the persisted session index (issue #35) needs to
-        // reattach, BEFORE add() so the first persist captures them.
         session.workspaceId = workspace.id
         session.branch = retrigger?.branch ?? "lemon/\(ref.pathSlug)"
         session.retrigger = retrigger
-        sessions.add(session)
+        return session
+    }
 
+    /// Enqueue an over-limit trigger as a tracked `.queued` session (#46).
+    /// Visible in the popover; promoted FIFO by `promoteQueued()` when a slot
+    /// frees. No worktree/runner is created here.
+    @MainActor
+    private func enqueueSession(ref: IssueRef, workspace: Workspace, retrigger: LemonMarker?) {
+        let session = makeSession(ref: ref, workspace: workspace, retrigger: retrigger)
+        session.status = .queued
+        sessions.add(session)
+        Logger.orchestrator.info("Queued \(ref.identifier) — at max concurrent (\(self.runningCount)/\(self.maxConcurrent))")
+    }
+
+    /// Spin up the runner for a session (the launch tail shared by startSession
+    /// and queue promotion). Flips the session out of `.queued` into `.planning`.
+    @MainActor
+    private func launchSession(session: Session, ref: IssueRef, workspace: Workspace,
+                               identity: Identity, client: any IssueSourceClient,
+                               auth: SourceAuth, retrigger: LemonMarker?)
+    {
+        session.status = .planning
         let runner = WorktreeRunner()
         runners[session.id] = runner
         wire(runner, to: session)
@@ -757,6 +903,34 @@ final class Orchestrator {
             await runner.run(ref: ref, pair: pair, client: client, auth: auth, retrigger: retrigger,
                              lockdown: lockdown, trustedAuthor: trustedAuthor)
         }
+    }
+
+    /// Promote queued sessions into freed slots, oldest first (FIFO by
+    /// startedAt) (#46). A session whose workspace/credentials vanished while it
+    /// waited is failed rather than left to wedge the queue.
+    @MainActor
+    private func promoteQueued() async {
+        let keychain = KeychainStore.shared
+        let byId = Dictionary(keychain.workspaces.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        while runningCount < maxConcurrent,
+              let next = sessions.active
+              .filter({ $0.status == .queued })
+              .min(by: { $0.startedAt < $1.startedAt })
+        {
+            guard let wsId = next.workspaceId, let ws = byId[wsId],
+                  let identity = keychain.identity(for: ws),
+                  let auth = keychain.authFor(identity: identity)
+            else {
+                Logger.orchestrator.info("promoteQueued: \(next.issue.identifier) unrunnable (workspace/credentials gone) — failing")
+                next.status = .failed
+                sessions.finish(next)
+                continue
+            }
+            Logger.orchestrator.info("Promoting queued \(next.issue.identifier) — slot free (\(self.runningCount)/\(self.maxConcurrent))")
+            launchSession(session: next, ref: next.issue, workspace: ws, identity: identity,
+                          client: client(for: identity), auth: auth, retrigger: next.retrigger)
+        }
+        sessions.persist()
     }
 
     /// Wire a runner's callbacks to a Session. Shared by `startSession` and the
@@ -852,7 +1026,7 @@ final class Orchestrator {
     /// AskUserQuestion picker claude raises per LEMON_CONTEXT — "1. Approve —
     /// open the PR now" / "2. Request changes". No-ops with a log if the session
     /// isn't actually parked at a gate.
-    func resolveGate(session: Session, decision: GateDecision) {
+    func resolveGate(session: Session, decision: GateDecision, notes: String? = nil) {
         let gate = session.status
         guard gate.isGate else {
             Logger.orchestrator.info("resolveGate \(session.issue.identifier): not at a gate (\(String(describing: gate)))")
@@ -862,6 +1036,7 @@ final class Orchestrator {
         // The runner's planGatePhase parks on this sentinel; it's the cross-task
         // signal that the human resolved the gate (the keystroke drives claude).
         let gateSentinel = "/tmp/lemon-gate-\(session.issue.pathSlug)"
+        let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
         switch (gate, decision) {
         case (.planReview, .approve):
             sendTmuxKeys(to: sessionName, keys: "1") // "Yes, and use auto mode"
@@ -872,6 +1047,7 @@ final class Orchestrator {
         case (.planReview, .requestChanges):
             sendTmuxKeys(to: sessionName, keys: "4") // "Tell Claude what to change"
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+            injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
         case (.resultReview, .approve):
             sendTmuxKeys(to: sessionName, keys: "1") // "Approve — open the PR now"
             try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
@@ -879,13 +1055,45 @@ final class Orchestrator {
         case (.resultReview, .requestChanges):
             sendTmuxKeys(to: sessionName, keys: "2") // "Request changes"
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
+            injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
             session.status = .executing
         default:
             break
         }
         // Persist the post-gate status so a relaunch resumes correctly (issue #35).
         sessions.persist()
-        Logger.orchestrator.info("resolveGate \(session.issue.identifier) \(gate.displayLabel) -> \(decision.rawValue)")
+        Logger.orchestrator.info("resolveGate \(session.issue.identifier) \(gate.displayLabel) -> \(decision.rawValue)\(trimmedNotes?.isEmpty == false ? " (+notes)" : "")")
+    }
+
+    /// After selecting "request changes" in claude's picker, type the human's
+    /// feedback as text + a SEPARATE Enter (never combined — the same two-step
+    /// pattern the session-limit resume uses). A short delay lets claude's picker
+    /// present its free-text input before we type. No-op without notes (#57).
+    private func injectGateNotes(to sessionName: String, notes: String?) {
+        guard let notes, !notes.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            self?.sendTmuxText(to: sessionName, text: notes)
+        }
+    }
+
+    /// Free-form "talk to claude" path (#57): type a message into the live
+    /// session + a separate Enter, without resolving a gate. Drives the gate
+    /// card's chat composer. No-op on empty input.
+    func sendMessage(session: Session, text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        sendTmuxText(to: "lemon-\(session.issue.pathSlug)", text: t)
+        Logger.orchestrator.info("sendMessage \(session.issue.identifier): \(t.count) chars to session")
+    }
+
+    /// Send free text then a separate Enter (two send-keys calls). Splitting the
+    /// Enter is load-bearing: a combined `'<text>' Enter` can race claude's input
+    /// box and drop the newline, leaving the text typed but unsent.
+    private func sendTmuxText(to sessionName: String, text: String) {
+        let escaped = text.replacingOccurrences(of: "'", with: "'\\''")
+        _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(escaped)'")
+        _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' Enter")
     }
 
     /// Resolve a gate by issue id/identifier — the path the MCP `approve_gate`
@@ -1113,10 +1321,22 @@ final class Orchestrator {
                 resultGate.appendLog(line)
             }
 
+            // Queued — triggered but over the concurrency limit, awaiting a free
+            // slot (#46). Renders a "Queued" row in the list.
+            let queued = Session(issue: IssueRef(
+                id: "mock-7", identifier: "sandbox/demo#4",
+                title: "Add keyboard shortcuts to the command palette",
+                description: "Power users want hotkeys for the palette.",
+                labelNames: ["🍋 Lemon"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 4),
+            ), startedAt: now.addingTimeInterval(-30))
+            queued.status = .queued
+            queued.aiSummary = "Queued — waiting for a free slot"
+
             sessions.add(active1)
             sessions.add(active2)
             sessions.add(planGate)
             sessions.add(resultGate)
+            sessions.add(queued)
             sessions.add(reviewing)
             sessions.finish(recent)
 
