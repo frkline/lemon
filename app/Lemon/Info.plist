@@ -24,32 +24,13 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<!-- Hide from Dock — menu bar only -->
 	<key>LSUIElement</key>
 	<true/>
-	<!--
-	  Deliberately NO Downloads / Desktop / Documents / Photos / Music / Movies /
-	  Camera / Contacts / Calendars NS*UsageDescription keys (#86). Lemon never
-	  legitimately touches the user's personal-data folders, and a spawned session's
-	  subprocess straying into one (a broad `find ~`) would otherwise prompt — and a
-	  reflexive "Allow" would grant every future session permanent access. With no
-	  usage string, macOS DENIES the access outright instead of prompting. Keep this
-	  list empty; LemonTests/InfoPlistPrivacyTests enforces it. (cf. #80, where we
-	  DID add an honest string for the loopback network use.)
-	-->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Lemon uses Terminal to launch Claude sessions.</string>
-	<!--
-	  The "Local Network" prompt this triggers is a false alarm: Lemon does no LAN
-	  discovery. The on-device Gemma classifier (SwiftLM) binds 127.0.0.1 only, and
-	  Lemon talks to it over pure loopback — the Mac talking to itself. macOS exempts
-	  loopback from the restriction, so classification works whether the user allows
-	  or denies. This honest copy replaces macOS's generic "collect data from devices"
-	  default; it does not suppress the prompt.
-	-->
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Lemon uses a local (loopback) connection to talk to its on-device Gemma classifier. Nothing is sent to other devices on your network.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Lemon uses a local (loopback) connection to talk to its on-device Gemma classifier. Nothing is sent to other devices on your network.</string>
 </dict>
 </plist>
