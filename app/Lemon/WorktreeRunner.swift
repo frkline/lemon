@@ -1108,6 +1108,20 @@ final class WorktreeRunner: @unchecked Sendable {
         case launchError(String)
     }
 
+    /// Builds the kickoff prompt claude launches with. Extracted as a static so it
+    /// can be unit-tested (`WorktreeRunnerTests`). Both variants OPEN by asking
+    /// claude to echo the issue title + a one-line summary to its console before
+    /// anything else, so a remote-control (phone) watcher gets context up front
+    /// (#85). The prompt is single-quoted in bash by the launcher, so it must
+    /// contain no apostrophes.
+    static func kickoffPrompt(planMode: Bool, planPath: String, gatePath: String) -> String {
+        let echoFirst = "FIRST, print the issue title and a one-line summary (from LEMON_CONTEXT.md) to your console so anyone watching on their phone has context. THEN "
+        if planMode {
+            return "Read LEMON_CONTEXT.md in this directory. \(echoFirst)triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise investigate and write a concise implementation plan to the file \(planPath), post it to the issue, and present the go/no-go using the AskUserQuestion tool with exactly two options in this order: 1. Approve — build  2. Request changes. Do NOT edit any files until approved. On approve, FIRST write the file \(gatePath) containing exactly the text approve, THEN implement the plan, follow the completion checklist, and use /loop for iterative work. If changes are requested, revise the plan, overwrite \(planPath) with the new plan, and ask the same AskUserQuestion again."
+        }
+        return "Read LEMON_CONTEXT.md in this directory. \(echoFirst)complete the task described there. Follow the completion checklist. Use /loop for iterative work."
+    }
+
     private func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
                             sentinelPath: String, mcpConfigPath: String? = nil,
                             planMode: Bool = false) -> LaunchFailure?
@@ -1149,9 +1163,7 @@ final class WorktreeRunner: @unchecked Sendable {
         let permissionMode = "auto"
         let planPath = planReadyPath(slug: slug)
         let gatePath = gateSentinelPath(slug: slug)
-        let kickoffPrompt = planMode
-            ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise investigate and write a concise implementation plan to the file \(planPath), post it to the issue, and present the go/no-go using the AskUserQuestion tool with exactly two options in this order: 1. Approve — build  2. Request changes. Do NOT edit any files until approved. On approve, FIRST write the file \(gatePath) containing exactly the text approve, THEN implement the plan, follow the completion checklist, and use /loop for iterative work. If changes are requested, revise the plan, overwrite \(planPath) with the new plan, and ask the same AskUserQuestion again."
-            : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
+        let kickoffPrompt = Self.kickoffPrompt(planMode: planMode, planPath: planPath, gatePath: gatePath)
 
         // Resolve the claude binary. SANDBOX runs honour `LEMON_CLAUDE_BIN`
         // (that's how fake-claude.sh is selected). REAL runs deliberately ignore
