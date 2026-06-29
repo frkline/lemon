@@ -113,8 +113,8 @@ struct SessionDetailView: View {
                     .foregroundStyle(LD.statusWaiting)
                 Spacer()
             }
-            // The proposed plan, captured from the ExitPlanMode hook. Scrolls
-            // inside a short window so the card stays compact.
+            // The proposed plan, read from the plan sentinel claude writes.
+            // Scrolls inside a short window so the card stays compact.
             ScrollView(showsIndicators: true) {
                 Text(session.planMarkdown ?? "Drafting plan…")
                     .font(.system(size: 10.5, design: .monospaced))

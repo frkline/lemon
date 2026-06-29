@@ -8,7 +8,14 @@ related: [[plan-gate-workflow]]
 
 Durable facts about how `claude --permission-mode plan` behaves, established by running a
 real session in tmux with hooks capturing every payload (2026-06-27, claude v2.1.195).
-The plan-gate design depends on these.
+
+> **Note (2026-06-28, #76): Lemon no longer uses plan mode.** The plan gate was reworked to
+> launch in `--permission-mode auto` and approve via AskUserQuestion, symmetric with the
+> result gate — see [[plan-gate-workflow]]. The facts below are kept as reference, but the
+> brittleness they document is exactly why we moved off: the approval picker (item below) is
+> a human pick among version-coupled options (hard-coded "1" drifts across claude versions),
+> phone approval over remote-control bypassed Lemon's keystroke, and plan mode's read-only
+> nature was inherited by subagents (Explore prompted during planning).
 
 - **Hooks fire in plan mode** — `PreToolUse`, `PermissionRequest`, `Stop`, `Notification`
   all fire, each payload stamped `"permission_mode":"plan"`.
@@ -27,6 +34,9 @@ The plan-gate design depends on these.
   in a new dir and blocks until answered — worktrees must be pre-trusted.
 - **Cost:** one plan pass pushed a Claude Max session to ~94% — plan-first is ~2× usage.
 
-**How to apply:** Lemon's per-worktree `.claude/settings.json` hooks read `planFilePath`
-on the `ExitPlanMode` PermissionRequest and write a sentinel; Lemon posts the plan and
-parks until a human answers, then `send-keys "1"`. See [[plan-gate-workflow]].
+**How to apply (historical — superseded by #76):** Lemon's per-worktree
+`.claude/settings.json` hooks read `planFilePath` on the `ExitPlanMode` PermissionRequest
+and wrote a sentinel; Lemon posted the plan and parked until a human answered, then
+`send-keys "1"`. This is no longer how the plan gate works — claude now writes the plan
+sentinel directly in auto mode and approval is an AskUserQuestion picker (resolveGate
+send-keys "1"/"2"). See [[plan-gate-workflow]].

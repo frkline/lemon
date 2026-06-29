@@ -1024,11 +1024,12 @@ final class Orchestrator {
 
     /// Resolve a human gate (plan review or result review). Backs both the
     /// popover buttons and the `approve_gate` MCP tool, so approval reaches a
-    /// session whether the user is at the desk or remote. The keystroke maps to
-    /// the live `claude` picker: at the plan gate, ExitPlanMode's "1. Yes, and
-    /// use auto mode" / "4. Tell Claude what to change"; at the result gate, the
-    /// AskUserQuestion picker claude raises per LEMON_CONTEXT — "1. Approve —
-    /// open the PR now" / "2. Request changes". No-ops with a log if the session
+    /// session whether the user is at the desk or remote. Both gates now run in
+    /// auto mode and surface approval via the same AskUserQuestion picker (#76),
+    /// so the keystroke is identical for both — "1. Approve" / "2. Request
+    /// changes". The gate sentinel is the cross-task release signal; the
+    /// keystroke just drives claude's on-screen picker (phone approval reaches
+    /// claude directly and never runs this). No-ops with a log if the session
     /// isn't actually parked at a gate.
     func resolveGate(session: Session, decision: GateDecision, notes: String? = nil) {
         let gate = session.status
@@ -1043,21 +1044,21 @@ final class Orchestrator {
         let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
         switch (gate, decision) {
         case (.planReview, .approve):
-            sendTmuxKeys(to: sessionName, keys: "1") // "Yes, and use auto mode"
+            sendTmuxKeys(to: sessionName, keys: "1") // AskUserQuestion: "1. Approve — build"
             try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.planMarkdown = nil
             session.aiSummary = "Plan approved — building"
             session.status = .executing
         case (.planReview, .requestChanges):
-            sendTmuxKeys(to: sessionName, keys: "4") // "Tell Claude what to change"
+            sendTmuxKeys(to: sessionName, keys: "2") // AskUserQuestion: "2. Request changes"
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
         case (.resultReview, .approve):
-            sendTmuxKeys(to: sessionName, keys: "1") // "Approve — open the PR now"
+            sendTmuxKeys(to: sessionName, keys: "1") // AskUserQuestion: "1. Approve — open the PR now"
             try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.status = .executing
         case (.resultReview, .requestChanges):
-            sendTmuxKeys(to: sessionName, keys: "2") // "Request changes"
+            sendTmuxKeys(to: sessionName, keys: "2") // AskUserQuestion: "2. Request changes"
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
             session.status = .executing

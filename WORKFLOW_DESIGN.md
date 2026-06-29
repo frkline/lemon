@@ -89,6 +89,20 @@ not "a plan awaits approval." Gemma's only live role is classifying permission p
 
 ## Core design decisions
 
+> **⚠️ Superseded by #76 (2026-06-28): the plan gate no longer uses plan mode.** Decision 1
+> below (launch in `--permission-mode plan`, `send-keys "1"` at the ExitPlanMode picker) was
+> implemented and then replaced. The plan gate now launches in `--permission-mode auto` and
+> approves via an **AskUserQuestion** picker — symmetric with the result gate (#57). Reasons
+> the plan-mode transition was dropped: the picker is a human pick among version-coupled
+> options (hard-coded "1" drifts), phone approval over remote-control bypassed Lemon's
+> keystroke and stalled the build in `default` mode, and plan mode's read-only nature was
+> inherited by subagents (Explore prompted during planning). Decision 2 still holds in
+> spirit (plan posted to the issue with a `Lemon Plan` marker), but the plan is now written
+> by claude directly to the plan sentinel rather than captured from an ExitPlanMode hook.
+> Canonical current description: `CLAUDE.md` + `memory/plan-gate-workflow.md`. The spike
+> findings below remain accurate about how plan mode *behaves*; they are kept as the record
+> of why the original design looked attractive.
+
 ### 1. One session that switches mode at the approval picker (recommended)
 
 A 🍋 issue runs as **a single `claude` session launched in plan mode** that, on approval,

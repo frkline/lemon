@@ -419,8 +419,8 @@ final class Session: Identifiable {
     var endedAt: Date?
     var aiSummary: String?
     var pendingAction: String?
-    /// The plan Claude proposed, captured from the ExitPlanMode hook's
-    /// planFilePath. Shown in the `.planReview` gate card for approval.
+    /// The plan Claude proposed, read from the plan sentinel it writes in auto
+    /// mode. Shown in the `.planReview` gate card for approval.
     var planMarkdown: String?
     /// Populated when handleComplete fires. The session moves to
     /// `.reviewing` and stays in the active list until the user clicks

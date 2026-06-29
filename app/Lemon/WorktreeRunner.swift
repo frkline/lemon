@@ -12,8 +12,9 @@ final class WorktreeRunner: @unchecked Sendable {
     var onStatusChange: ((SessionStatus) -> Void)?
     var onLogLine: ((String) -> Void)?
     var onPRUrl: ((String) -> Void)?
-    /// Fired when the plan-mode session writes its plan (via the ExitPlanMode
-    /// hook → plan sentinel). Carries the plan markdown for the .planReview card.
+    /// Fired when a gated session writes its plan to the plan sentinel (claude
+    /// does this directly, per the kickoff prompt). Carries the plan markdown for
+    /// the .planReview card.
     var onPlanReady: ((String) -> Void)?
     /// Fired when the build signals "ready for review" (result sentinel) instead
     /// of opening the PR directly. Carries the result summary for the gate card.
@@ -174,7 +175,6 @@ final class WorktreeRunner: @unchecked Sendable {
         try? FileManager.default.removeItem(atPath: gateSentinelPath(slug: slug))
         try? FileManager.default.removeItem(atPath: resultReadyPath(slug: slug))
         pretrustWorktree(path: launchPath) // skip claude's folder-trust prompt
-        if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
 
         let sessionLabel = WorktreeRunner.remoteControlName(
             identifier: identifier, title: ref.title,
@@ -819,9 +819,10 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Plan-gate paths (the contract between the claude side and Lemon)
 
-    /// Written by the ExitPlanMode hook (real claude) or fake-claude (sandbox)
-    /// when a plan is ready. Contains the plan markdown; its presence is the
-    /// signal that the session has reached the plan gate.
+    /// Written by claude (real or fake-claude in the sandbox) when a plan is
+    /// ready — the kickoff prompt instructs writing the plan here in auto mode
+    /// (#76). Contains the plan markdown; its presence is the signal that the
+    /// session has reached the plan gate.
     func planReadyPath(slug: String) -> String {
         "/tmp/lemon-plan-\(slug).md"
     }
@@ -887,39 +888,17 @@ final class WorktreeRunner: @unchecked Sendable {
         log("[lemon] pre-trusted worktree for claude: \(path)")
     }
 
-    // MARK: - Plan-gate hooks (real claude side)
-
-    /// Writes a project-local `.claude/settings.json` into the worktree so REAL
-    /// claude copies its plan to the plan sentinel the moment it calls
-    /// ExitPlanMode (the picker stays up for a human to approve). In the sandbox,
-    /// fake-claude writes the sentinel directly, so this is a no-op for that path
-    /// but harmless to install. See WORKFLOW_DESIGN.md / claude-code-plan-mode.
-    private func writePlanHooks(launchPath: String, slug: String) {
-        let planPath = planReadyPath(slug: slug)
-        // The hook receives the ExitPlanMode tool_input on stdin; copy the plan
-        // file it points at (or the inline plan) to the sentinel.
-        let cmd = "python3 -c \"import json,sys,os; d=json.load(sys.stdin); ti=d.get('tool_input',{}); p=ti.get('planFilePath'); plan=open(p).read() if p and os.path.exists(p) else ti.get('plan',''); open('\(planPath)','w').write(plan)\""
-        let settings: [String: Any] = [
-            "hooks": [
-                "PreToolUse": [[
-                    "matcher": "ExitPlanMode",
-                    "hooks": [["type": "command", "command": cmd]],
-                ]],
-            ],
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted]) else { return }
-        let dir = "\(launchPath)/.claude"
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings.json"))
-    }
-
     // MARK: - Plan gate (the human approval before any code is written)
 
     /// Wait for the plan, surface it for approval, park until the human resolves
     /// the gate, then continue (approve → build) or abort. Returns true to
-    /// proceed into pollUntilDone. Sentinels decouple this from who runs claude:
-    /// the ExitPlanMode hook / fake-claude writes the plan sentinel; resolveGate
-    /// writes the gate sentinel.
+    /// proceed into pollUntilDone. Symmetric with the result gate (#76): the
+    /// session runs in auto the whole time, claude writes its plan to the plan
+    /// sentinel and raises a native AskUserQuestion picker; resolveGate (desk /
+    /// MCP) send-keys "1"/"2" into that picker AND writes the gate sentinel,
+    /// while phone approval over remote-control reaches claude directly and
+    /// claude writes the gate sentinel itself. Either way this loop only watches
+    /// the two sentinels — no pane-log detection, no mode transition.
     /// `resuming` is set when reattaching to a session already parked at the plan
     /// gate (issue #35): the plan was posted and the 🍋 Waiting label applied by
     /// the pre-crash process, so we restore the UI and re-enter the park loop
@@ -945,115 +924,113 @@ final class WorktreeRunner: @unchecked Sendable {
             return await tmuxSessionDead(slug: slug)
         }
 
-        // 1. Wait for the plan to be ready (or early exit / timeout).
-        let planDeadline = Date().addingTimeInterval(2 * 3600)
-        var plan: String?
-        while !stopped, Date() < planDeadline {
-            try? await Task.sleep(for: .seconds(3))
-            if stopped { return false }
-            if let p = try? String(contentsOfFile: planPath, encoding: .utf8),
-               !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            {
-                plan = p
-                break
+        // The plan gate runs as rounds: wait for a plan, surface it, park on the
+        // gate sentinel. On "approve" we build; on "changes" claude rewrites the
+        // plan sentinel and re-raises AskUserQuestion, so we loop for the next
+        // round. `surfaced` mirrors the result gate's `resultGateActive` — true
+        // once the current round's plan has been posted + parked.
+        var resumingRound = resuming
+        var surfaced = resuming
+        while !stopped {
+            // 1. Wait for the plan to be ready (or early exit / timeout). On a
+            // re-plan round (and on the very first round) the plan sentinel is
+            // cleared, so this waits for the fresh plan; on resume it is already
+            // on disk and we fall straight through.
+            let planDeadline = Date().addingTimeInterval(2 * 3600)
+            var plan: String?
+            while !stopped, Date() < planDeadline {
+                if let p = try? String(contentsOfFile: planPath, encoding: .utf8),
+                   !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                    plan = p
+                    break
+                }
+                try? await Task.sleep(for: .seconds(3))
+                if stopped { return false }
+                // Triage reject: Claude judged the issue malformed/blocked, posted
+                // a clarifying comment, and set 🍋 Waiting instead of planning.
+                // Treat as awaiting-human, not a plan gate or a failure. (Only
+                // before the plan is first surfaced — once we apply 🍋 Waiting for
+                // the gate, that label is ours, not a triage signal.)
+                if !surfaced,
+                   let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth),
+                   labels.contains(LemonState.waiting.labelName)
+                {
+                    log("[lemon] triage: issue needs clarification (🍋 Waiting) — pausing for human")
+                    onStatusChange?(.waiting)
+                    return false
+                }
+                if await sessionEnded() {
+                    log("[lemon] session ended during planning", level: .error)
+                    onStatusChange?(.failed)
+                    return false
+                }
             }
-            // Triage reject: Claude judged the issue malformed/blocked, posted a
-            // clarifying comment, and set 🍋 Waiting instead of planning. Treat as
-            // awaiting-human, not a plan gate or a failure.
-            if let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth),
-               labels.contains(LemonState.waiting.labelName)
-            {
-                log("[lemon] triage: issue needs clarification (🍋 Waiting) — pausing for human")
-                onStatusChange?(.waiting)
-                return false
-            }
-            if await sessionEnded() {
-                log("[lemon] session ended during planning", level: .error)
+            guard let plan else {
+                log("[lemon] timed out waiting for a plan", level: .error)
                 onStatusChange?(.failed)
                 return false
             }
-        }
-        guard let plan else {
-            log("[lemon] timed out waiting for a plan", level: .error)
-            onStatusChange?(.failed)
-            return false
-        }
 
-        // Surface the plan for approval: card + posted comment + 🍋 Waiting.
-        // On resume the comment + labels are already in place — just restore the
-        // card and status, then fall through to the park loop (no double-post).
-        onPlanReady?(plan)
-        onStatusChange?(.planReview)
-        if resuming {
-            log("[lemon] reattached at plan gate for \(ref.identifier) — awaiting approval")
-        } else {
-            log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
-            await clearStateConfirmed(ref: ref, state: .inProgress, client: client, auth: auth)
-            try? await client.applyState(ref: ref, state: .waiting, auth: auth)
-            _ = try? await client.postComment(
-                ref: ref,
-                body: "## 🍋 Lemon Plan — \(ref.identifier)\n\n\(plan)\n\n---\nReply **approve** to build, or leave feedback to revise.",
-                auth: auth,
-            )
-        }
-
-        // 2. Park until the gate is resolved.
-        let gateDeadline = Date().addingTimeInterval(24 * 3600)
-        var phoneApproveStreak = 0 // #64: debounce the pane-log detector
-        while !stopped, Date() < gateDeadline {
-            try? await Task.sleep(for: .seconds(2))
-            if stopped { return false }
-            // #64: approving the plan on the PHONE uses claude's native
-            // ExitPlanMode picker over remote-control — it bypasses Lemon's
-            // resolveGate AND the gate sentinel, so the build silently begins
-            // (and, if the human didn't pick "auto", stalls on the first edit
-            // prompt) while Lemon hangs here forever. Detect the plan exit from
-            // the pane log independently of the sentinel; re-assert auto only if
-            // a permission prompt is actually visible (a blind Shift+Tab would
-            // toggle auto OFF if it was already on), then write the sentinel
-            // ourselves so the gate releases via the same idempotent path below.
-            let tail = tailLog(slug: slug, last: 80)
-            if WorktreeRunner.planExecutionStarted(in: tail) {
-                phoneApproveStreak += 1
+            // Surface the plan for approval: card + posted comment + 🍋 Waiting.
+            // On resume the comment + labels are already in place — just restore
+            // the card and status, then fall through to the park loop (no
+            // double-post). Re-plan rounds post the revised plan afresh.
+            onPlanReady?(plan)
+            onStatusChange?(.planReview)
+            if resumingRound {
+                log("[lemon] reattached at plan gate for \(ref.identifier) — awaiting approval")
             } else {
-                phoneApproveStreak = 0
+                log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
+                await clearStateConfirmed(ref: ref, state: .inProgress, client: client, auth: auth)
+                try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                _ = try? await client.postComment(
+                    ref: ref,
+                    body: "## 🍋 Lemon Plan — \(ref.identifier)\n\n\(plan)\n\n---\nApprove to build, or request changes to revise.",
+                    auth: auth,
+                )
             }
-            if phoneApproveStreak >= 2, !FileManager.default.fileExists(atPath: gatePath) {
-                if WorktreeRunner.permissionPromptVisible(in: tail) {
-                    log("[lemon] plan approved via remote control, build stalled on a permission prompt — re-asserting auto mode")
-                    runSync("\(Self.tmuxBase) send-keys -t '\(tmuxSessionName(slug: slug))' BTab")
-                } else {
-                    log("[lemon] plan approved via remote control (already auto) — releasing gate")
-                }
-                try? "approve".write(toFile: gatePath, atomically: true, encoding: .utf8)
-            }
-            if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
-                let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                try? FileManager.default.removeItem(atPath: gatePath)
-                try? FileManager.default.removeItem(atPath: planPath)
-                if decision == "approve" {
-                    log("[lemon] plan approved for \(ref.identifier) — building")
+            resumingRound = false
+            surfaced = true
+
+            // 2. Park until the gate is resolved.
+            let gateDeadline = Date().addingTimeInterval(24 * 3600)
+            var resolved = false
+            while !stopped, Date() < gateDeadline {
+                try? await Task.sleep(for: .seconds(2))
+                if stopped { return false }
+                if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
+                    let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    try? FileManager.default.removeItem(atPath: gatePath)
+                    try? FileManager.default.removeItem(atPath: planPath)
+                    if decision == "approve" {
+                        log("[lemon] plan approved for \(ref.identifier) — building")
+                        await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
+                        try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                        return true
+                    }
+                    // Changes requested: claude revises and overwrites the plan
+                    // sentinel, then re-raises AskUserQuestion. Reset the label to
+                    // In Progress so the next round surfaces cleanly, and loop.
+                    log("[lemon] changes requested for \(ref.identifier) — re-planning")
                     await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
                     try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
-                    return true
+                    onStatusChange?(.planning)
+                    resolved = true
+                    break
                 }
-                // Changes requested: claude got "4" + re-plans; wait for a new plan.
-                // Reset the label to In Progress so the re-plan's triage check
-                // doesn't mistake the gate's 🍋 Waiting for a triage reject.
-                log("[lemon] changes requested for \(ref.identifier) — re-planning")
-                await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
-                try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
-                onStatusChange?(.planning)
-                return await planGatePhase(ref: ref, client: client, auth: auth,
-                                           slug: slug, sentinelPath: sentinelPath)
+                if await sessionEnded() {
+                    log("[lemon] session ended while awaiting plan approval", level: .error)
+                    onStatusChange?(.failed)
+                    return false
+                }
             }
-            if await sessionEnded() {
-                log("[lemon] session ended while awaiting plan approval", level: .error)
+            if !resolved {
+                // Gate deadline elapsed without a decision.
                 onStatusChange?(.failed)
                 return false
             }
         }
-        onStatusChange?(.failed)
         return false
     }
 
@@ -1160,14 +1137,20 @@ final class WorktreeRunner: @unchecked Sendable {
         // mis-bound — live-test caught this on HRP-37 (Gemma saw the silence as
         // state=stuck). Both are single-quoted in bash, so neither the name nor
         // the prompt body may carry apostrophes.
-        // Plan-gate flow: launch in plan mode so Claude proposes a plan and
-        // parks at the ExitPlanMode approval picker. Lemon surfaces the plan for
-        // human approval, then send-keys "1" ("Yes, and use auto mode") to let
-        // the SAME session continue into the build. Retriggers (revisions) skip
-        // the gate and go straight to auto.
-        let permissionMode = planMode ? "plan" : "auto"
+        // Plan-gate flow (symmetric with the result gate, #76): launch in AUTO
+        // — never plan mode. Claude triages, writes its plan to the plan
+        // sentinel, posts it, and raises a native AskUserQuestion picker for the
+        // go/no-go. Lemon's resolveGate send-keys "1"/"2" into that picker (or
+        // Claude writes the gate sentinel itself on phone approval). There is no
+        // mode to transition out of, so no post-approval edit prompts and
+        // subagents during planning run under auto's classifier. Retriggers
+        // (revisions) skip the gate. The prompt is single-quoted in bash, so it
+        // must not contain apostrophes.
+        let permissionMode = "auto"
+        let planPath = planReadyPath(slug: slug)
+        let gatePath = gateSentinelPath(slug: slug)
         let kickoffPrompt = planMode
-            ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise produce a concise implementation plan and present it for approval via ExitPlanMode (do not edit files yet). Once approved you continue in auto mode: implement it, follow the completion checklist, and use /loop for iterative work."
+            ? "Read LEMON_CONTEXT.md in this directory. FIRST triage the issue: is it clear, unambiguous, not already done, and unblocked? If it is malformed, a duplicate, or blocked, do NOT plan — post a short comment on the issue saying what you need, set the '🍋 Waiting' label, and stop. Otherwise investigate and write a concise implementation plan to the file \(planPath), post it to the issue, and present the go/no-go using the AskUserQuestion tool with exactly two options in this order: 1. Approve — build  2. Request changes. Do NOT edit any files until approved. On approve, FIRST write the file \(gatePath) containing exactly the text approve, THEN implement the plan, follow the completion checklist, and use /loop for iterative work. If changes are requested, revise the plan, overwrite \(planPath) with the new plan, and ask the same AskUserQuestion again."
             : "Read LEMON_CONTEXT.md in this directory and complete the task described there. Follow the completion checklist. Use /loop for iterative work."
 
         // Resolve the claude binary. SANDBOX runs honour `LEMON_CLAUDE_BIN`
@@ -1433,29 +1416,6 @@ final class WorktreeRunner: @unchecked Sendable {
             return []
         }
         return WorktreeRunner.tailLines(from: content, last: n)
-    }
-
-    /// #64 Signal 1 — plan mode has EXITED and the build began. An edit/exec
-    /// tool-call bullet is impossible in plan mode (which gates every mutation
-    /// behind ExitPlanMode); read-only tools (Read/Glob/Grep) ARE allowed there,
-    /// so they're excluded. Pure + static so it's unit-testable.
-    static func planExecutionStarted(in lines: [String]) -> Bool {
-        let bullets: Set<Character> = ["●", "⏺"]
-        let tools = ["Update(", "Write(", "Edit(", "MultiEdit(", "Bash(", "NotebookEdit("]
-        return lines.contains { line in
-            guard line.contains(where: { bullets.contains($0) }) else { return false }
-            return tools.contains { line.contains($0) }
-        }
-    }
-
-    /// #64 Signal 2 — a per-tool permission prompt is on screen, i.e. the build
-    /// landed in default (prompt-on-edit) mode. The "don't ask again" wording is
-    /// unique to the per-tool prompt; the ExitPlanMode picker never shows it, so
-    /// it cleanly distinguishes "stalled awaiting permission" from the plan
-    /// picker. Pure + static so it's unit-testable.
-    static func permissionPromptVisible(in lines: [String]) -> Bool {
-        let blob = lines.joined(separator: "\n").lowercased()
-        return blob.contains("ask again") // "don't/don’t ask again" — apostrophe-agnostic
     }
 
     /// Bounds the Gemma classify input. The pane log is dense with ANSI
