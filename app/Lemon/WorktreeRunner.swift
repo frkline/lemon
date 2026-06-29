@@ -308,8 +308,10 @@ final class WorktreeRunner: @unchecked Sendable {
                 )
             }
 
-        case .done, .failed:
-            // Terminal statuses are never persisted; no-op defensively.
+        case .queued, .done, .failed:
+            // .queued is re-adopted by restoreSessions (promoted by the poll
+            // loop, never reattached here); terminal statuses are never
+            // persisted. No-op defensively.
             break
         }
     }
@@ -467,11 +469,95 @@ final class WorktreeRunner: @unchecked Sendable {
             planReadyPath(slug: slug),
             gateSentinelPath(slug: slug),
             resultReadyPath(slug: slug),
+            "/tmp/lemon-pr-\(slug)", // sandbox PR sentinel (#53/#54 completion path)
         ]
         for path in leftovers {
             try? FileManager.default.removeItem(atPath: path)
         }
         log("[lemon] worktree(s) cleaned up")
+    }
+
+    // MARK: - Startup GC (#55)
+
+    /// A lemon-owned worktree registration from `git worktree list`.
+    struct LemonWorktree { let path: String; let slug: String; let branch: String? }
+
+    /// Git subrepo paths for a folder workspace (public wrapper over the private
+    /// discovery used at setup). Single-repo workspaces pass their own path.
+    func discoverRepoPaths(in folderPath: String) -> [String] {
+        discoverRepos(in: folderPath).map(\.repoPath)
+    }
+
+    /// Parse `git worktree list --porcelain`, returning only Lemon-owned
+    /// entries: worktrees whose path is under /tmp/lemon- OR whose branch is
+    /// lemon/<slug>. Keying on the registration (not an on-disk /tmp dir) is the
+    /// point — the stale entry that breaks a later `git worktree add` can persist
+    /// after the directory itself is gone (#55).
+    func lemonWorktrees(porcelain: String) -> [LemonWorktree] {
+        var out: [LemonWorktree] = []
+        var path: String?
+        var branch: String?
+        func flush() {
+            if let p = path, let slug = lemonSlug(path: p, branch: branch) {
+                out.append(LemonWorktree(path: p, slug: slug, branch: branch))
+            }
+            path = nil; branch = nil
+        }
+        for raw in porcelain.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("worktree ") { flush(); path = String(line.dropFirst("worktree ".count)) }
+            else if line.hasPrefix("branch ") { branch = String(line.dropFirst("branch ".count)) }
+            else if line.isEmpty { flush() }
+        }
+        flush()
+        return out
+    }
+
+    private func lemonSlug(path: String, branch: String?) -> String? {
+        let prefix = "/tmp/lemon-"
+        if path.hasPrefix(prefix) { return String(path.dropFirst(prefix.count)) }
+        if let b = branch, let r = b.range(of: "lemon/") { return String(b[r.upperBound...]) }
+        return nil
+    }
+
+    /// Prune stale lemon-owned worktree registrations across `repoPaths` whose
+    /// slug isn't in `keepSlugs` and whose tmux session is dead (#55). Removes
+    /// the dir + git registration + the lemon/<slug> branch so a re-run's
+    /// `git worktree add` for the same slug succeeds. Live-but-untracked
+    /// worktrees are LEFT (a re-trigger can adopt them, consistent with #38).
+    /// Returns the pruned slugs.
+    func gcStaleWorktrees(repoPaths: [String], keepSlugs: Set<String>) async -> [String] {
+        var pruned: [String] = []
+        for repoPath in repoPaths {
+            guard let porcelain = try? await shell("git -C \(q(repoPath)) worktree list --porcelain") else { continue }
+            for wt in lemonWorktrees(porcelain: porcelain) {
+                if keepSlugs.contains(wt.slug) { continue }
+                if await !tmuxSessionDead(slug: wt.slug) { continue } // live → leave for reattach
+                await forceRemoveWorktree(repoPath: repoPath, worktreePath: wt.path)
+                if let b = wt.branch {
+                    let name = b.replacingOccurrences(of: "refs/heads/", with: "")
+                    _ = try? await shell("git -C \(q(repoPath)) branch -D \(q(name))")
+                }
+                pruned.append(wt.slug)
+                Logger.worktree.info("[gc] pruned stale worktree \(wt.slug) in \(repoPath)")
+            }
+        }
+        return pruned
+    }
+
+    /// Slugs of all live tmux sessions on the -L lemon socket (session name
+    /// `lemon-<slug>` → `<slug>`). Empty when no tmux server is running.
+    func lemonTmuxSlugs() async -> [String] {
+        guard let out = try? await shell("\(Self.tmuxBase) ls -F '#{session_name}'") else { return [] }
+        return out.split(separator: "\n").compactMap { line in
+            let name = String(line)
+            guard name.hasPrefix("lemon-") else { return nil }
+            return String(name.dropFirst("lemon-".count))
+        }
+    }
+
+    func killTmuxSession(slug: String) {
+        runSync("\(Self.tmuxBase) kill-session -t '\(tmuxSessionName(slug: slug))' 2>/dev/null || true")
     }
 
     // MARK: - Context file
@@ -908,9 +994,34 @@ final class WorktreeRunner: @unchecked Sendable {
 
         // 2. Park until the gate is resolved.
         let gateDeadline = Date().addingTimeInterval(24 * 3600)
+        var phoneApproveStreak = 0 // #64: debounce the pane-log detector
         while !stopped, Date() < gateDeadline {
             try? await Task.sleep(for: .seconds(2))
             if stopped { return false }
+            // #64: approving the plan on the PHONE uses claude's native
+            // ExitPlanMode picker over remote-control — it bypasses Lemon's
+            // resolveGate AND the gate sentinel, so the build silently begins
+            // (and, if the human didn't pick "auto", stalls on the first edit
+            // prompt) while Lemon hangs here forever. Detect the plan exit from
+            // the pane log independently of the sentinel; re-assert auto only if
+            // a permission prompt is actually visible (a blind Shift+Tab would
+            // toggle auto OFF if it was already on), then write the sentinel
+            // ourselves so the gate releases via the same idempotent path below.
+            let tail = tailLog(slug: slug, last: 80)
+            if WorktreeRunner.planExecutionStarted(in: tail) {
+                phoneApproveStreak += 1
+            } else {
+                phoneApproveStreak = 0
+            }
+            if phoneApproveStreak >= 2, !FileManager.default.fileExists(atPath: gatePath) {
+                if WorktreeRunner.permissionPromptVisible(in: tail) {
+                    log("[lemon] plan approved via remote control, build stalled on a permission prompt — re-asserting auto mode")
+                    runSync("\(Self.tmuxBase) send-keys -t '\(tmuxSessionName(slug: slug))' BTab")
+                } else {
+                    log("[lemon] plan approved via remote control (already auto) — releasing gate")
+                }
+                try? "approve".write(toFile: gatePath, atomically: true, encoding: .utf8)
+            }
             if let raw = try? String(contentsOfFile: gatePath, encoding: .utf8) {
                 let decision = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 try? FileManager.default.removeItem(atPath: gatePath)
@@ -1284,7 +1395,7 @@ final class WorktreeRunner: @unchecked Sendable {
     }
 
     /// tmux special key names that don't need an Enter-suffix and must not be quoted.
-    static let specialKeys: Set<String> = ["Enter", "Return", "Escape", "Space", "Tab", "BSpace", "Up", "Down", "Left", "Right"]
+    static let specialKeys: Set<String> = ["Enter", "Return", "Escape", "Space", "Tab", "BTab", "BSpace", "Up", "Down", "Left", "Right"]
 
     /// Safe confirmations: single keystrokes Claude/claude-code prompts accept,
     /// numeric menu selections (1-9), yes/no, and the navigation/confirmation
@@ -1314,6 +1425,29 @@ final class WorktreeRunner: @unchecked Sendable {
             return []
         }
         return WorktreeRunner.tailLines(from: content, last: n)
+    }
+
+    /// #64 Signal 1 — plan mode has EXITED and the build began. An edit/exec
+    /// tool-call bullet is impossible in plan mode (which gates every mutation
+    /// behind ExitPlanMode); read-only tools (Read/Glob/Grep) ARE allowed there,
+    /// so they're excluded. Pure + static so it's unit-testable.
+    static func planExecutionStarted(in lines: [String]) -> Bool {
+        let bullets: Set<Character> = ["●", "⏺"]
+        let tools = ["Update(", "Write(", "Edit(", "MultiEdit(", "Bash(", "NotebookEdit("]
+        return lines.contains { line in
+            guard line.contains(where: { bullets.contains($0) }) else { return false }
+            return tools.contains { line.contains($0) }
+        }
+    }
+
+    /// #64 Signal 2 — a per-tool permission prompt is on screen, i.e. the build
+    /// landed in default (prompt-on-edit) mode. The "don't ask again" wording is
+    /// unique to the per-tool prompt; the ExitPlanMode picker never shows it, so
+    /// it cleanly distinguishes "stalled awaiting permission" from the plan
+    /// picker. Pure + static so it's unit-testable.
+    static func permissionPromptVisible(in lines: [String]) -> Bool {
+        let blob = lines.joined(separator: "\n").lowercased()
+        return blob.contains("ask again") // "don't/don’t ask again" — apostrophe-agnostic
     }
 
     /// Bounds the Gemma classify input. The pane log is dense with ANSI
@@ -1466,11 +1600,24 @@ final class WorktreeRunner: @unchecked Sendable {
                     // keep polling so the real PR can still open (#53).
                     continue
                 }
-                // Infer waiting vs executing from the current label set.
-                if labels.contains(LemonState.waiting.labelName) {
-                    onStatusChange?(.waiting)
-                } else if labels.contains(LemonState.inProgress.labelName) {
+                // Infer waiting vs executing from the current label set. #51:
+                // check In Progress FIRST. When a gate approval's
+                // clearState(.waiting) didn't take, both 🍋 In Progress and
+                // 🍋 Waiting linger; the old waiting-first precedence then pinned
+                // a building session to "Waiting" every tick (and fed
+                // reconcileLabels building=false, which cleared In Progress and
+                // kept Waiting — a desync death spiral). Resolve the inconsistent
+                // both-present set to the more-advanced state (building) and
+                // re-clear the stale Waiting so it self-heals.
+                let hasInProgress = labels.contains(LemonState.inProgress.labelName)
+                let hasWaiting = labels.contains(LemonState.waiting.labelName)
+                if hasInProgress {
                     onStatusChange?(.executing)
+                    if hasWaiting {
+                        await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
+                    }
+                } else if hasWaiting {
+                    onStatusChange?(.waiting)
                 }
             }
 
@@ -1709,6 +1856,16 @@ final class WorktreeRunner: @unchecked Sendable {
     // MARK: - PR detection
 
     private func detectPR(branch: String, repos: [(name: String, repoPath: String)]) async -> String? {
+        // Sandbox has no GitHub for `gh pr list` to query, so the completion path
+        // (#53 report, #54 auto-retire) could never be exercised. fake-claude
+        // writes the "opened PR" URL to /tmp/lemon-pr-<slug> when it sets
+        // 🍋 Complete; read it here so detection mirrors a real opened PR.
+        if KeychainStore.isSandbox {
+            let slug = branch.hasPrefix("lemon/") ? String(branch.dropFirst("lemon/".count)) : branch
+            guard let raw = try? String(contentsOfFile: "/tmp/lemon-pr-\(slug)", encoding: .utf8) else { return nil }
+            let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return url.isEmpty ? nil : url
+        }
         for repo in repos {
             if let url = await detectPRInRepo(branch: branch, repoPath: repo.repoPath) {
                 return url

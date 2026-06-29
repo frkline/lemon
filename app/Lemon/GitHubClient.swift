@@ -376,6 +376,22 @@ final class GitHubClient: Sendable {
             $0.event == "labeled" && Self.normalizeIncomingLabel($0.label?.name ?? "") == trigger
         }?.actor?.login
     }
+
+    /// Cheap issue-state GET for the auto-retire secondary trigger (#54): a
+    /// `.reviewing` session whose issue was closed (e.g. PR merged & auto-closed,
+    /// or the human closed it) should tear down without a manual click.
+    func isIssueClosed(ref: IssueRef, auth: SourceAuth) async throws -> Bool {
+        let (token, _, host) = try ghAuth(auth)
+        let (owner, repo, number) = try ghScope(ref)
+        let req = authedRequest(
+            "GET",
+            path: "/repos/\(owner)/\(repo)/issues/\(number)",
+            token: token, host: host,
+        )
+        let (_, data) = try await send(req)
+        struct StateDTO: Decodable { let state: String }
+        return try decode(data, as: StateDTO.self).state == "closed"
+    }
 }
 
 /// Tiny thread-safe set used to memoize the per-repo bootstrap status during

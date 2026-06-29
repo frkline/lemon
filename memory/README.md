@@ -66,3 +66,8 @@ a valid "this is worth writing" marker, not an error.
 - [ci-lint-swiftformat](ci-lint-swiftformat.md) — *instruction* — CI's `lint` job
   (swiftformat --lint + swiftlint --strict) is the #1 PR-check failure; a clean
   build/test doesn't cover it. Run `swiftformat` + `swiftlint --strict` before pushing.
+- [long-tail-omnibus](long-tail-omnibus.md) — *decision* — the ≥46 lifecycle cleanup:
+  visible concurrency queue (#46, runningCount gate), auto-cleanup on merge/close (#54),
+  startup leak GC + no-teardown-on-quit (#55), label-desync precedence (#51), glyph
+  decay (#48), gate notes/chat/Join (#57/#67), phone plan-approval detector (#64), and
+  the sandbox mock-PR seam that took `make sandbox-test` to 13/13.

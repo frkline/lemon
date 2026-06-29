@@ -7,9 +7,12 @@ import XCTest
 final class MenuBarGlyphTests: XCTestCase {
     private func glyph(_ active: [SessionStatus],
                        recent: SessionStatus? = nil,
+                       recentEndedAt: Date? = nil,
+                       now: Date = Date(),
                        configured: Bool = true) -> MenuBarGlyph
     {
-        MenuBarGlyph.aggregate(activeStatuses: active, lastRecentStatus: recent, configured: configured)
+        MenuBarGlyph.aggregate(activeStatuses: active, lastRecentStatus: recent,
+                               lastRecentEndedAt: recentEndedAt, now: now, configured: configured)
     }
 
     func testDisabledWhenNotConfigured() {
@@ -35,9 +38,30 @@ final class MenuBarGlyphTests: XCTestCase {
         XCTAssertEqual(glyph([.reviewing]), .done)
     }
 
-    func testRecentOutcomeWhenNoActive() {
-        XCTAssertEqual(glyph([], recent: .failed), .error)
+    func testQueuedShowsWorking() {
+        // A queue-only state still reads as activity (#46).
+        XCTAssertEqual(glyph([.queued]), .working)
+    }
+
+    func testRecentDoneShowsDone() {
         XCTAssertEqual(glyph([], recent: .done), .done)
+    }
+
+    // #48: a failure only colors the glyph red while it's fresh, then decays.
+    func testFreshFailureShowsError() {
+        let now = Date()
+        XCTAssertEqual(glyph([], recent: .failed, recentEndedAt: now, now: now), .error)
+    }
+
+    func testStaleFailureDecaysToIdle() {
+        let now = Date()
+        let old = now.addingTimeInterval(-(MenuBarGlyph.errorWindow + 60))
+        XCTAssertEqual(glyph([], recent: .failed, recentEndedAt: old, now: now), .idle)
+    }
+
+    func testFailureWithNoTimestampDecaysToIdle() {
+        // No endedAt (mock/legacy) → don't pin error without proof of freshness.
+        XCTAssertEqual(glyph([], recent: .failed), .idle)
     }
 
     func testNeedsHumanWinsOverWorking() {

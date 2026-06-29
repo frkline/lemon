@@ -24,7 +24,9 @@ clean_artifacts() {
     | xargs -I{} tmux -L lemon kill-session -t {} 2>/dev/null || true
   rm -rf /tmp/lemon-sandbox-demo-* 2>/dev/null || true
   rm -f /tmp/lemon-exit-sandbox-demo-* /tmp/lemon-launch-sandbox-demo-*.sh \
-        /tmp/lemon-mcp-sandbox-demo-* 2>/dev/null || true
+        /tmp/lemon-mcp-sandbox-demo-* /tmp/lemon-pr-sandbox-demo-* \
+        /tmp/lemon-gate-sandbox-demo-* /tmp/lemon-plan-sandbox-demo-*.md \
+        /tmp/lemon-result-sandbox-demo-*.md 2>/dev/null || true
 }
 
 init() {

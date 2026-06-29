@@ -15,6 +15,9 @@ struct SessionDetailView: View {
     @State private var joinCopied = false
     @State private var stopConfirmingId: UUID? = nil
     @State private var stopConfirmTask: Task<Void, Never>? = nil
+    /// Shared text for the gate cards' notes-on-request-changes + chat composer
+    /// (#57). Only one gate card is on screen at a time, so a single field is fine.
+    @State private var gateNote = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -120,18 +123,7 @@ struct SessionDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 132)
-            HStack(spacing: 7) {
-                // The one yellow on the gate: approve and let it build.
-                Button("Approve & run") {
-                    orchestrator.resolveGate(session: session, decision: .approve)
-                }
-                .buttonStyle(DetailPrimaryButtonStyle())
-                Button("Request changes") {
-                    orchestrator.resolveGate(session: session, decision: .requestChanges)
-                }
-                .buttonStyle(GhostButtonStyle())
-                Spacer()
-            }
+            gateActions(session: session, approveLabel: "Approve & run")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -167,17 +159,7 @@ struct SessionDetailView: View {
                         .truncationMode(.middle)
                 }
             }
-            HStack(spacing: 7) {
-                Button("Open PR") {
-                    orchestrator.resolveGate(session: session, decision: .approve)
-                }
-                .buttonStyle(DetailPrimaryButtonStyle())
-                Button("Request changes") {
-                    orchestrator.resolveGate(session: session, decision: .requestChanges)
-                }
-                .buttonStyle(GhostButtonStyle())
-                Spacer()
-            }
+            gateActions(session: session, approveLabel: "Open PR")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -185,6 +167,57 @@ struct SessionDetailView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
         }
+    }
+
+    // MARK: - Shared gate actions (plan + result review)
+
+    /// The A/B decision row + notes/chat composer + Join, shared by both gate
+    /// cards (#57, #67). One yellow stays on the primary (approve); Request
+    /// changes carries any typed notes, and the paperplane sends the field as a
+    /// free-form message into the live session. Join attaches to tmux from the
+    /// gate so the human can see what claude did before deciding.
+    private func gateActions(session: Session, approveLabel: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Button(approveLabel) {
+                    orchestrator.resolveGate(session: session, decision: .approve)
+                    gateNote = ""
+                }
+                .buttonStyle(DetailPrimaryButtonStyle())
+                Button("Request changes") {
+                    orchestrator.resolveGate(session: session, decision: .requestChanges,
+                                             notes: gateNote.isEmpty ? nil : gateNote)
+                    gateNote = ""
+                }
+                .buttonStyle(GhostButtonStyle())
+                // #67: attach to the live session from the gate.
+                Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
+                    .buttonStyle(GhostButtonStyle())
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                TextField("Notes for changes, or a message to Claude…", text: $gateNote)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(LD.textPrimary)
+                    .padding(.horizontal, 8)
+                    .frame(height: 24)
+                    .background(LD.textPrimary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                    .onSubmit { sendGateMessage(session) }
+                Button { sendGateMessage(session) } label: {
+                    Image(systemName: "paperplane.fill").font(.system(size: 10))
+                }
+                .buttonStyle(GhostButtonStyle())
+                .disabled(gateNote.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private func sendGateMessage(_ session: Session) {
+        let t = gateNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        orchestrator.sendMessage(session: session, text: t)
+        gateNote = ""
     }
 
     // MARK: - Ready for review
@@ -195,7 +228,7 @@ struct SessionDetailView: View {
                 Circle()
                     .fill(LD.statusDone)
                     .frame(width: 6, height: 6)
-                Text(session.prMerged ? "MERGED — READY TO CLEAN UP" : "READY FOR REVIEW")
+                Text(session.prMerged ? "MERGED — CLEANING UP" : "READY FOR REVIEW")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.4)
                     .foregroundStyle(LD.statusDone)
@@ -298,13 +331,9 @@ struct SessionDetailView: View {
             if !session.status.isTerminal {
                 // Primary action — the one yellow on this screen. Compact chip
                 // (30pt / pad 0-13 / 12-600) so the yellow stays a small,
-                // earned moment rather than a loud block. At a gate, the gate
-                // card owns the yellow, so Join steps down to a ghost chip to
-                // keep one earned yellow per screen.
-                if session.status.isGate {
-                    Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
-                        .buttonStyle(GhostButtonStyle())
-                } else {
+                // earned moment rather than a loud block. At a gate the gate card
+                // owns Join (#67), so the footer drops it to avoid a duplicate.
+                if !session.status.isGate {
                     Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
                         .buttonStyle(DetailPrimaryButtonStyle())
                 }

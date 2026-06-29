@@ -73,6 +73,14 @@ fi
 # --- Build phase -------------------------------------------------------------
 set_complete() {
   [ -n "$num" ] || { echo "[fake-claude] no issue number; skipping label flip"; return; }
+  # Simulate "opened the PR": the sandbox has no GitHub for `gh pr list`, so
+  # write the PR-URL sentinel that WorktreeRunner.detectPR reads in sandbox
+  # mode. Without this, detectPR returns nil and handleComplete's #53 guard
+  # bounces (no PR found). Skip the write to exercise that #53 bounce on purpose.
+  if [ "${LEMON_FAKE_NO_PR:-0}" != "1" ]; then
+    printf 'https://example.test/sandbox/demo/pull/%s' "$num" > "/tmp/lemon-pr-$slug"
+    echo "[fake-claude] opened PR (sentinel /tmp/lemon-pr-$slug)"
+  fi
   python3 - "$ISSUES/$num.json" <<'PY'
 import json, sys
 p = sys.argv[1]

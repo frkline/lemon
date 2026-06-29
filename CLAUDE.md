@@ -100,7 +100,10 @@ Orchestrator (poll loop: 15s when active, 45s when idle)
   → per pair: client.fetchTriggerQueue() → start session
               client.fetchCompleteQueue() → check for human reply → re-trigger
   → bootstrapLabels per-pair, memoized by pair.id (retried next poll on failure)
-  → WorktreeRunner.run(ref:, pair:, client:, auth:, retrigger:) per issue (max 2 concurrent)
+  → WorktreeRunner.run(ref:, pair:, client:, auth:, retrigger:) per issue
+              (concurrency limit configurable in Settings, default 2; overflow
+              triggers become tracked `.queued` sessions, promoted FIFO by
+              promoteQueued() as slots free — #46)
   → SessionStore tracks active + recent; isTracking by IssueRef.trackingKey
 
 WorktreeRunner (one per issue)
