@@ -3,10 +3,14 @@
 # WorktreeRunner's launcher. Mimics claude's observable surface so the full Lemon
 # lifecycle — including the plan gate — runs with zero tokens.
 #
-# Plan mode (`--permission-mode plan` in the args): writes a plan to the plan
-# sentinel (as the real ExitPlanMode hook would), then blocks on stdin waiting
-# for the approval keystroke "1" (which Orchestrator.resolveGate send-keys into
-# the pane). After approval it falls through to the build phase.
+# Plan gate (#76): the session always launches in auto mode now — there is no
+# `--permission-mode plan`. A gated session is detected by the plan-sentinel path
+# the kickoff prompt asks claude to write (the literal `lemon-plan-` marker).
+# fake-claude writes a plan to that sentinel (as real claude would after triage),
+# then blocks on stdin for the AskUserQuestion keystroke "1" (approve) / "2"
+# (request changes), which Orchestrator.resolveGate send-keys into the pane. On
+# approve it writes the gate sentinel itself (parity with real claude / the
+# result gate) and falls through to the build phase.
 #
 # Build phase behaviour is set by LEMON_FAKE_CLAUDE_MODE (default: complete):
 #   complete  flip the triggering issue's fixture to 🍋 Complete (Claude sets the
@@ -28,10 +32,12 @@ echo "[fake-claude] launched (mode=$MODE) worktree=$(pwd) issue=#${num:-unknown}
 PLAN_MODE=0
 
 # --- Plan gate ---------------------------------------------------------------
-# Loop on the approval picker: "1" approves; anything else (e.g. "4", the
-# "tell Claude what to change" option Lemon send-keys for request-changes) means
-# revise — write a fresh plan and wait again. This exercises the re-plan loop.
-if [[ "$ARGS" == *"--permission-mode plan"* ]]; then
+# Loop on the AskUserQuestion picker: "1" approves; anything else (e.g. "2",
+# request-changes) means revise — write a fresh plan and wait again. This
+# exercises the re-plan loop. Gated sessions are detected by the plan-sentinel
+# path the kickoff prompt asks claude to write (the `lemon-plan-` marker); the
+# session itself always launches in auto mode (#76).
+if [[ "$ARGS" == *"lemon-plan-"* ]]; then
   PLAN_MODE=1
   attempt=1
   while true; do
@@ -59,10 +65,15 @@ Revised per the requested changes.
 2. Add a test covering it AND the edge case raised in review.
 PLAN
     fi
-    echo "[fake-claude] plan v$attempt ready — parked at approval picker (1=approve, else=revise)"
+    echo "[fake-claude] plan v$attempt ready — parked at AskUserQuestion picker (1=approve, else=revise)"
     read -r answer || true
     if [ "$answer" = "1" ]; then
-      echo "[fake-claude] approved — entering auto mode, building"
+      # Native-approval release (#64/#76): write the gate sentinel ourselves so
+      # the gate releases even when approval came over remote-control (which
+      # never runs Orchestrator.resolveGate). Same path + format as
+      # WorktreeRunner.gateSentinelPath; idempotent with resolveGate's write.
+      printf approve > "/tmp/lemon-gate-$slug"
+      echo "[fake-claude] approved — wrote gate sentinel, building"
       break
     fi
     echo "[fake-claude] changes requested ('$answer') — re-planning (v$((attempt + 1)))"

@@ -364,13 +364,17 @@ Reviewing — with a PASS/FAIL summary and a real exit code. Reset also cleans s
 `/tmp/lemon-sandbox-demo-*` worktrees/tmux/sentinels (a leftover worktree otherwise fails
 the next `git worktree add`).
 
-The **plan gate** is wired (issue #11): fresh sessions launch `--permission-mode plan`;
-the ExitPlanMode hook (real claude) or `fake-claude` (sandbox) writes the plan to
-`/tmp/lemon-plan-{slug}.md`; `WorktreeRunner.planGatePhase` posts the plan to the issue and
-parks at `.planReview`; `Orchestrator.resolveGate` (popover button or `approve_gate` MCP)
-send-keys "1" + writes `/tmp/lemon-gate-{slug}`, and the same session continues into the
-build. Retriggers skip the gate. Real-claude validation (folder pre-trust, live hook) is
-still pending — the sandbox validates the Lemon side.
+The **plan gate** is wired (issue #11), and now symmetric with the result gate (#76):
+fresh sessions launch `--permission-mode auto` (never plan mode); the kickoff prompt has
+claude triage, write its plan to `/tmp/lemon-plan-{slug}.md`, post it, and raise a native
+AskUserQuestion picker (1 approve / 2 request changes) — `fake-claude` mimics this in the
+sandbox. `WorktreeRunner.planGatePhase` posts the plan to the issue and parks at
+`.planReview`; `Orchestrator.resolveGate` (popover button or `approve_gate` MCP) send-keys
+"1"/"2" into that picker AND writes `/tmp/lemon-gate-{slug}`, while phone approval reaches
+claude directly and claude writes the gate sentinel itself. Either way the same session
+continues into the build — no mode transition, so no post-approval edit prompts. Retriggers
+skip the gate. Real-claude validation (folder pre-trust, live AskUserQuestion) is still
+pending — the sandbox validates the Lemon side.
 
 `scripts/sandbox.sh <init|issue|show|reset>` is the harness; `make` wraps it. The app
 launches with `LEMON_SANDBOX=1 LEMON_ENABLE_MCP=1 LEMON_CLAUDE_BIN=scripts/fake-claude.sh`

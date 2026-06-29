@@ -14,13 +14,21 @@ fire-straight-into-auto (`WorktreeRunner.run`).
 
 Settled decisions (do not re-litigate without a reason):
 
-- **Single `claude` session that switches mode at the approval picker** (recommended,
-  spike-validated). Launch in `--permission-mode plan`; on approval Lemon `send-keys "1"`
-  ("Yes, and use auto mode") → same session continues in auto with context retained. The
-  two-session alternative (fresh auto session reading the plan) is kept on record only for
-  if carried context pollutes builds. See [[claude-code-plan-mode]] for the mechanics.
-- **Plan captured from `planFilePath`** in the ExitPlanMode hook payload (Claude Code
-  auto-writes the plan file), then posted to the issue with a `Lemon Plan` marker.
+- **Single `claude` session in auto mode the whole time** (#76, supersedes the
+  plan-mode→auto transition below). Launch in `--permission-mode auto`; the kickoff prompt
+  has claude triage, write its plan to the plan sentinel, post it, and raise a native
+  **AskUserQuestion** picker (1 approve / 2 request changes) — exactly like the result gate.
+  There is **no mode to transition out of**, so the brittle `send-keys "1" = use auto mode`
+  step and its phone-approval failure modes are gone. See [[claude-code-plan-mode]].
+  - *Superseded:* the original design launched `--permission-mode plan` and `send-keys "1"`
+    at the ExitPlanMode picker to continue in auto. Dropped in #76 because exiting plan mode
+    is a human pick among ~5 version-coupled options (hard-coded "1" drifts), phone approval
+    bypassed Lemon's keystroke (stalling on the first edit prompt in `default` mode), and
+    plan mode is read-only so subagents inherited it and prompted.
+- **Plan written by claude directly** to the plan sentinel (the kickoff prompt instructs it
+  in auto mode), then posted to the issue with a `Lemon Plan` marker. (Previously captured
+  from `planFilePath` via an ExitPlanMode `PreToolUse` hook — that hook + `writePlanHooks`
+  were deleted in #76.)
 - **Claude opens the PR** at the result gate; Lemon writes `.lemon/journal.md` in the
   worktree for Claude to fold in.
 - **State detection via project-local hooks** (PermissionRequest/Notification/Stop →
@@ -30,19 +38,18 @@ Settled decisions (do not re-litigate without a reason):
 - Two new `SessionStatus` cases (`.planReview`, `.resultReview`) overload 🍋 Waiting.
 - **Worktrees must be pre-trusted** or `claude` hangs on the folder-trust prompt.
 
-**Implemented + sandbox-validated 2026-06-27** (single session, plan mode → gate → auto):
-`WorktreeRunner` launches `--permission-mode plan` for fresh sessions + writes a
-`.claude/settings.json` ExitPlanMode hook; `planGatePhase` waits for the plan sentinel
-(`/tmp/lemon-plan-{slug}.md`, written by the hook or fake-claude), posts the plan to the
-issue, parks at `.planReview`; `Orchestrator.resolveGate` (popover or `approve_gate` MCP)
-send-keys "1" + writes `/tmp/lemon-gate-{slug}`; the same session continues into the build.
-**Both gates** are wired: the result gate is opt-in via `/tmp/lemon-result-{slug}.md` — if
-the build writes it (instead of opening the PR), Lemon parks at `.resultReview` until
-approval, then the same session opens the PR; absent it, the existing 🍋 Complete path runs
-unchanged (autopilot/retriggers). `make sandbox-test` asserts the full two-gate lifecycle
-(8/8). **Still pending:** real-claude end-to-end validation (folder pre-trust spike #8, live
-hook — blocked on a fresh Claude session limit), #11 issue-triage + confirm-screen phases,
-autopilot opt-out, the request-changes feedback loop (stubbed: sends "4"/revise, re-plans).
+**Implemented + sandbox-validated 2026-06-27; reworked to auto + AskUserQuestion 2026-06-28
+(#76).** Both gates now run the single session in `--permission-mode auto` and surface
+approval via AskUserQuestion. `planGatePhase` waits for the plan sentinel
+(`/tmp/lemon-plan-{slug}.md`, written by claude / fake-claude), posts the plan, parks at
+`.planReview`; `Orchestrator.resolveGate` (popover or `approve_gate` MCP) send-keys "1"/"2"
+into the picker AND writes `/tmp/lemon-gate-{slug}`, while phone approval has claude write
+the gate sentinel itself; the same session continues into the build. The result gate is
+opt-in via `/tmp/lemon-result-{slug}.md` — same shape. `make sandbox-test` asserts the full
+two-gate lifecycle. The request-changes loop is real: resolveGate send-keys "2", claude
+revises + rewrites the plan sentinel + re-raises AskUserQuestion, and `planGatePhase` loops
+to the next round. **Still pending:** real-claude end-to-end validation (folder pre-trust,
+live AskUserQuestion over remote-control), autopilot opt-out tuning.
 
 **Why:** Frank's "the key workflow to get right" — the whole point of Lemon.
 **How to apply:** Phase 1 (plan gate, desk popover channel) is the keystone. Watch the
