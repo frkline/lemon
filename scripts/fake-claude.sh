@@ -93,9 +93,21 @@ case "$MODE" in
       cat > "/tmp/lemon-result-$slug.md" <<RESULT
 Built sandbox/demo#$num — 2 files changed, tests green. Awaiting approval to open the PR.
 RESULT
-      echo "[fake-claude] parked at result gate (awaiting approval to open PR)"
+      # Result gate: mirror the native AskUserQuestion picker the real claude
+      # raises (Orchestrator.resolveGate send-keys the option number into it:
+      # 1=approve, 2=request changes). The sandbox scenario drives approve.
+      echo "[fake-claude] Open the PR for sandbox/demo#$num?"
+      echo "  1. Approve — open the PR now"
+      echo "  2. Request changes"
+      echo "[fake-claude] parked at result gate (awaiting selection)"
       read -r approve2 || true
-      echo "[fake-claude] result approved ('$approve2') — opening PR"
+      # Native-approval release (#64): claude writes the gate sentinel itself
+      # before opening the PR, so pollUntilDone releases even when approval came
+      # over remote-control and never ran Orchestrator.resolveGate. Same path +
+      # format as WorktreeRunner.gateSentinelPath (no extension); idempotent with
+      # resolveGate's write on the desk/MCP path.
+      printf approve > "/tmp/lemon-gate-$slug"
+      echo "[fake-claude] result approved ('$approve2') — wrote gate sentinel, opening PR"
     fi
     set_complete
     sleep 30  # stay alive so Lemon's 10s label poll observes Complete
