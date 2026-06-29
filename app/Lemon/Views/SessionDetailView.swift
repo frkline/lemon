@@ -63,6 +63,11 @@ struct SessionDetailView: View {
                 .background(LD.textPrimary.opacity(0.02))
             }
 
+            // Gemma idle countdown — when the next classify fires (#50).
+            GemmaIdleIndicator(session: session)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
+
             // Pending Gemma action — shown for 5 s before keys are sent. Carries
             // the Gemma teal accent, not the yellow (yellow belongs to the CTA).
             if let pending = session.pendingAction {
@@ -190,7 +195,7 @@ struct SessionDetailView: View {
                 Circle()
                     .fill(LD.statusDone)
                     .frame(width: 6, height: 6)
-                Text("READY FOR REVIEW")
+                Text(session.prMerged ? "MERGED — READY TO CLEAN UP" : "READY FOR REVIEW")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.4)
                     .foregroundStyle(LD.statusDone)

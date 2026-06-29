@@ -143,6 +143,30 @@ final class GitHubClientTests: XCTestCase {
                       "LinearClient palette stores '#'-prefixed values; GitHubClient strips it on send.")
     }
 
+    // MARK: - Label removal (regression: #51 double-encoding)
+
+    ///
+    /// removeLabel used to pre-percent-encode the label name AND let
+    /// authedRequest's appendingPathComponent encode it again — "🍋 Waiting"
+    /// became %25F0…%2520Waiting, GitHub 404'd, and allow404 masked it so the
+    /// label was silently never removed. That left every gate transition with
+    /// stale 🍋 labels and desynced the session status for the whole build (#51).
+    /// This locks in single-encoding: the emoji + space appear once, never %25.
+    func testClearStateSingleEncodesEmojiLabelInDeletePath() async throws {
+        var observed: URLRequest?
+        GitHubStubURLProtocol.onRequest = { observed = $0 }
+        GitHubStubURLProtocol.respond(json: "[]") // DELETE returns the remaining labels
+
+        try await client().clearState(ref: githubRef(), state: .waiting, auth: auth())
+
+        XCTAssertEqual(observed?.httpMethod, "DELETE")
+        let url = try XCTUnwrap(observed?.url?.absoluteString)
+        XCTAssertTrue(url.contains("/labels/%F0%9F%8D%8B%20Waiting"),
+                      "expected single-encoded label path, got \(url)")
+        XCTAssertFalse(url.contains("%25"),
+                       "label name was double-encoded (the #51 bug): \(url)")
+    }
+
     // MARK: - bootstrapLabels
 
     //

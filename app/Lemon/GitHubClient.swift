@@ -288,11 +288,6 @@ final class GitHubClient: Sendable {
         }
     }
 
-    /// URL-encode a single path segment. Emoji + spaces require encoding.
-    private func encodePathSegment(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s
-    }
-
     private func addLabel(owner: String, repo: String, number: Int, name: String, token: String, host: String?) async throws {
         struct Body: Encodable { let labels: [String] }
         let body = try JSONEncoder().encode(Body(labels: [name]))
@@ -307,9 +302,16 @@ final class GitHubClient: Sendable {
     }
 
     private func removeLabel(owner: String, repo: String, number: Int, name: String, token: String, host: String?) async throws {
+        // Pass the RAW label name: authedRequest builds the URL with
+        // `appendingPathComponent`, which percent-encodes the emoji + spaces
+        // exactly once (and preserves the `/` separators). Pre-encoding here
+        // double-encoded the `%` (🍋 → %25F0…), so GitHub 404'd and — masked by
+        // allow404 — the label was silently never removed. That left every gate
+        // transition with stale 🍋 In Progress / 🍋 Waiting labels and desynced
+        // the session status for the whole build (#51).
         let req = authedRequest(
             "DELETE",
-            path: "/repos/\(owner)/\(repo)/issues/\(number)/labels/\(encodePathSegment(name))",
+            path: "/repos/\(owner)/\(repo)/issues/\(number)/labels/\(name)",
             token: token,
             host: host,
         )

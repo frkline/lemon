@@ -25,6 +25,10 @@ final class WorktreeRunner: @unchecked Sendable {
     /// `.reviewing` and waiting for the user to hit "Cleanup worktree".
     /// Orchestrator stashes this info on the Session.
     var onCleanupReady: ((WorktreeCleanupInfo) -> Void)?
+    /// Fired each poll tick during the build with the silence-detector timing —
+    /// last pane activity + last Gemma classify — so the UI can render the idle
+    /// countdown ("Gemma checks in 0:48" / "Listening — pane active") (#50).
+    var onGemmaTiming: ((_ lastActivityAt: Date, _ lastGemmaAt: Date?) -> Void)?
 
     func cancelPendingAction() {
         pendingActionTask?.cancel()
@@ -121,6 +125,13 @@ final class WorktreeRunner: @unchecked Sendable {
             }
         }
 
+        // Fresh sessions (not a retrigger, not autopilot) go through BOTH gates:
+        // plan review before building, and result review before the PR opens (#53).
+        // Retriggers revise an already-open PR; autopilot is the explicit opt-out.
+        let autopilot = TrustPolicy.isAutopilot(labels: ref.labelNames)
+        if autopilot { log("[lemon] autopilot (🍋 auto) — skipping the plan + result gates") }
+        let gated = retrigger == nil && !autopilot
+
         writeContext(
             to: sessionPath,
             ref: ref,
@@ -130,6 +141,7 @@ final class WorktreeRunner: @unchecked Sendable {
             revisionComments: revisionComments,
             trustedAuthor: trustedAuthor,
             lockdown: lockdown,
+            resultGate: gated,
         )
 
         // Update source state labels.
@@ -151,15 +163,11 @@ final class WorktreeRunner: @unchecked Sendable {
                                              isMultiRepo: workspace.allReposInFolder,
                                              slug: slug)
 
-        // Fresh sessions go through the plan gate (plan mode → human approval →
-        // auto). Retriggers are revisions to already-approved work, so they skip
-        // the gate. Autopilot opt-out: a `🍋 auto` label on the issue skips the
-        // gate for trivial work the user trusts to run unattended.
-        let autopilot = TrustPolicy.isAutopilot(labels: ref.labelNames)
-        if autopilot { log("[lemon] autopilot (🍋 auto) — skipping the plan gate") }
-        let planMode = retrigger == nil && !autopilot
+        // Plan mode mirrors the gating decided above (fresh, non-autopilot work).
+        let planMode = gated
         try? FileManager.default.removeItem(atPath: planReadyPath(slug: slug))
         try? FileManager.default.removeItem(atPath: gateSentinelPath(slug: slug))
+        try? FileManager.default.removeItem(atPath: resultReadyPath(slug: slug))
         pretrustWorktree(path: launchPath) // skip claude's folder-trust prompt
         if planMode { writePlanHooks(launchPath: launchPath, slug: slug) }
 
@@ -468,14 +476,20 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Context file
 
+    /// Pane must be silent this long before Gemma classifies; Gemma won't re-fire
+    /// within `gemmaCooldown` of its last verdict. Shared with the UI so the idle
+    /// countdown shows the real numbers (#50).
+    static let gemmaSilenceThreshold: TimeInterval = 120
+    static let gemmaCooldown: TimeInterval = 180
+
     /// Returns true when the silence detector should fire Gemma.
     /// Extracted for unit testability — call sites pass `now` explicitly.
     static func shouldInvokeGemma(
         lastActivityAt: Date,
         lastGemmaAt: Date?,
         now: Date = Date(),
-        silenceThreshold: TimeInterval = 120,
-        cooldown: TimeInterval = 180,
+        silenceThreshold: TimeInterval = WorktreeRunner.gemmaSilenceThreshold,
+        cooldown: TimeInterval = WorktreeRunner.gemmaCooldown,
     ) -> Bool {
         let silence = now.timeIntervalSince(lastActivityAt)
         let gemmaCooldown = lastGemmaAt.map { now.timeIntervalSince($0) } ?? .infinity
@@ -513,6 +527,7 @@ final class WorktreeRunner: @unchecked Sendable {
         revisionComments: [RevisionComment] = [],
         trustedAuthor: String? = nil,
         lockdown _: Bool = false,
+        resultGate: Bool = false,
     ) {
         var content = ""
 
@@ -596,9 +611,29 @@ final class WorktreeRunner: @unchecked Sendable {
         case .github: "Apply the GitHub label **🍋 Complete** to issue \(ref.identifier) via `gh issue edit \(ref.identifier.components(separatedBy: "#").last ?? "") --add-label '🍋 Complete'` (run inside the worktree where `gh` knows the repo)."
         }
 
-        // Completion checklist — universal across stacks.
-        content += """
-        ---
+        // Completion checklist. Gated (fresh) sessions go through a result-review
+        // gate: claude commits + pushes + writes the result sentinel, then STOPS —
+        // a human approves before the PR opens and before 🍋 Complete is applied
+        // (#53). Retrigger / autopilot sessions open the PR directly (legacy path).
+        let resultPath = resultReadyPath(slug: ref.pathSlug)
+        let completionChecklist = resultGate ? """
+        ## Completion checklist (result review required)
+
+        This issue uses a **result-review gate**: a human reviews your build before the PR is opened. Do NOT open a PR or apply any 🍋 label until you are told the result is approved.
+
+        When your implementation is finished and verified — it builds, lints, and tests pass — and you have committed your work and pushed the branch:
+        1. Write a concise summary of what you changed and how you verified it to BOTH:
+           - `.lemon-summary.md` in this worktree, and
+           - the result-review sentinel `\(resultPath)` — creating that file signals Lemon your build is ready for review.
+           Then STOP and wait. Do NOT open the PR yet.
+        2. A human reviews and replies via Lemon:
+           - **"Approved — open the PR now."** → open the PR (`gh pr create …`), then \(completeInstruction)
+           - **change requests** → address them, re-commit and push, then write `\(resultPath)` again to request another review.
+        3. Kill any dev servers, background tasks, or external resources you started.
+
+        If you need human input mid-build, apply the label **🍋 Waiting** and pause.
+        If the issue's team LEMON.md above gave you extra steps, do those too.
+        """ : """
         ## Completion checklist
 
         When the PR is open and ready for review:
@@ -608,6 +643,11 @@ final class WorktreeRunner: @unchecked Sendable {
 
         If you need human input at any point, apply the label **🍋 Waiting** and pause.
         If the issue's team LEMON.md above gave you extra steps, do those too.
+        """
+
+        content += """
+        ---
+        \(completionChecklist)
 
         ---
         ## Use `/loop` for iterative work
@@ -700,6 +740,26 @@ final class WorktreeRunner: @unchecked Sendable {
     /// → the existing 🍋 Complete → handleComplete path runs unchanged.
     func resultReadyPath(slug: String) -> String {
         "/tmp/lemon-result-\(slug).md"
+    }
+
+    /// Clear a 🍋* state label and CONFIRM it's actually gone, retrying a few
+    /// times. The plain one-shot `try? clearState` swallows failures, and a stale
+    /// 🍋 Waiting left behind after a gate approval desyncs the whole build (#51):
+    /// `Orchestrator.reconcileLabels` then reads [In Progress + Waiting] and clears
+    /// In Progress (keeping Waiting) every poll, and `pollUntilDone` re-derives the
+    /// status as Waiting. Gate transitions use this so the label set is clean before
+    /// the build proceeds.
+    func clearStateConfirmed(ref: IssueRef, state: LemonState,
+                             client: any IssueSourceClient, auth: SourceAuth,
+                             attempts: Int = 4) async
+    {
+        for attempt in 0 ..< max(1, attempts) {
+            try? await client.clearState(ref: ref, state: state, auth: auth)
+            guard let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth) else { return }
+            if !labels.contains(state.labelName) { return }
+            if attempt < attempts - 1 { try? await Task.sleep(for: .seconds(1)) }
+        }
+        log("[lemon] clearStateConfirmed: \(state.labelName) still set after retries on \(ref.identifier)", level: .error)
     }
 
     /// Pre-trust the worktree in `~/.claude.json` so real `claude` skips the
@@ -827,7 +887,7 @@ final class WorktreeRunner: @unchecked Sendable {
             log("[lemon] reattached at plan gate for \(ref.identifier) — awaiting approval")
         } else {
             log("[lemon] plan ready for \(ref.identifier) — awaiting approval")
-            try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+            await clearStateConfirmed(ref: ref, state: .inProgress, client: client, auth: auth)
             try? await client.applyState(ref: ref, state: .waiting, auth: auth)
             _ = try? await client.postComment(
                 ref: ref,
@@ -847,7 +907,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 try? FileManager.default.removeItem(atPath: planPath)
                 if decision == "approve" {
                     log("[lemon] plan approved for \(ref.identifier) — building")
-                    try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                    await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
                     try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
                     return true
                 }
@@ -855,7 +915,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 // Reset the label to In Progress so the re-plan's triage check
                 // doesn't mistake the gate's 🍋 Waiting for a triage reject.
                 log("[lemon] changes requested for \(ref.identifier) — re-planning")
-                try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
                 try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
                 onStatusChange?(.planning)
                 return await planGatePhase(ref: ref, client: client, auth: auth,
@@ -1358,7 +1418,7 @@ final class WorktreeRunner: @unchecked Sendable {
                     if decision == "approve" {
                         log("[lemon] result approved for \(ref.identifier) — opening PR")
                         onStatusChange?(.executing)
-                        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                        await clearStateConfirmed(ref: ref, state: .waiting, client: client, auth: auth)
                         try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
                     } else {
                         log("[lemon] result changes requested for \(ref.identifier)")
@@ -1379,7 +1439,7 @@ final class WorktreeRunner: @unchecked Sendable {
             // targets the single ref and is cheaper too.
             if let labels = try? await client.fetchIssueLabels(ref: ref, auth: auth) {
                 if labels.contains(LemonState.complete.labelName) {
-                    await handleComplete(
+                    let done = await handleComplete(
                         ref: ref,
                         pair: pair,
                         client: client,
@@ -1391,7 +1451,10 @@ final class WorktreeRunner: @unchecked Sendable {
                         retrigger: retrigger,
                         workspacePath: workspacePath,
                     )
-                    return
+                    if done { return }
+                    // Premature 🍋 Complete (no PR) was bounced to 🍋 Waiting —
+                    // keep polling so the real PR can still open (#53).
+                    continue
                 }
                 // Infer waiting vs executing from the current label set.
                 if labels.contains(LemonState.waiting.labelName) {
@@ -1452,6 +1515,8 @@ final class WorktreeRunner: @unchecked Sendable {
                 lastLineCount = currentLines
                 lastActivityAt = Date()
             }
+            // Publish the silence-detector timing for the idle countdown UI (#50).
+            onGemmaTiming?(lastActivityAt, lastGemmaAt)
             // Quota wall (#39): if parked on a Max session-limit, don't classify
             // (it would re-fire on a frozen pane). Auto-resume once the reset time
             // passes — a continuation nudge + a separate Enter — then resume normal
@@ -1487,6 +1552,10 @@ final class WorktreeRunner: @unchecked Sendable {
 
     // MARK: - Completion handler
 
+    /// Returns true when the issue is genuinely complete (report posted, ready
+    /// for review). Returns false when 🍋 Complete was premature — no PR exists —
+    /// so the caller keeps polling instead of treating the session as done (#53).
+    @discardableResult
     private func handleComplete(
         ref: IssueRef,
         pair _: WorkspacePair,
@@ -1498,14 +1567,33 @@ final class WorktreeRunner: @unchecked Sendable {
         branch: String,
         retrigger: LemonMarker?,
         workspacePath: String,
-    ) async {
-        onStatusChange?(.reviewing)
+    ) async -> Bool {
         log("[lemon] 🍋 Complete detected for \(ref.identifier)")
+
+        let prUrl = await detectPR(branch: branch, repos: repos)
+
+        // #53 defense: 🍋 Complete must not precede an actual PR. On a fresh
+        // (non-retrigger) session with no detectable PR, claude jumped the gun —
+        // don't post a PR-less "done" report or tear down. Bounce to 🍋 Waiting
+        // with the work intact and keep polling so the real PR can still open.
+        if prUrl == nil, retrigger == nil {
+            Logger.worktree.warning("🍋 Complete on \(ref.identifier) with no PR — bouncing to 🍋 Waiting (premature complete, #53)")
+            await clearStateConfirmed(ref: ref, state: .complete, client: client, auth: auth)
+            try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+            _ = try? await client.postComment(
+                ref: ref,
+                body: "## 🍋 Lemon — no PR found\n\nThis issue was marked **🍋 Complete**, but no open PR was found for branch `\(branch)`. Open the PR first (`gh pr create …`), then re-apply **🍋 Complete**. The worktree is left intact.",
+                auth: auth,
+            )
+            onStatusChange?(.waiting)
+            return false
+        }
+
+        onStatusChange?(.reviewing)
 
         // Final Gemma summary before posting the report comment.
         await invokeGemma(ref: ref)
 
-        let prUrl = await detectPR(branch: branch, repos: repos)
         let prNumber = prUrl.flatMap { URL(string: $0)?.lastPathComponent } ?? ""
         let summary = (try? String(contentsOfFile: "\(sessionPath)/.lemon-summary.md", encoding: .utf8)) ?? ""
 
@@ -1566,6 +1654,7 @@ final class WorktreeRunner: @unchecked Sendable {
         )
         onCleanupReady?(cleanup)
         log("[lemon] ready for review — worktree at \(sessionPath). Click Cleanup to tear down.")
+        return true
     }
 
     // MARK: - Comment builders
@@ -1624,6 +1713,18 @@ final class WorktreeRunner: @unchecked Sendable {
         ) else { return nil }
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty || trimmed == "null" ? nil : trimmed
+    }
+
+    /// True if the PR at `prUrl` is merged. Drives the #54 "ready to clean up"
+    /// surface on a `.reviewing` session once its PR lands. `gh pr view` resolves
+    /// a full PR URL on its own, but we run from the worktree (`cwd`) so gh's auth
+    /// and host config resolve the same way `detectPR` does.
+    func isPRMerged(prUrl: String, cwd: String?) async -> Bool {
+        let prefix = cwd.map { "cd \(q($0)) && " } ?? "cd /tmp && "
+        guard let output = try? await shell(
+            "\(prefix)gh pr view \(q(prUrl)) --json state --jq '.state' 2>/dev/null",
+        ) else { return false }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines) == "MERGED"
     }
 
     // MARK: - Shell helper

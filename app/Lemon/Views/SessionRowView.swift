@@ -31,6 +31,12 @@ struct SessionRowView: View {
                     .buttonStyle(.plain)
                     .padding(.top, 4)
                 }
+
+                // Gemma idle countdown — when the next classify fires (#50).
+                if session.status == .executing {
+                    GemmaIdleBadge(session: session)
+                        .padding(.top, 4)
+                }
             }
             .padding(EdgeInsets(top: 11, leading: 14, bottom: 12, trailing: 0))
 
