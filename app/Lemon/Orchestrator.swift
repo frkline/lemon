@@ -161,7 +161,7 @@ final class Orchestrator {
 
     func start() {
         guard pollTask == nil else { return }
-        Task { await LocalLLM.shared.start() }
+        Task { _ = await LocalLLM.shared.ensureReady() }
         Task { @MainActor [weak self] in
             await self?.restoreSessions()
         }
@@ -498,6 +498,10 @@ final class Orchestrator {
         defer {
             isPolling = false
             lastPolledAt = Date()
+            // Reclaim ~5 GB by unloading SwiftLM after it's been idle (#70);
+            // never while a session is active. Snapshot state *after* so the UI
+            // reflects .idle the same tick. Reloads lazily on the next classify.
+            LocalLLM.shared.unloadIfIdle(hasActiveSessions: !sessions.active.isEmpty)
             aiState = LocalLLM.shared.state()
         }
 

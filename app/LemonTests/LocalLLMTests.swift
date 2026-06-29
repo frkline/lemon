@@ -114,8 +114,107 @@ final class LocalLLMTests: XCTestCase {
         StubURLProtocol.onRequest = nil
     }
 
+    @MainActor
     func testIsReadyReturnsTrueForTestInstance() {
         XCTAssertTrue(llm().isReady())
+    }
+
+    // MARK: - Idle unload (#70)
+
+    private let threshold = LocalLLM.idleUnloadThreshold
+
+    // Pure predicate — no instance / subprocess needed (mirrors shouldInvokeGemma).
+
+    func testShouldUnloadFalseWhenNotReady() {
+        XCTAssertFalse(LocalLLM.shouldUnloadForIdle(
+            ready: false, lastActivityAt: Date(), hasActiveSessions: false,
+            now: Date().addingTimeInterval(threshold + 1), threshold: threshold,
+        ))
+    }
+
+    func testShouldUnloadFalseWhenSessionsActive() {
+        let last = Date()
+        XCTAssertFalse(LocalLLM.shouldUnloadForIdle(
+            ready: true, lastActivityAt: last, hasActiveSessions: true,
+            now: last.addingTimeInterval(threshold + 100), threshold: threshold,
+        ))
+    }
+
+    func testShouldUnloadFalseWhenNeverActive() {
+        XCTAssertFalse(LocalLLM.shouldUnloadForIdle(
+            ready: true, lastActivityAt: nil, hasActiveSessions: false,
+            now: Date(), threshold: threshold,
+        ))
+    }
+
+    func testShouldUnloadTrueAtThresholdBoundary() {
+        let last = Date()
+        XCTAssertTrue(LocalLLM.shouldUnloadForIdle(
+            ready: true, lastActivityAt: last, hasActiveSessions: false,
+            now: last.addingTimeInterval(threshold), threshold: threshold,
+        ))
+    }
+
+    func testShouldUnloadFalseJustUnderThreshold() {
+        let last = Date()
+        XCTAssertFalse(LocalLLM.shouldUnloadForIdle(
+            ready: true, lastActivityAt: last, hasActiveSessions: false,
+            now: last.addingTimeInterval(threshold - 1), threshold: threshold,
+        ))
+    }
+
+    func testShouldUnloadTrueWhenIdlePastThreshold() {
+        let last = Date()
+        XCTAssertTrue(LocalLLM.shouldUnloadForIdle(
+            ready: true, lastActivityAt: last, hasActiveSessions: false,
+            now: last.addingTimeInterval(threshold + 60), threshold: threshold,
+        ))
+    }
+
+    // Instance behavior — classify() records activity; unloadIfIdle() tears down.
+
+    @MainActor
+    func testClassifyRecordsActivityEnablingIdleUnload() async throws {
+        let m = llm()
+        // Fresh ready instance has never classified → no activity → won't unload.
+        XCTAssertFalse(m.unloadIfIdle(hasActiveSessions: false,
+                                      now: Date().addingTimeInterval(threshold + 1)))
+        stubResponse(state: "running", summary: "ok")
+        _ = try await m.classify(issue: issue(), logLines: ["work"])
+        // After a classify, an idle window past the threshold unloads.
+        XCTAssertTrue(m.unloadIfIdle(hasActiveSessions: false,
+                                     now: Date().addingTimeInterval(threshold + 1)))
+    }
+
+    @MainActor
+    func testIdleUnloadTransitionsToIdleState() async throws {
+        let m = llm()
+        stubResponse(state: "running", summary: "ok")
+        _ = try await m.classify(issue: issue(), logLines: ["work"])
+        XCTAssertTrue(m.unloadIfIdle(hasActiveSessions: false,
+                                     now: Date().addingTimeInterval(threshold + 1)))
+        XCTAssertEqual(m.state(), .idle)
+        XCTAssertFalse(m.isReady())
+    }
+
+    @MainActor
+    func testActiveSessionBlocksUnload() async throws {
+        let m = llm()
+        stubResponse(state: "running", summary: "ok")
+        _ = try await m.classify(issue: issue(), logLines: ["work"])
+        XCTAssertFalse(m.unloadIfIdle(hasActiveSessions: true,
+                                      now: Date().addingTimeInterval(threshold + 100)))
+        XCTAssertEqual(m.state(), .ready)
+    }
+
+    @MainActor
+    func testFreshActivityBlocksUnload() async throws {
+        let m = llm()
+        stubResponse(state: "running", summary: "ok")
+        _ = try await m.classify(issue: issue(), logLines: ["work"])
+        // Just classified → not idle yet.
+        XCTAssertFalse(m.unloadIfIdle(hasActiveSessions: false, now: Date()))
+        XCTAssertEqual(m.state(), .ready)
     }
 }
 
