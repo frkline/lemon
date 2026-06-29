@@ -612,10 +612,13 @@ final class WorktreeRunner: @unchecked Sendable {
         }
 
         // Completion checklist. Gated (fresh) sessions go through a result-review
-        // gate: claude commits + pushes + writes the result sentinel, then STOPS —
-        // a human approves before the PR opens and before 🍋 Complete is applied
-        // (#53). Retrigger / autopilot sessions open the PR directly (legacy path).
+        // gate: claude commits + pushes + writes the result sentinel, then raises a
+        // native AskUserQuestion picker for the go/no-go (#57). On approve claude
+        // writes the gate sentinel itself before opening the PR, so the release
+        // signal works for phone approval too (which bypasses resolveGate — #64).
+        // Retrigger / autopilot sessions open the PR directly (legacy path).
         let resultPath = resultReadyPath(slug: ref.pathSlug)
+        let gatePath = gateSentinelPath(slug: ref.pathSlug)
         let completionChecklist = resultGate ? """
         ## Completion checklist (result review required)
 
@@ -630,8 +633,8 @@ final class WorktreeRunner: @unchecked Sendable {
            2. **Request changes**
            This renders as a tappable choice on the reviewer's phone (remote-control) and in Lemon's popover. The reviewer may tap an option, or use the free-text / "Other" field to type specific feedback. Wait for the selection.
         3. Act on the selection:
-           - **Approve** → open the PR (`gh pr create …`), then \(completeInstruction)
-           - **Request changes** (or any typed feedback) → address it, re-commit and push, write `\(resultPath)` again, and **ask the same AskUserQuestion again** for another review.
+           - **Approve** → FIRST write the file `\(gatePath)` containing exactly the text `approve` (no newline needed, no file extension — this is the release signal Lemon watches; native phone approval reaches you directly and never runs Lemon's own writer, so you must write it). THEN open the PR (`gh pr create …`), then \(completeInstruction)
+           - **Request changes** (or any typed feedback) → do NOT write `\(gatePath)`. Address the feedback, re-commit and push, write `\(resultPath)` again, and **ask the same AskUserQuestion again** for another review.
         4. Kill any dev servers, background tasks, or external resources you started.
 
         If you need human input mid-build, apply the label **🍋 Waiting** and pause.
@@ -732,8 +735,12 @@ final class WorktreeRunner: @unchecked Sendable {
         "/tmp/lemon-plan-\(slug).md"
     }
 
-    /// Written by Orchestrator.resolveGate when the human approves/rejects a
-    /// gate ("approve" or "changes"). Both gate park-loops watch for it.
+    /// The result-gate release signal ("approve" or "changes"). Both gate
+    /// park-loops watch for it. Written by Orchestrator.resolveGate (desk/MCP
+    /// approval) AND, at the result gate, by claude itself on approve — native
+    /// phone approval over remote-control reaches claude directly and never runs
+    /// resolveGate, so claude must write it or pollUntilDone never releases (#64).
+    /// The double-write is idempotent.
     func gateSentinelPath(slug: String) -> String {
         "/tmp/lemon-gate-\(slug)"
     }

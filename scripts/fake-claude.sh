@@ -101,7 +101,13 @@ RESULT
       echo "  2. Request changes"
       echo "[fake-claude] parked at result gate (awaiting selection)"
       read -r approve2 || true
-      echo "[fake-claude] result selection ('$approve2') — opening PR"
+      # Native-approval release (#64): claude writes the gate sentinel itself
+      # before opening the PR, so pollUntilDone releases even when approval came
+      # over remote-control and never ran Orchestrator.resolveGate. Same path +
+      # format as WorktreeRunner.gateSentinelPath (no extension); idempotent with
+      # resolveGate's write on the desk/MCP path.
+      printf approve > "/tmp/lemon-gate-$slug"
+      echo "[fake-claude] result approved ('$approve2') — wrote gate sentinel, opening PR"
     fi
     set_complete
     sleep 30  # stay alive so Lemon's 10s label poll observes Complete
