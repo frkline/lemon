@@ -378,6 +378,7 @@ struct SettingsView: View {
                         if ws.allReposInFolder {
                             editorialChip("folder", tint: LD.textSecondary)
                         }
+                        editorialChip(ws.engine.kind.chipLabel, tint: LD.textSecondary, mono: true)
                         if ws.allReposInFolder, !ws.homeRepo.isEmpty {
                             editorialChip("→ \(ws.homeRepo)/", tint: LD.textSecondary, mono: true)
                         }

@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-light.png">
-  <img alt="Lemon — Claude Code, no cruft. Tag an issue with 🍋; Lemon spins the worktree, runs your own claude, and ships the PR." src="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-dark.png" width="900">
+  <img alt="Lemon — local agent orchestration, no cruft. Tag an issue with 🍋; Lemon spins the worktree, runs your own CLI, and ships the PR." src="https://raw.githubusercontent.com/frkline/lemon/main/docs/img/readme-hero-dark.png" width="900">
 </picture>
 
 <sub><i>Made for the Mac mini sitting on your desk.</i></sub>
@@ -24,16 +24,16 @@
 
 <br/>
 
-Lemon is a menu-bar app that orchestrates Claude Code from your issue tracker. Tag an issue with 🍋 and Lemon cuts a git worktree, drops in the right context, and launches *your own* `claude` CLI in a terminal. A small local model handles the routine confirmations so a session keeps moving; you step in only for the decisions that need a person.
+Lemon is a menu-bar app that orchestrates a local coding engine from your issue tracker. Today the default engine is Claude Code; OpenCode support is in progress behind the new engine abstraction. Tag an issue with 🍋 and Lemon cuts a git worktree, drops in the right context, and launches *your own* CLI in a terminal. A small local model handles routine confirmations and summaries so a session keeps moving; you step in only for decisions that need a person.
 
-It is deliberately thin. The intelligence is Claude Code, running under your login; the judgment is yours. Lemon is the glue between your tracker and your session — it watches the queue, manages worktrees and labels, gates the work behind your approval, and posts the report when the PR is open.
+It is deliberately thin. The intelligence is your selected engine, running under your login; the judgment is yours. Lemon is the glue between your tracker and your session — it watches the queue, manages worktrees and labels, gates the work behind your approval, and posts the report when the PR is open.
 
 <div align="center">
 <img src="docs/img/real/01-list.png" alt="The Lemon popover — active and recent sessions across states: executing, waiting, plan review, result review, reviewing" width="320">
 </div>
 
 > [!IMPORTANT]
-> Lemon is not an AI-agent product and not an assignee meant to stand in for a developer. It does not wrap Claude in another UI or route your traffic through anyone's servers. It decides *when* to start Claude Code and handles the workflow around the session — nothing more.
+> Lemon is not an AI-agent product and not an assignee meant to stand in for a developer. It does not wrap your coding engine in another UI or route your traffic through anyone's servers. It decides *when* to start your session and handles the workflow around it — nothing more.
 
 ## Install
 
@@ -212,7 +212,8 @@ None of this is from scratch.
 
 | | Project | What |
 |---|---|---|
-| Agent | [Claude Code](https://claude.com/code) (Anthropic) | The intelligence |
+| Agent | [Claude Code](https://claude.com/code) (Anthropic) | Default engine today |
+| Agent (in progress) | [OpenCode](https://github.com/sst/opencode) | Structured REST/SSE engine integration |
 | Runtime | [SwiftLM](https://github.com/SharpAI/SwiftLM) (SharpAI, `b648`) | OpenAI-compatible MLX inference server in pure Swift |
 | Framework | [MLX](https://github.com/ml-explore/mlx) (Apple) | Open-source ML for Apple Silicon |
 | Weights | [`mlx-community`](https://huggingface.co/mlx-community) | Quantized Gemma 4 on Hugging Face |

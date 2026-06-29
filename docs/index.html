@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Lemon — Run Claude Code from your Linear or GitHub queue.</title>
-<meta name="description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device. Tag an issue with 🍋, get a PR." />
-<meta property="og:title" content="Lemon — Run Claude Code from your Linear or GitHub queue." />
-<meta property="og:description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device." />
+<title>Lemon — Run your local coding engine from your Linear or GitHub queue.</title>
+<meta name="description" content="A personal workflow orchestration menu-bar app for your coding engine + issue tracker, leveraging Gemma 4 on device. Tag an issue with 🍋, get a PR." />
+<meta property="og:title" content="Lemon — Run your local coding engine from your Linear or GitHub queue." />
+<meta property="og:description" content="A personal workflow orchestration menu-bar app for your coding engine + issue tracker, leveraging Gemma 4 on device." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://lemon.living/" />
 <meta property="og:image" content="https://lemon.living/img/readme-hero-dark.png" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Lemon — Run Claude Code from your Linear or GitHub queue." />
-<meta name="twitter:description" content="A personal workflow orchestration menu-bar app for Claude Code + your issue tracker, leveraging Gemma 4 on device." />
+<meta name="twitter:title" content="Lemon — Run your local coding engine from your Linear or GitHub queue." />
+<meta name="twitter:description" content="A personal workflow orchestration menu-bar app for your coding engine + issue tracker, leveraging Gemma 4 on device." />
 <meta name="twitter:image" content="https://lemon.living/img/readme-hero-dark.png" />
 <link rel="canonical" href="https://lemon.living/" />
 <meta name="theme-color" content="#F7C842" />
@@ -77,6 +77,9 @@ body{
 h1{font-size:58px;line-height:1.02;letter-spacing:-1.7px;font-weight:700}
 h2{font-size:36px;line-height:1.06;letter-spacing:-.9px;font-weight:700}
 h3{font-size:19px;line-height:1.2;letter-spacing:-.3px;font-weight:600}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;
+  margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;
+  white-space:nowrap!important;border:0!important}
 .lead{font-size:18.5px;line-height:1.55;color:var(--ink2);font-weight:400;letter-spacing:-.1px}
 .sub{font-size:15.5px;line-height:1.6;color:var(--ink2);letter-spacing:-.1px}
 p code,.sub code{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:.86em;
@@ -126,6 +129,11 @@ em{font-style:italic;color:var(--ink)}
 .hero{display:grid;grid-template-columns:452px 1fr;gap:30px;align-items:center;
   padding:64px 84px 86px}
 .hero h1{margin:20px 0 0;font-size:58px;letter-spacing:-2px;line-height:.96}
+.hero-rotor{position:relative;display:inline-block;vertical-align:baseline}
+.hero-rotor::before{content:"Claude";visibility:hidden}
+.hero-rotor .word{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity .22s ease}
+.hero-rotor .word.open{left:auto;right:0;opacity:0;animation:heroWordOpen 4.2s ease-in-out infinite}
+.hero-rotor .word.claude{animation:heroWordClaude 4.2s ease-in-out infinite}
 .herokick{margin-top:16px;font-size:25px;line-height:1.12;letter-spacing:-.6px;font-weight:600;color:var(--ink2)}
 /* ---- The point (manifesto) ---- */
 .pitch{display:grid;grid-template-columns:.92fr 1.08fr;gap:60px;align-items:start}
@@ -191,6 +199,12 @@ em{font-style:italic;color:var(--ink)}
 }
 @keyframes heroRise{from{transform:translateY(16px)}to{transform:none}}
 @keyframes dropIn{from{transform:translateY(-10px)}to{transform:none}}
+@keyframes heroWordClaude{0%,44%{opacity:1}50%,94%{opacity:0}100%{opacity:1}}
+@keyframes heroWordOpen{0%,44%{opacity:0}50%,94%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){
+  .hero-rotor .word{animation:none;transition:none}
+  .hero-rotor .word.open{display:none}
+}
 
 /* ============================================================
    APP UI — rebuilt from the Lemon design system.
@@ -557,14 +571,14 @@ em{font-style:italic;color:var(--ink)}
   <section class="hero">
     <div class="hero-copy">
       <span class="eyebrow"><i></i>macOS menu bar · Apple silicon</span>
-      <h1>Claude Code,<br>no cruft.</h1>
+      <h1><span class="sr-only">Claude Code, no cruft.</span><span class="hero-rotor" aria-hidden="true"><span class="word claude">Claude</span><span class="word open">Open</span></span> Code,<br>no cruft.</h1>
       <p class="herokick">Built for the Mac&nbsp;mini on your desk.</p>
-      <p class="lead">The quiet machine in the corner of your desk becomes an orchestrator in the corner of your screen — facilitating Claude Code across your Linear and GitHub issues, watched by <b>Gemma running locally</b>, one click off the menu bar.</p>
+      <p class="lead">The quiet machine in the corner of your desk becomes an orchestrator in the corner of your screen — facilitating your coding engine across Linear and GitHub issues, watched by <b>Gemma running locally</b>, one click off the menu bar.</p>
       <div class="cta">
         <a class="btn primary" href="https://github.com/frkline/lemon/releases" target="_blank" rel="noopener">Download for Apple silicon</a>
         <a class="btn ghost" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">View source</a>
       </div>
-      <p class="fineprint mono">macOS 26 · Claude Code · Gemma 4 runs fully on-device</p>
+      <p class="fineprint mono">macOS 26 · Claude Code today · OpenCode in progress · Gemma 4 on-device</p>
     </div>
     <div class="hero-visual">
       <div class="macscene">

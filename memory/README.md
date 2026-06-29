@@ -71,3 +71,6 @@ a valid "this is worth writing" marker, not an error.
   startup leak GC + no-teardown-on-quit (#55), label-desync precedence (#51), glyph
   decay (#48), gate notes/chat/Join (#57/#67), phone plan-approval detector (#64), and
   the sandbox mock-PR seam that took `make sandbox-test` to 13/13.
+- [opencode-engine-foundation](opencode-engine-foundation.md) — *decision* — issue #92
+  phase-1 data model: per-workspace `engine` config (Claude default + OpenCode slots)
+  lands first, backward-compatible, before runtime engine orchestration extraction.

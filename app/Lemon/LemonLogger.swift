@@ -5,4 +5,5 @@ extension Logger {
     static let worktree = Logger(subsystem: "com.lemon.app", category: "worktree")
     static let orchestrator = Logger(subsystem: "com.lemon.app", category: "orchestrator")
     static let onboarding = Logger(subsystem: "com.lemon.app", category: "onboarding")
+    static let opencode = Logger(subsystem: "com.lemon.app", category: "opencode")
 }

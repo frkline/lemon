@@ -217,6 +217,69 @@ struct Routing: Codable, Hashable {
     var surfaceId: String
 }
 
+enum AgentEngineKind: String, Codable, Hashable, CaseIterable {
+    case claudeCode = "claude_code"
+    case openCode = "opencode"
+
+    var displayName: String {
+        switch self {
+        case .claudeCode: "Claude Code"
+        case .openCode: "OpenCode"
+        }
+    }
+
+    var chipLabel: String {
+        switch self {
+        case .claudeCode: "claude"
+        case .openCode: "opencode"
+        }
+    }
+}
+
+enum OpenCodeAutoOpenThreshold: String, Codable, Hashable, CaseIterable {
+    case off
+    case highConfidenceOnly = "high_confidence_only"
+    case anyApprove = "any_approve"
+
+    var displayName: String {
+        switch self {
+        case .off: "Off"
+        case .highConfidenceOnly: "High confidence only"
+        case .anyApprove: "Any approve"
+        }
+    }
+}
+
+struct OpenCodeModelConfig: Codable, Hashable {
+    var plan: String = ""
+    var code: String = ""
+    var review: String = ""
+
+    var hasAllConfigured: Bool {
+        !plan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !review.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+struct OpenCodeDaemonConfig: Codable, Hashable {
+    var host: String = "127.0.0.1"
+    var port: Int = 4096
+}
+
+struct OpenCodeWorkspaceConfig: Codable, Hashable {
+    var models: OpenCodeModelConfig = .init()
+    var autoOpenThreshold: OpenCodeAutoOpenThreshold = .highConfidenceOnly
+    var daemon: OpenCodeDaemonConfig = .init()
+}
+
+struct WorkspaceEngineConfig: Codable, Hashable {
+    var kind: AgentEngineKind = .claudeCode
+    var openCode: OpenCodeWorkspaceConfig? = nil
+
+    static let claudeDefault = WorkspaceEngineConfig()
+}
+
 /// Local folder + a single routing.
 struct Workspace: Codable, Identifiable, Hashable {
     var id: UUID = .init()
@@ -230,6 +293,37 @@ struct Workspace: Codable, Identifiable, Hashable {
     /// (vs. delimiter-wrapped when off). Default on is offered for public GitHub
     /// repos in onboarding. Decodes false for pre-lockdown configs.
     var lockdown: Bool = false
+    /// Per-workspace agent engine selection and engine-specific config.
+    /// Defaults to Claude Code for backward compatibility.
+    var engine: WorkspaceEngineConfig = .claudeDefault
+
+    init(id: UUID = .init(), path: String, allReposInFolder: Bool = false,
+         homeRepo: String = "", routing: Routing, lockdown: Bool = false,
+         engine: WorkspaceEngineConfig = .claudeDefault)
+    {
+        self.id = id
+        self.path = path
+        self.allReposInFolder = allReposInFolder
+        self.homeRepo = homeRepo
+        self.routing = routing
+        self.lockdown = lockdown
+        self.engine = engine
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, path, allReposInFolder, homeRepo, routing, lockdown, engine
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        path = try container.decode(String.self, forKey: .path)
+        allReposInFolder = try container.decodeIfPresent(Bool.self, forKey: .allReposInFolder) ?? false
+        homeRepo = try container.decodeIfPresent(String.self, forKey: .homeRepo) ?? ""
+        routing = try container.decode(Routing.self, forKey: .routing)
+        lockdown = try container.decodeIfPresent(Bool.self, forKey: .lockdown) ?? false
+        engine = try container.decodeIfPresent(WorkspaceEngineConfig.self, forKey: .engine) ?? .claudeDefault
+    }
 }
 
 // MARK: - Legacy WorkspacePair surface (migration source)

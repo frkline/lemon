@@ -5,9 +5,23 @@ import os
 /// issue (Linear or GitHub). Supports single-repo and multi-repo (all git
 /// repos in a folder) modes.
 final class WorktreeRunner: @unchecked Sendable {
+    struct EngineLaunchRequest {
+        let sessionPath: String
+        let slug: String
+        let sessionLabel: String
+        let sentinelPath: String
+        let mcpConfigPath: String?
+        let planMode: Bool
+    }
+
     private var pollTask: Task<Void, Never>?
     private var stopped = false
     private var pendingActionTask: Task<Void, Never>?
+    private let engine: any AgentEngine
+
+    init(engine: any AgentEngine = ClaudeCodeEngine()) {
+        self.engine = engine
+    }
 
     var onStatusChange: ((SessionStatus) -> Void)?
     var onLogLine: ((String) -> Void)?
@@ -179,11 +193,17 @@ final class WorktreeRunner: @unchecked Sendable {
         let sessionLabel = WorktreeRunner.remoteControlName(
             identifier: identifier, title: ref.title,
         )
-        if let failure = launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
-                                    sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
-                                    planMode: planMode)
+        let launchRequest = EngineLaunchRequest(
+            sessionPath: launchPath,
+            slug: slug,
+            sessionLabel: sessionLabel,
+            sentinelPath: sentinelPath,
+            mcpConfigPath: mcpConfigPath,
+            planMode: planMode,
+        )
+        if let failure = engine.launch(request: launchRequest, runner: self)
         {
-            log("[lemon] tmux launch failed — session aborted", level: .error)
+            log("[lemon] \(engine.kind.displayName) launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
             try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
             let body = switch failure {
@@ -1124,9 +1144,9 @@ final class WorktreeRunner: @unchecked Sendable {
         return "Read LEMON_CONTEXT.md in this directory. \(echoFirst)complete the task described there. Follow the completion checklist. Use /loop for iterative work."
     }
 
-    private func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
-                            sentinelPath: String, mcpConfigPath: String? = nil,
-                            planMode: Bool = false) -> LaunchFailure?
+    func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
+                    sentinelPath: String, mcpConfigPath: String? = nil,
+                    planMode: Bool = false) -> LaunchFailure?
     {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {

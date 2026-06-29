@@ -13,6 +13,16 @@ struct WorkspaceEditorPane: View {
     @State private var allReposInFolder: Bool = false
     @State private var homeRepo: String = ""
     @State private var lockdown: Bool = false
+    @State private var engineKind: AgentEngineKind = .claudeCode
+    @State private var openCodePlanModel: String = ""
+    @State private var openCodeCodeModel: String = ""
+    @State private var openCodeReviewModel: String = ""
+    @State private var openCodeAutoOpenThreshold: OpenCodeAutoOpenThreshold = .highConfidenceOnly
+    @State private var openCodeHost: String = "127.0.0.1"
+    @State private var openCodePort: Int = 4096
+    @State private var readiness: AgentEngineReadiness?
+    @State private var readinessLoading = false
+    @State private var readinessTask: Task<Void, Never>?
     @State private var identityId: UUID? = nil
     @State private var surfaceId: String = ""
     @State private var deleteArmed = false
@@ -72,6 +82,7 @@ struct WorkspaceEditorPane: View {
                     pathSection
                     identitySection
                     surfaceSection
+                    engineSection
                     folderOptions
                 }
                 actionsRow
@@ -85,7 +96,188 @@ struct WorkspaceEditorPane: View {
         // The "second room": a faint lemon glaze over the inherited window
         // glass, r14. Interior surfaces are resting thin glass.
         .lemonGlass(.thick, tint: LD.tintLemon, cornerRadius: LD.r14)
-        .onAppear { hydrate() }
+        .onAppear {
+            hydrate()
+            refreshReadiness()
+        }
+        .onChange(of: engineKind) { _, _ in refreshReadiness() }
+        .onChange(of: openCodePlanModel) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeCodeModel) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeReviewModel) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeHost) { _, _ in refreshReadiness() }
+        .onChange(of: openCodePort) { _, _ in refreshReadiness() }
+    }
+
+    // MARK: - Engine
+
+    private var engineSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ENGINE")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(LD.textTertiary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(AgentEngineKind.allCases, id: \.self) { kind in
+                        engineChoice(kind)
+                    }
+                }
+
+                if engineKind == .openCode {
+                    VStack(alignment: .leading, spacing: 8) {
+                        modelField("Plan model", text: $openCodePlanModel,
+                                   placeholder: "provider/model")
+                        modelField("Code model", text: $openCodeCodeModel,
+                                   placeholder: "provider/model")
+                        modelField("Review model", text: $openCodeReviewModel,
+                                   placeholder: "provider/model")
+
+                        HStack(spacing: 8) {
+                            Text("Auto-open")
+                                .font(.system(size: 10))
+                                .foregroundStyle(LD.textSecondary)
+                            Spacer()
+                            Menu {
+                                ForEach(OpenCodeAutoOpenThreshold.allCases, id: \.self) { threshold in
+                                    Button(threshold.displayName) {
+                                        openCodeAutoOpenThreshold = threshold
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(openCodeAutoOpenThreshold.displayName)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(LD.textPrimary)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(LD.textTertiary)
+                                }
+                            }
+                            .menuStyle(.borderlessButton)
+                        }
+
+                        HStack(spacing: 8) {
+                            modelField("Host", text: $openCodeHost, placeholder: "127.0.0.1")
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Port")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .kerning(1.2)
+                                    .foregroundStyle(LD.textTertiary)
+                                HStack(spacing: 6) {
+                                    Text("\(openCodePort)")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(LD.textPrimary)
+                                    Stepper("", value: $openCodePort, in: 1 ... 65_535)
+                                        .labelsHidden()
+                                }
+                            }
+                            .frame(width: 118, alignment: .leading)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+
+                engineReadinessBlock
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lemonGlass(.thin, cornerRadius: LD.r10)
+        }
+    }
+
+    private func engineChoice(_ kind: AgentEngineKind) -> some View {
+        let selected = engineKind == kind
+        return Button {
+            withAnimation(LD.snappy) {
+                engineKind = kind
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(kind.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(selected ? LD.textPrimary : LD.textSecondary)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LD.statusDone)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .lemonGlass(selected ? .regular : .thin,
+                        tint: selected ? LD.tintLemon : nil,
+                        cornerRadius: LD.r10,
+                        ring: selected ? LD.lemon.opacity(0.30) : nil)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func modelField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: LD.r6)
+                        .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+                )
+        }
+    }
+
+    @ViewBuilder
+    private var engineReadinessBlock: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Text("READINESS")
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(1.2)
+                    .foregroundStyle(LD.textTertiary)
+                if readinessLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let readiness {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(readiness.isReady ? LD.statusDone : LD.coral)
+                            .frame(width: 5, height: 5)
+                        Text(readiness.isReady ? "ready" : "setup needed")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(readiness.isReady ? LD.statusDone : LD.coral)
+                    }
+                }
+            }
+
+            if let readiness {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(readiness.checks) { check in
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: check.status == .pass ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(check.status == .pass ? LD.statusDone : LD.coral)
+                                .padding(.top, 1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(check.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(LD.textPrimary)
+                                Text(check.detail)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(LD.textTertiary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.top, 4)
     }
 
     // MARK: - Header
@@ -647,6 +839,14 @@ struct WorkspaceEditorPane: View {
                 identityId = ws.routing.identityId
                 surfaceId = ws.routing.surfaceId
                 lockdown = ws.lockdown
+                engineKind = ws.engine.kind
+                let openCode = ws.engine.openCode
+                openCodePlanModel = openCode?.models.plan ?? ""
+                openCodeCodeModel = openCode?.models.code ?? ""
+                openCodeReviewModel = openCode?.models.review ?? ""
+                openCodeAutoOpenThreshold = openCode?.autoOpenThreshold ?? .highConfidenceOnly
+                openCodeHost = openCode?.daemon.host ?? "127.0.0.1"
+                openCodePort = openCode?.daemon.port ?? 4096
             }
         }
     }
@@ -679,6 +879,37 @@ struct WorkspaceEditorPane: View {
         )
     }
 
+    private func refreshReadiness() {
+        readinessTask?.cancel()
+        let engineConfig = WorkspaceEngineConfig(
+            kind: engineKind,
+            openCode: engineKind == .openCode
+                ? OpenCodeWorkspaceConfig(
+                    models: OpenCodeModelConfig(
+                        plan: openCodePlanModel,
+                        code: openCodeCodeModel,
+                        review: openCodeReviewModel,
+                    ),
+                    autoOpenThreshold: openCodeAutoOpenThreshold,
+                    daemon: OpenCodeDaemonConfig(
+                        host: openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "127.0.0.1" : openCodeHost,
+                        port: max(1, min(openCodePort, 65_535)),
+                    ),
+                )
+                : nil,
+        )
+
+        readinessLoading = true
+        readinessTask = Task {
+            let snapshot = await Task.detached(priority: .utility) {
+                AgentEngineFactory.make(kind: engineConfig.kind).readiness(config: engineConfig)
+            }.value
+            guard !Task.isCancelled else { return }
+            readiness = snapshot
+            readinessLoading = false
+        }
+    }
+
     private func save() {
         let keychain = KeychainStore.shared
         guard let identityId else { return }
@@ -697,6 +928,21 @@ struct WorkspaceEditorPane: View {
         working.homeRepo = homeRepo.trimmingCharacters(in: .whitespaces)
         working.routing = Routing(identityId: identityId, surfaceId: trimmedSurface)
         working.lockdown = lockdown
+        let daemonHost = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let openCodeConfig = OpenCodeWorkspaceConfig(
+            models: OpenCodeModelConfig(
+                plan: openCodePlanModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                code: openCodeCodeModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                review: openCodeReviewModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            ),
+            autoOpenThreshold: openCodeAutoOpenThreshold,
+            daemon: OpenCodeDaemonConfig(host: daemonHost.isEmpty ? "127.0.0.1" : daemonHost,
+                                         port: max(1, min(openCodePort, 65_535))),
+        )
+        working.engine = WorkspaceEngineConfig(
+            kind: engineKind,
+            openCode: engineKind == .openCode ? openCodeConfig : nil,
+        )
 
         var all = keychain.workspaces
         if let idx = all.firstIndex(where: { $0.id == working.id }) {

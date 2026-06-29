@@ -335,7 +335,7 @@ final class Orchestrator {
         session.appendLog("[lemon] reattached on launch (\(p.status.displayLabel))")
         sessions.add(session)
 
-        let runner = WorktreeRunner()
+        let runner = makeRunner(for: workspace)
         runners[session.id] = runner
         wire(runner, to: session)
 
@@ -896,7 +896,7 @@ final class Orchestrator {
                                auth: SourceAuth, retrigger: LemonMarker?)
     {
         session.status = .planning
-        let runner = WorktreeRunner()
+        let runner = makeRunner(for: workspace)
         runners[session.id] = runner
         wire(runner, to: session)
 
@@ -1003,6 +1003,10 @@ final class Orchestrator {
                 homeRepo: workspace.homeRepo,
             ),
         )
+    }
+
+    private func makeRunner(for workspace: Workspace) -> WorktreeRunner {
+        WorktreeRunner(engine: AgentEngineFactory.make(config: workspace.engine))
     }
 
     func stopSession(_ session: Session) {
