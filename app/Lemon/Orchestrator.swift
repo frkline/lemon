@@ -1048,6 +1048,7 @@ final class Orchestrator {
             Logger.orchestrator.info("resolveGate \(session.issue.identifier): not at a gate (\(String(describing: gate)))")
             return
         }
+        let engineKind = engineKind(for: session)
         let sessionName = "lemon-\(session.issue.pathSlug)"
         // The runner's planGatePhase parks on this sentinel; it's the cross-task
         // signal that the human resolved the gate (the keystroke drives claude).
@@ -1055,23 +1056,39 @@ final class Orchestrator {
         let trimmedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
         switch (gate, decision) {
         case (.planReview, .approve):
-            sendTmuxKeys(to: sessionName, keys: "1") // AskUserQuestion: "1. Approve — build"
+            if engineKind == .claudeCode {
+                sendTmuxKeys(to: sessionName, keys: "1") // AskUserQuestion: "1. Approve — build"
+            }
             try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.planMarkdown = nil
             session.aiSummary = "Plan approved — building"
             session.status = .executing
         case (.planReview, .requestChanges):
-            sendTmuxKeys(to: sessionName, keys: "2") // AskUserQuestion: "2. Request changes"
+            if engineKind == .claudeCode {
+                sendTmuxKeys(to: sessionName, keys: "2") // AskUserQuestion: "2. Request changes"
+            }
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
-            injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
+            if engineKind == .claudeCode {
+                injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
+            } else {
+                sendOpenCodeGateNotes(session: session, notes: trimmedNotes)
+            }
         case (.resultReview, .approve):
-            sendTmuxKeys(to: sessionName, keys: "1") // AskUserQuestion: "1. Approve — open the PR now"
+            if engineKind == .claudeCode {
+                sendTmuxKeys(to: sessionName, keys: "1") // AskUserQuestion: "1. Approve — open the PR now"
+            }
             try? "approve".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
             session.status = .executing
         case (.resultReview, .requestChanges):
-            sendTmuxKeys(to: sessionName, keys: "2") // AskUserQuestion: "2. Request changes"
+            if engineKind == .claudeCode {
+                sendTmuxKeys(to: sessionName, keys: "2") // AskUserQuestion: "2. Request changes"
+            }
             try? "changes".write(toFile: gateSentinel, atomically: true, encoding: .utf8)
-            injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
+            if engineKind == .claudeCode {
+                injectGateNotes(to: sessionName, notes: trimmedNotes) // #57
+            } else {
+                sendOpenCodeGateNotes(session: session, notes: trimmedNotes)
+            }
             session.status = .executing
         default:
             break
@@ -1099,8 +1116,15 @@ final class Orchestrator {
     func sendMessage(session: Session, text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        sendTmuxText(to: "lemon-\(session.issue.pathSlug)", text: t)
-        Logger.orchestrator.info("sendMessage \(session.issue.identifier): \(t.count) chars to session")
+        if engineKind(for: session) == .claudeCode {
+            sendTmuxText(to: "lemon-\(session.issue.pathSlug)", text: t)
+            Logger.orchestrator.info("sendMessage \(session.issue.identifier): \(t.count) chars to Claude session")
+            return
+        }
+        Task { @MainActor [weak self] in
+            let sent = await self?.sendOpenCodeMessage(session: session, text: t) ?? false
+            Logger.orchestrator.info("sendMessage \(session.issue.identifier): \(t.count) chars to OpenCode (sent=\(sent))")
+        }
     }
 
     /// Send free text then a separate Enter (two send-keys calls). Splitting the
@@ -1126,6 +1150,50 @@ final class Orchestrator {
 
     private func sendTmuxKeys(to sessionName: String, keys: String) {
         _ = runShellCommand("\(WorktreeRunner.tmuxBase) send-keys -t '\(sessionName)' '\(keys)' Enter")
+    }
+
+    private func engineKind(for session: Session) -> AgentEngineKind {
+        guard let workspaceId = session.workspaceId,
+              let workspace = KeychainStore.shared.workspaces.first(where: { $0.id == workspaceId })
+        else {
+            return .claudeCode
+        }
+        return workspace.engine.kind
+    }
+
+    private func openCodeClientAndSessionID(for session: Session) -> (OpenCodeClient, String)? {
+        guard let workspaceId = session.workspaceId,
+              let workspace = KeychainStore.shared.workspaces.first(where: { $0.id == workspaceId })
+        else {
+            return nil
+        }
+        let openCode = workspace.engine.openCode ?? OpenCodeWorkspaceConfig()
+        let sessionPath = WorktreeRunner.openCodeSessionPath(slug: session.issue.pathSlug)
+        guard let sessionID = try? String(contentsOfFile: sessionPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !sessionID.isEmpty
+        else {
+            return nil
+        }
+        return (OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port), sessionID)
+    }
+
+    private func sendOpenCodeGateNotes(session: Session, notes: String?) {
+        guard let notes, !notes.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            _ = await self?.sendOpenCodeMessage(session: session, text: notes)
+        }
+    }
+
+    private func sendOpenCodeMessage(session: Session, text: String) async -> Bool {
+        guard let (client, sessionID) = openCodeClientAndSessionID(for: session) else { return false }
+        do {
+            try await client.sendMessage(sessionID: sessionID, body: .init(content: text, prompt_async: true))
+            return true
+        } catch {
+            Logger.orchestrator.error("OpenCode sendMessage failed for \(session.issue.identifier): \(error.localizedDescription)")
+            return false
+        }
     }
 
     @discardableResult
