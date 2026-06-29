@@ -191,6 +191,52 @@ final class WorktreeRunnerTests: XCTestCase {
         XCTAssertTrue(WorktreeRunner.tailLines(from: "", last: 100).isEmpty)
     }
 
+    // MARK: - kickoffPrompt (#85 echo issue title + summary first)
+
+    func testKickoffPromptEchoesTitleAndSummaryFirst() {
+        for planMode in [true, false] {
+            let prompt = WorktreeRunner.kickoffPrompt(
+                planMode: planMode,
+                planPath: "/tmp/lemon-plan-demo-1.md",
+                gatePath: "/tmp/lemon-gate-demo-1",
+            )
+            XCTAssertTrue(prompt.contains("print the issue title"),
+                          "planMode=\(planMode): prompt must ask claude to echo the title")
+            XCTAssertTrue(prompt.contains("summary"),
+                          "planMode=\(planMode): prompt must ask claude to echo a summary")
+            // The echo must come BEFORE the work (triage / the task) so a phone
+            // watcher gets context first.
+            let echoIdx = try? XCTUnwrap(prompt.range(of: "print the issue title")).lowerBound
+            let workIdx = try? XCTUnwrap(prompt.range(of: planMode ? "triage" : "complete the task")).lowerBound
+            if let echoIdx, let workIdx {
+                XCTAssertLessThan(echoIdx, workIdx,
+                                  "planMode=\(planMode): echo instruction must precede the work")
+            }
+        }
+    }
+
+    func testKickoffPromptEchoAddsNoApostrophes() {
+        // The launcher single-quotes the prompt in bash. The echo instruction
+        // the simple variant adds must not introduce apostrophes (the plan
+        // variant already quotes the 🍋 Waiting label name — pre-existing, out
+        // of scope here).
+        let simple = WorktreeRunner.kickoffPrompt(
+            planMode: false, planPath: "/tmp/lemon-plan-demo-1.md", gatePath: "/tmp/lemon-gate-demo-1",
+        )
+        XCTAssertFalse(simple.contains("'"), "simple prompt must not contain apostrophes")
+    }
+
+    func testKickoffPromptPlanModeKeepsGateFlow() {
+        let prompt = WorktreeRunner.kickoffPrompt(
+            planMode: true,
+            planPath: "/tmp/lemon-plan-demo-1.md",
+            gatePath: "/tmp/lemon-gate-demo-1",
+        )
+        XCTAssertTrue(prompt.contains("/tmp/lemon-plan-demo-1.md"))
+        XCTAssertTrue(prompt.contains("/tmp/lemon-gate-demo-1"))
+        XCTAssertTrue(prompt.contains("AskUserQuestion"))
+    }
+
     // MARK: - parseSessionLimitReset (#39 quota detection)
 
     func testParseSessionLimitNilForNormalOutput() {

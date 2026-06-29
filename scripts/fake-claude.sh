@@ -29,6 +29,17 @@ slug="$(basename "$(pwd)" | sed 's/^lemon-//')"
 num="$(grep -oE 'sandbox/demo#[0-9]+' LEMON_CONTEXT.md 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)"
 echo "[fake-claude] launched (mode=$MODE) worktree=$(pwd) issue=#${num:-unknown}"
 
+# Echo the issue title + one-line summary first, so a phone watcher has context
+# before anything else — parity with what the real kickoff prompt asks claude to
+# do (#85). Title is the `# … Issue: … — <title>` heading; summary is the first
+# non-empty line under the `## Summary` section of LEMON_CONTEXT.md.
+if [ -f LEMON_CONTEXT.md ]; then
+  title="$(grep -m1 -oE 'Issue: .* — .*' LEMON_CONTEXT.md | sed 's/^Issue: //')"
+  summary="$(awk '/^## Summary/{f=1;next} f&&NF{print;exit}' LEMON_CONTEXT.md)"
+  echo "[fake-claude] Issue: ${title:-unknown}"
+  echo "[fake-claude] Summary: ${summary:-n/a}"
+fi
+
 PLAN_MODE=0
 
 # --- Plan gate ---------------------------------------------------------------
