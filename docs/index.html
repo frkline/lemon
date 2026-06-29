@@ -108,6 +108,17 @@ em{font-style:italic;color:var(--ink)}
 .nav .ghostlink{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 15px;
   border-radius:9px;font-size:13.5px;font-weight:600;color:var(--ink);text-decoration:none;
   background:var(--panel);box-shadow:inset 0 0 0 .5px var(--panelRing)}
+/* Star pill — a ghost sibling of the GitHub link; never the yellow (that stays
+   on Download). Star outline fills on hover; the count chip only appears once
+   the script confirms a flattering number (see #star fetch at end of body). */
+.nav .starpill{gap:8px}
+.starpill .staricon{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;
+  stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;transition:fill .15s ease}
+.starpill:hover .staricon{fill:currentColor}
+.starpill .starcount{font:600 12px/1 "SF Mono",ui-monospace,Menlo,monospace;
+  color:var(--ink2);padding:3px 7px;border-radius:6px;background:var(--panelHi);
+  box-shadow:inset 0 0 0 .5px var(--panelRing);font-feature-settings:"tnum"}
+@media (prefers-reduced-motion:reduce){.starpill .staricon{transition:none}}
 
 /* ============================================================
    HERO
@@ -534,6 +545,11 @@ em{font-style:italic;color:var(--ink)}
       <a href="/llms.txt">llms.txt</a>
     </nav>
     <span class="spacer"></span>
+    <a class="ghostlink starpill" id="starPill" href="https://github.com/frkline/lemon" target="_blank" rel="noopener" aria-label="Star Lemon on GitHub">
+      <svg class="staricon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.6 5.27 5.82.85-4.21 4.1.99 5.79L12 16.86l-5.2 2.75.99-5.79-4.21-4.1 5.82-.85z"/></svg>
+      <span>Star</span>
+      <span class="starcount" id="starCount" hidden></span>
+    </a>
     <a class="ghostlink" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">GitHub ↗</a>
   </header>
 
@@ -988,5 +1004,34 @@ em{font-style:italic;color:var(--ink)}
     </nav>
   </footer>
 </main>
+<script>
+// Star count for the nav pill. Plain GitHub API read → stargazers_count,
+// cached 6h in localStorage so the 60-req/hr unauthenticated limit never bites.
+// Graceful: any failure leaves the bare "Star" pill. The count chip is shown
+// only above a threshold, so a young repo's small number never reads as
+// anti-proof. No dependencies — the site stays dependency-free.
+(function () {
+  var count = document.getElementById('starCount');
+  if (!count) return;
+  var THRESHOLD = 50, KEY = 'lemon-stars', TTL = 6 * 3600 * 1000;
+  function render(n) {
+    if (typeof n !== 'number' || n < THRESHOLD) return;
+    count.textContent = n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
+    count.hidden = false;
+  }
+  try {
+    var c = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (c && Date.now() - c.t < TTL) { render(c.n); return; }
+  } catch (e) {}
+  fetch('https://api.github.com/repos/frkline/lemon')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || typeof d.stargazers_count !== 'number') return;
+      render(d.stargazers_count);
+      try { localStorage.setItem(KEY, JSON.stringify({ n: d.stargazers_count, t: Date.now() })); } catch (e) {}
+    })
+    .catch(function () {});
+})();
+</script>
 </body>
 </html>
