@@ -18,12 +18,28 @@ final class LocalLLM: @unchecked Sendable {
         case starting // SwiftLM subprocess launched, waiting for /health
         case ready // /health 200, classify() should succeed
         case failed(String) // exited / didn't respond / health-poll timeout
+        case idle // dormant: subprocess unloaded after idle, lazily reloads on next ensureReady (#70)
 
         var isReady: Bool {
             if case .ready = self { true } else { false }
         }
     }
 
+    /// Idle window after which a configured-but-unused SwiftLM is torn down to
+    /// reclaim ~5 GB (#70). 1 h is a starting point; the orchestrator poll loop
+    /// (≤45 s when no sessions are active) detects it within one tick.
+    static let idleUnloadThreshold: TimeInterval = 3600
+
+    /// Wall-clock of the last load-completion or classify(), used by the idle
+    /// unloader. nil = never loaded / just unloaded.
+    private var lastActivityAt: Date?
+
+    /// In-flight load, so concurrent ensureReady() callers (boot, warm-up-on-
+    /// spawn, lazy reload, Settings self-test) coalesce onto one real start()
+    /// instead of racing two subprocess launches.
+    private var loadTask: Task<Void, Never>?
+
+    @MainActor
     func state() -> AIState {
         _state
     }
@@ -44,6 +60,27 @@ final class LocalLLM: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
+    /// Ensure the SwiftLM subprocess is loaded and ready, lazily (re)starting it
+    /// if it was never launched or was unloaded after idle (#70). Concurrent
+    /// callers coalesce onto a single in-flight load via `loadTask`, so warm-up-
+    /// on-spawn, the silence-path reload, and the Settings self-test can't race
+    /// two subprocess launches (which would SIGTERM each other on the port).
+    @MainActor
+    func ensureReady() async -> Bool {
+        if isReady() { return true }
+        let task = loadTask ?? {
+            let t = Task { @MainActor in await self.start() }
+            loadTask = t
+            return t
+        }()
+        await task.value
+        // Only clear if it's still the same load; a stale waiter must not nil a
+        // newer one. Task is a value type but Equatable by identity.
+        if loadTask == task { loadTask = nil }
+        return isReady()
+    }
+
+    @MainActor
     func start() async {
         let store = KeychainStore.shared
         guard store.aiEnabled, !store.swiftLMPath.isEmpty, !store.modelPath.isEmpty else {
@@ -127,6 +164,7 @@ final class LocalLLM: @unchecked Sendable {
             if await healthCheck() {
                 _ready = true
                 _state = .ready
+                lastActivityAt = Date()
                 Logger.orchestrator.info("SwiftLM ready on port \(self.port) after \(Int(Date().timeIntervalSince(startedAt))) s")
                 return
             }
@@ -136,11 +174,51 @@ final class LocalLLM: @unchecked Sendable {
         _state = .failed(msg)
     }
 
+    @MainActor
     func stop() {
+        teardown(finalState: .notConfigured)
+    }
+
+    /// Shared teardown for both quit (`stop()` → `.notConfigured`) and idle
+    /// unload (`unloadIfIdle()` → `.idle`); the two differ only in final state.
+    @MainActor
+    private func teardown(finalState: AIState) {
         _ready = false
-        _state = .notConfigured
         process?.terminate()
         process = nil
+        _state = finalState
+    }
+
+    /// Pure idle predicate (injectable `now`, mirrors
+    /// `WorktreeRunner.shouldInvokeGemma`): unload only a ready, session-idle
+    /// SwiftLM that's been untouched for at least `threshold`.
+    static func shouldUnloadForIdle(ready: Bool, lastActivityAt: Date?,
+                                    hasActiveSessions: Bool, now: Date,
+                                    threshold: TimeInterval) -> Bool
+    {
+        guard ready, !hasActiveSessions, let last = lastActivityAt else { return false }
+        return now.timeIntervalSince(last) >= threshold
+    }
+
+    /// Tear down the SwiftLM subprocess if it's been idle past the threshold and
+    /// no session is active, reclaiming ~5 GB (#70). Reloads lazily via
+    /// `ensureReady()` on the next classify. Returns whether it unloaded.
+    @MainActor @discardableResult
+    func unloadIfIdle(hasActiveSessions: Bool, now: Date = Date()) -> Bool {
+        guard Self.shouldUnloadForIdle(ready: _ready, lastActivityAt: lastActivityAt,
+                                       hasActiveSessions: hasActiveSessions,
+                                       now: now, threshold: Self.idleUnloadThreshold)
+        else { return false }
+        Logger.orchestrator.info("Unloading SwiftLM after idle — reclaiming ~5 GB")
+        teardown(finalState: .idle)
+        lastActivityAt = nil
+        return true
+    }
+
+    /// Record classify activity so the idle unloader sees the subprocess as live.
+    @MainActor
+    func recordActivity() {
+        lastActivityAt = Date()
     }
 
     /// In tests there is no process — treat nil process as "externally managed, assume running".
@@ -150,6 +228,7 @@ final class LocalLLM: @unchecked Sendable {
     /// path keeps re-tripping with no escape — the next start() bails on
     /// `guard process == nil` because the dead Process is still parked there.
     /// Transition to .failed + clear process so a Re-run actually re-boots.
+    @MainActor
     func isReady() -> Bool {
         let stillUp = process?.isRunning ?? true
         if _ready, !stillUp {
@@ -232,6 +311,9 @@ final class LocalLLM: @unchecked Sendable {
     // MARK: - Inference
 
     func classify(issue: IssueRef, logLines: [String]) async throws -> GemmaResponse {
+        // Mark activity so the idle unloader (#70) keeps the subprocess loaded
+        // while classify() is in active use. Cheap MainActor hop vs the inference.
+        await recordActivity()
         let systemPrompt = """
         You monitor a running Claude Code coding session for Lemon. Given the last \
         terminal output, classify the session and decide whether to act.

@@ -419,7 +419,8 @@ struct PopoverView: View {
     @ViewBuilder
     private var aiStatusBadge: some View {
         switch orchestrator.aiState {
-        case .ready, .notConfigured:
+        case .ready, .notConfigured, .idle:
+            // .idle = dormant after idle unload (#70); not an error, don't nag.
             EmptyView()
         case .starting:
             HStack(spacing: 6) {

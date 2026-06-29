@@ -763,8 +763,8 @@ struct SettingsView: View {
         aiTestState = .starting
         let startedAt = Date()
         Task {
-            await LocalLLM.shared.start()
-            guard LocalLLM.shared.isReady() else {
+            let ready = await LocalLLM.shared.ensureReady()
+            guard ready else {
                 // Surface the actual failure reason from LocalLLM.AIState rather
                 // than the generic timeout message. SwiftLM commonly dies in
                 // ~2 s when the model files are missing or incompatible —
@@ -775,6 +775,7 @@ struct SettingsView: View {
                 case .starting: "Still loading after \(Int(Date().timeIntervalSince(startedAt))) s — Gemma 4 model may be unusually large or disk-bound."
                 case .notConfigured: "Local AI isn't configured. Re-run setup to download the model + SwiftLM binary."
                 case .ready: "Race: state went .ready but isReady() returned false. Re-run."
+                case .idle: "Model is dormant (unloaded after idle). Re-run to reload."
                 }
                 await MainActor.run { aiTestState = .failed(detail) }
                 return

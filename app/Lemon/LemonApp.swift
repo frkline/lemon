@@ -95,7 +95,9 @@ struct LemonApp: App {
                 LemonApp.openMenuBarPopover()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                LocalLLM.shared.stop()
+                // willTerminate is delivered on the main thread, so it's safe to
+                // assume MainActor isolation for the now-@MainActor stop() (#70).
+                MainActor.assumeIsolated { LocalLLM.shared.stop() }
                 // #55: deliberately do NOT tear down -L lemon tmux/claude on
                 // quit. Long-running sessions must survive a Lemon restart
                 // (auto-update, crash) so a relaunch re-adopts in-flight work

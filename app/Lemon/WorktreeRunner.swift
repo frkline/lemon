@@ -52,6 +52,11 @@ final class WorktreeRunner: @unchecked Sendable {
         log("[lemon] starting session for \(identifier)")
         onStatusChange?(.planning)
 
+        // Warm up the classifier now (#70): if SwiftLM was unloaded after idle,
+        // the ~60-90 s reload overlaps worktree setup so the first pane classify
+        // never stalls. Fire-and-forget; idempotent; a no-op when AI is disabled.
+        Task { _ = await LocalLLM.shared.ensureReady() }
+
         // Discover repos to include in this session.
         let repos: [(name: String, repoPath: String)]
         if workspace.allReposInFolder {
@@ -1250,8 +1255,11 @@ final class WorktreeRunner: @unchecked Sendable {
     /// classifies the pane, acts on the verdict, and returns nil.
     @discardableResult
     private func invokeGemma(ref: IssueRef) async -> Date? {
-        guard LocalLLM.shared.isReady() else {
-            Logger.worktree.info("[gemma] skipped — LocalLLM not ready for \(ref.identifier)")
+        // Lazily (re)load SwiftLM if it was unloaded after idle (#70). Warm-up-
+        // on-spawn usually means it's already ready by the time the silence
+        // detector fires; this is the fallback that reloads on demand.
+        guard await LocalLLM.shared.ensureReady() else {
+            Logger.worktree.info("[gemma] skipped — LocalLLM not ready/loading for \(ref.identifier)")
             return nil
         }
         let lines = tailLog(slug: ref.pathSlug, last: 100)

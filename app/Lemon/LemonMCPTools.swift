@@ -185,8 +185,8 @@ enum LemonMCPTools {
                 guard let (issue, tail) = snapshot else {
                     throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
                 }
-                guard LocalLLM.shared.isReady() else {
-                    throw MCPError(code: -32001, message: "LocalLLM not ready — check Self-test in Settings")
+                guard await LocalLLM.shared.ensureReady() else {
+                    throw MCPError(code: -32001, message: "LocalLLM not ready — reloading model, retry shortly")
                 }
                 let started = Date()
                 let verdict: GemmaResponse
@@ -429,6 +429,7 @@ enum LemonMCPTools {
         case .starting: "starting"
         case .ready: "ready"
         case let .failed(m): "failed: \(m)"
+        case .idle: "idle"
         }
     }
 
