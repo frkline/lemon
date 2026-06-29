@@ -37,6 +37,12 @@ struct OpenCodePermissionResponse: Codable {
     var decision: String
 }
 
+enum OpenCodeSessionLiveness {
+    case active
+    case terminal
+    case unknown
+}
+
 final class OpenCodeClient: Sendable {
     let baseURL: URL
     private let session: URLSession
@@ -70,6 +76,37 @@ final class OpenCodeClient: Sendable {
     func answerPermission(sessionID: String, permissionID: String, decision: OpenCodePermissionResponse) async throws {
         let body = try JSONEncoder().encode(decision)
         _ = try await request("POST", path: "/session/\(sessionID)/permissions/\(permissionID)", body: body)
+    }
+
+    func sessionLiveness(sessionID: String) async -> OpenCodeSessionLiveness {
+        do {
+            let data = try await request("GET", path: "/session/\(sessionID)")
+            let object = try JSONSerialization.jsonObject(with: data)
+            guard let dict = object as? [String: Any] else { return .unknown }
+            let probes = [
+                dict["status"],
+                dict["state"],
+                (dict["session"] as? [String: Any])?["status"],
+                (dict["session"] as? [String: Any])?["state"],
+            ]
+            let values = probes
+                .compactMap { $0 as? String }
+                .map { $0.lowercased() }
+            let terminalStates = [
+                "done", "completed", "stopped", "failed",
+                "error", "crashed", "cancelled", "aborted",
+            ]
+            if values.contains(where: { terminalStates.contains($0) }) {
+                return .terminal
+            }
+            let activeStates = ["running", "active", "queued", "working", "processing"]
+            if values.contains(where: { activeStates.contains($0) }) {
+                return .active
+            }
+            return .unknown
+        } catch {
+            return .unknown
+        }
     }
 
     private func request(_ method: String, path: String, body: Data? = nil) async throws -> Data {

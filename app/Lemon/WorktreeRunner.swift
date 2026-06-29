@@ -178,6 +178,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // Remove any leftover sentinel and log from a prior run.
         try? FileManager.default.removeItem(atPath: sentinelPath)
         try? FileManager.default.removeItem(atPath: logPath(slug: slug))
+        try? FileManager.default.removeItem(atPath: Self.openCodeSessionPath(slug: slug))
 
         // Pre-merge .mcp.json files so Claude skips the interactive MCP discovery prompt.
         let mcpConfigPath = prepareMcpConfig(sessionPath: sessionPath, repos: repos,
@@ -501,6 +502,7 @@ final class WorktreeRunner: @unchecked Sendable {
             planReadyPath(slug: slug),
             gateSentinelPath(slug: slug),
             resultReadyPath(slug: slug),
+            Self.openCodeSessionPath(slug: slug),
             "/tmp/lemon-pr-\(slug)", // sandbox PR sentinel (#53/#54 completion path)
         ]
         for path in leftovers {
@@ -844,6 +846,10 @@ final class WorktreeRunner: @unchecked Sendable {
 
     func logPath(slug: String) -> String {
         "/tmp/lemon-log-\(slug).txt"
+    }
+
+    static func openCodeSessionPath(slug: String) -> String {
+        "/tmp/lemon-opencode-session-\(slug)"
     }
 
     // MARK: - Plan-gate paths (the contract between the claude side and Lemon)
@@ -1678,7 +1684,7 @@ final class WorktreeRunner: @unchecked Sendable {
             }
 
             if !monitorTmux {
-                if await engine.executionHealthy() {
+                if await engine.executionHealthy(slug: slug) {
                     engineHealthMisses = 0
                 } else {
                     engineHealthMisses += 1

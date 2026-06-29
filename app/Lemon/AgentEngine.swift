@@ -5,7 +5,7 @@ protocol AgentEngine: Sendable {
     var kind: AgentEngineKind { get }
     func launch(request: WorktreeRunner.EngineLaunchRequest,
                 runner: WorktreeRunner) async -> WorktreeRunner.LaunchFailure?
-    func executionHealthy() async -> Bool
+    func executionHealthy(slug: String) async -> Bool
     func readiness(config: WorkspaceEngineConfig) -> AgentEngineReadiness
 }
 
@@ -101,7 +101,7 @@ struct ClaudeCodeEngine: AgentEngine {
         ])
     }
 
-    func executionHealthy() async -> Bool {
+    func executionHealthy(slug _: String) async -> Bool {
         true
     }
 }
@@ -157,6 +157,9 @@ struct OpenCodeEngine: AgentEngine {
                 sessionID: created.id,
                 body: .init(content: kickoffPrompt, prompt_async: true),
             )
+            try? created.id.write(toFile: WorktreeRunner.openCodeSessionPath(slug: request.slug),
+                                  atomically: true,
+                                  encoding: .utf8)
             Logger.opencode.info("[opencode] launched session \(created.id, privacy: .public) for \(request.slug, privacy: .public)")
             return nil
         } catch {
@@ -213,9 +216,24 @@ struct OpenCodeEngine: AgentEngine {
         ])
     }
 
-    func executionHealthy() async -> Bool {
+    func executionHealthy(slug: String) async -> Bool {
         let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
-        return await OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port).docReachable()
+        let client = OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port)
+        guard await client.docReachable() else { return false }
+
+        let sessionPath = WorktreeRunner.openCodeSessionPath(slug: slug)
+        guard let sessionID = try? String(contentsOfFile: sessionPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !sessionID.isEmpty
+        else { return true }
+
+        let liveness = await client.sessionLiveness(sessionID: sessionID)
+        switch liveness {
+        case .active, .unknown:
+            return true
+        case .terminal:
+            return false
+        }
     }
 }
 
