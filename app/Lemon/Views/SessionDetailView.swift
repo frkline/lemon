@@ -264,11 +264,14 @@ struct SessionDetailView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // Flexible filler with a bounded max: the console prefers up to 360
-            // (so short sessions stay compact, not a giant void) but shrinks down
-            // to minHeight when a tall session (reviewing card + summary + console
-            // + footer) would otherwise overflow the 620 cap and clip the footer.
-            .frame(minHeight: 160, maxHeight: 360)
+            // Flexible filler. The MAX is the critical number: the tallest
+            // non-console state (2-line title + ready-for-review card + summary +
+            // paddings ≈ 250pt) plus the footer (~40pt) plus this max must stay
+            // under the popover's 620 cap, or .clipped() eats the footer. 360 left
+            // only ~9pt of slack — one wrapped path or a 2-line title tipped it
+            // over in the field. 300 keeps a comfortable ~60pt margin; the low
+            // floor lets the console yield first if a popover is shorter still.
+            .frame(minHeight: 96, maxHeight: 300)
             .frame(maxWidth: .infinity)
             // Solid, no blur — the machine surface needs visual gravity. r6 box
             // with a faint inset hairline, clipped so output respects the corner.

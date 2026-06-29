@@ -1029,13 +1029,16 @@ final class Orchestrator {
             // that clipped its footer before the console was made flexible.
             let reviewing = Session(issue: IssueRef(
                 id: "mock-4", identifier: "sandbox/demo#1",
-                title: "Add a hello function with a test",
+                // Deliberately long → wraps to two lines, the tallest realistic
+                // title. This is the case that clipped the footer in the field
+                // (a 2-line title pushes the ready-for-review state past the cap).
+                title: "Result/plan gate: present the review decision as a selectable A/B (+ notes, + chat) in the popover",
                 description: "Add hello(name) and a test.",
                 labelNames: ["🍋 Complete"], scope: .githubRepo(owner: "sandbox", repo: "demo", number: 1),
             ), startedAt: now.addingTimeInterval(-900))
             reviewing.status = .reviewing
             reviewing.prUrl = "https://github.com/sandbox/demo/pull/1"
-            reviewing.aiSummary = "Starting work on sandbox/demo#1"
+            reviewing.aiSummary = "Session appears to be idling after completing PR #66."
             reviewing.cleanupInfo = WorktreeCleanupInfo(
                 sessionPath: "/tmp/lemon-sandbox-demo-1",
                 isMultiRepo: false,
