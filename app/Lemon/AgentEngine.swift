@@ -232,7 +232,10 @@ struct OpenCodeEngine: AgentEngine {
         case .active:
             return true
         case .unknown:
-            return false
+            // Schema drift-safe default: if /session responds but we cannot infer
+            // a terminal state, keep the run alive and let label/terminal-state
+            // signals resolve completion.
+            return true
         case .terminal:
             return false
         }
