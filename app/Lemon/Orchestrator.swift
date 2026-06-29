@@ -222,7 +222,14 @@ final class Orchestrator {
             }
 
             let cli = client(for: identity)
-            let alive = await !(probe.tmuxSessionDead(slug: p.slug))
+            let alive: Bool
+            if ws.engine.kind == .claudeCode {
+                alive = await !(probe.tmuxSessionDead(slug: p.slug))
+            } else {
+                // OpenCode sessions are daemon/API-driven (not tmux-backed), so
+                // tmux liveness is not a useful restore signal.
+                alive = true
+            }
             let sessionPath = "/tmp/lemon-\(p.slug)"
             let worktreeExists = isDirectory(sessionPath)
 

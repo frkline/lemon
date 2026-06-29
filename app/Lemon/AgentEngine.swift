@@ -1,9 +1,10 @@
 import Foundation
+import os
 
 protocol AgentEngine: Sendable {
     var kind: AgentEngineKind { get }
     func launch(request: WorktreeRunner.EngineLaunchRequest,
-                runner: WorktreeRunner) -> WorktreeRunner.LaunchFailure?
+                runner: WorktreeRunner) async -> WorktreeRunner.LaunchFailure?
     func readiness(config: WorkspaceEngineConfig) -> AgentEngineReadiness
 }
 
@@ -46,7 +47,7 @@ struct ClaudeCodeEngine: AgentEngine {
     let kind: AgentEngineKind = .claudeCode
 
     func launch(request: WorktreeRunner.EngineLaunchRequest,
-                runner: WorktreeRunner) -> WorktreeRunner.LaunchFailure?
+                runner: WorktreeRunner) async -> WorktreeRunner.LaunchFailure?
     {
         runner.launchTmux(
             sessionPath: request.sessionPath,
@@ -108,14 +109,55 @@ struct OpenCodeEngine: AgentEngine {
         self.config = config
     }
 
-    func launch(request _: WorktreeRunner.EngineLaunchRequest,
-                runner _: WorktreeRunner) -> WorktreeRunner.LaunchFailure?
+    func launch(request: WorktreeRunner.EngineLaunchRequest,
+                runner _: WorktreeRunner) async -> WorktreeRunner.LaunchFailure?
     {
-        let readiness = readiness(config: config)
-        if let firstFailure = readiness.checks.first(where: { $0.status == .fail }) {
-            return .launchError("OpenCode not ready: \(firstFailure.title). \(firstFailure.detail)")
+        let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
+        guard AgentEngineShell.commandExists("opencode") else {
+            return .binaryMissing("opencode")
         }
-        return .launchError("OpenCode selected, but execution pipeline is not wired yet (session/event loop integration pending)")
+        let authPath = NSHomeDirectory() + "/.local/share/opencode/auth.json"
+        guard FileManager.default.fileExists(atPath: authPath) else {
+            return .launchError("OpenCode auth missing at ~/.local/share/opencode/auth.json (run `opencode auth login`)")
+        }
+        guard openCode.models.hasAllConfigured else {
+            return .launchError("OpenCode model slots are incomplete (set plan/code/review models)")
+        }
+
+        let daemon = OpenCodeDaemonManager.shared
+        let ensure = await daemon.ensureRunning(config: openCode.daemon)
+        switch ensure {
+        case .ready:
+            break
+        case .notInstalled:
+            return .binaryMissing("opencode")
+        case let .startFailed(msg):
+            return .launchError("OpenCode daemon failed to start: \(msg)")
+        case .unhealthy:
+            return .launchError("OpenCode daemon is running but unhealthy (/doc unavailable)")
+        }
+
+        let planPath = "/tmp/lemon-plan-\(request.slug).md"
+        let gatePath = "/tmp/lemon-gate-\(request.slug)"
+        let kickoffPrompt = WorktreeRunner.kickoffPrompt(planMode: false, planPath: planPath, gatePath: gatePath)
+
+        let client = OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port)
+        do {
+            let created = try await client.createSession(.init(
+                model: openCode.models.code,
+                dir: request.sessionPath,
+                agent: nil,
+            ))
+            try await client.sendMessage(
+                sessionID: created.id,
+                body: .init(content: kickoffPrompt, prompt_async: true),
+            )
+            Logger.opencode.info("[opencode] launched session \(created.id, privacy: .public) for \(request.slug, privacy: .public)")
+            return nil
+        } catch {
+            Logger.opencode.error("[opencode] launch failed for \(request.slug, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return .launchError("OpenCode launch failed: \(error.localizedDescription)")
+        }
     }
 
     func readiness(config: WorkspaceEngineConfig) -> AgentEngineReadiness {
@@ -129,12 +171,6 @@ struct OpenCodeEngine: AgentEngine {
         let daemonReachable = AgentEngineShell.httpReachable(url: daemonURL)
 
         return AgentEngineReadiness(checks: [
-            .init(
-                id: "opencode-runtime",
-                title: "Execution pipeline",
-                detail: "OpenCode run/poll lifecycle is still being wired in Lemon.",
-                status: .fail,
-            ),
             .init(
                 id: "opencode-bin",
                 title: "OpenCode installed",
@@ -162,6 +198,12 @@ struct OpenCodeEngine: AgentEngine {
                 title: "Daemon health",
                 detail: daemonReachable ? "`/doc` responded at \(daemonURL)." : "No `/doc` response at \(daemonURL).",
                 status: daemonReachable ? .pass : .fail,
+            ),
+            .init(
+                id: "opencode-launch",
+                title: "Lemon launch bridge",
+                detail: "Lemon can launch OpenCode sessions via daemon API.",
+                status: .pass,
             ),
         ])
     }
