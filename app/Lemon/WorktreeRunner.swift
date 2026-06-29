@@ -1547,6 +1547,7 @@ final class WorktreeRunner: @unchecked Sendable {
         var lastGemmaAt: Date? = nil
         var resultGateActive = false
         var resumeAt: Date? = nil // set when parked on a Max session-limit wall (#39)
+        var engineHealthMisses = 0
 
         while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
@@ -1674,6 +1675,26 @@ final class WorktreeRunner: @unchecked Sendable {
                 _ = exitCode
                 onStatusChange?(.failed)
                 return
+            }
+
+            if !monitorTmux {
+                if await engine.executionHealthy() {
+                    engineHealthMisses = 0
+                } else {
+                    engineHealthMisses += 1
+                    if engineHealthMisses >= 3 {
+                        log("[lemon] \(engine.kind.displayName) runtime became unreachable", level: .error)
+                        _ = try? await client.postComment(
+                            ref: ref,
+                            body: "🍋 Session ended without completing — \(engine.kind.displayName) runtime became unreachable. Re-add the 🍋 label to retry.",
+                            auth: auth,
+                        )
+                        try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+                        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                        onStatusChange?(.failed)
+                        return
+                    }
+                }
             }
 
             // Silence detection: track LINE-count growth, not byte count.

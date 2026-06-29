@@ -5,6 +5,7 @@ protocol AgentEngine: Sendable {
     var kind: AgentEngineKind { get }
     func launch(request: WorktreeRunner.EngineLaunchRequest,
                 runner: WorktreeRunner) async -> WorktreeRunner.LaunchFailure?
+    func executionHealthy() async -> Bool
     func readiness(config: WorkspaceEngineConfig) -> AgentEngineReadiness
 }
 
@@ -98,6 +99,10 @@ struct ClaudeCodeEngine: AgentEngine {
                 status: hasHf ? .pass : .fail,
             ),
         ])
+    }
+
+    func executionHealthy() async -> Bool {
+        true
     }
 }
 
@@ -206,6 +211,11 @@ struct OpenCodeEngine: AgentEngine {
                 status: .pass,
             ),
         ])
+    }
+
+    func executionHealthy() async -> Bool {
+        let openCode = config.openCode ?? OpenCodeWorkspaceConfig()
+        return await OpenCodeClient(host: openCode.daemon.host, port: openCode.daemon.port).docReachable()
     }
 }
 
