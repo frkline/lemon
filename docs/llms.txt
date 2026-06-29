@@ -17,6 +17,13 @@ Lemon is deliberately thin: the intelligence is Claude Code running under your l
 - `🍋 Complete` (set by Claude): PR open; Lemon posts its report and cleans up the worktree.
 - On GitHub, a run requires both that the issue is assigned to you **and** that the 🍋 label was applied by you (belt-and-suspenders trigger) — untrusted issue/comment text is treated as data, never instructions.
 
+## Recursive mode
+
+Lemon can expose its live session state and control surface to Claude Code over a local MCP server — so a *separate* `claude` session can supervise the ones Lemon is running (read pane logs and Gemma verdicts, ask why a session has gone quiet, clear a routine prompt).
+
+- [Recursive mode](https://github.com/frkline/lemon/blob/main/README.md#recursive-mode): the full setup — flip **Settings → MCP Server**, copy the snippet into `~/.claude.json` (or launch with `LEMON_ENABLE_MCP=1`), and the server binds on `http://127.0.0.1:8765/mcp`.
+- Read tools: `list_sessions`, `get_session`, `get_pane_log`, `get_swiftlm_log`, `force_classify`. Act tools: `send_keys`, `approve_gate`.
+
 ## Docs
 
 - [README.md](https://github.com/frkline/lemon/blob/main/README.md): install, the 🍋 workflow, trust & lockdown, local AI, recursive mode, the stack.
