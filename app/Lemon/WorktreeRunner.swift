@@ -683,7 +683,9 @@ final class WorktreeRunner: @unchecked Sendable {
         // (Next.js, databases, deploy targets) belongs in the team's LEMON.md.
         content += "### Session Environment\n"
         content += "- **Reserved dev-server port:** `\(devPort)` — use this if you launch a dev server so concurrent Lemon sessions don't collide.\n"
-        content += "- **Worktree:** you're in a fresh git worktree on branch `\(ref.identifier.hasPrefix("lemon/") ? ref.identifier : "lemon/\(ref.pathSlug)")`. Don't switch branches.\n\n"
+        content += "- **Worktree:** you're in a fresh git worktree on branch `\(ref.identifier.hasPrefix("lemon/") ? ref.identifier : "lemon/\(ref.pathSlug)")`. Don't switch branches.\n"
+        content += "- **Stay in your session directory.** Your working area is `\(sessionPath)/` — it may hold more than one repo (multi-repo workspaces), and moving between those sibling repos is fine. Dev servers, builds, installing dependencies, and other infra all run *here*; standard toolchains reading or writing their own config and caches under your home dir (`~/.npm`, `~/.cargo`, `~/.config`, `~/Library/Caches`, `~/.docker`, git/gh/ssh config) is also fine.\n"
+        content += "- **Don't scan the home directory's personal-data folders.** Never read or recursively search `~/Downloads`, `~/Desktop`, `~/Documents`, `~/Pictures`, `~/Music`, or `~/Movies`, and never run an unrooted `find`/`grep`/`rg` from `~` or `/`. Root every search at your session directory. Touching those folders trips macOS privacy prompts that are attributed to Lemon and breaks scope containment — there is nothing you need there.\n\n"
 
         // Self-isolation guard (#40). This worktree may be a checkout of Lemon
         // itself, which ships dev/test scripts that tear down Lemon + tmux. Run
@@ -1484,6 +1486,10 @@ final class WorktreeRunner: @unchecked Sendable {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-l", "-c", command]
+        // Pin cwd to /tmp so a helper can never inherit $HOME (CLAUDE.md: "all
+        // subprocesses must cd /tmp first" — avoids TCC prompts attributed to
+        // Lemon, #86). Commands that need a specific dir already use `git -C`/`cd`.
+        p.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
         p.standardOutput = Pipe()
         p.standardError = Pipe()
         try? p.run()
@@ -1883,6 +1889,10 @@ final class WorktreeRunner: @unchecked Sendable {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
             p.arguments = ["-l", "-c", command]
+            // Pin cwd to /tmp so a helper can never inherit $HOME (CLAUDE.md: "all
+            // subprocesses must cd /tmp first" — avoids TCC prompts attributed to
+            // Lemon, #86). Callers that need a specific dir already prefix `git -C`/`cd`.
+            p.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
             let pipe = Pipe()
             p.standardOutput = pipe
             p.standardError = pipe
