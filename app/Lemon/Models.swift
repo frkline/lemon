@@ -255,6 +255,13 @@ struct OpenCodeModelConfig: Codable, Hashable {
     var code: String = ""
     var review: String = ""
 
+    static let defaultSuggestedModels: [String] = [
+        "openai/gpt-5.3-codex",
+        "anthropic/claude-opus-4",
+        "anthropic/claude-sonnet-4",
+        "openai/gpt-4.1-mini",
+    ]
+
     var hasAllConfigured: Bool {
         !plan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

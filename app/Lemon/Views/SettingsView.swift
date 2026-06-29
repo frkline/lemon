@@ -46,9 +46,9 @@ struct SettingsView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 28) {
                     generalSection
+                    agentEnginesSection
                     identitiesPanel
                     workspacesPanel
-                    agentEnginesSection
                     localAISection
                     mcpSection
                 }
@@ -607,7 +607,8 @@ struct SettingsView: View {
                 .kerning(1.2)
                 .foregroundStyle(LD.textTertiary)
             HStack(spacing: 8) {
-                TextField("provider/model", text: text)
+                providerSelector(text: text)
+                TextField("model", text: settingsOpenCodeModelNameBinding(text))
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
                 Menu {
@@ -630,6 +631,53 @@ struct SettingsView: View {
             .padding(.horizontal, 9)
             .background(RoundedRectangle(cornerRadius: LD.r6).strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth))
         }
+    }
+
+    private func providerSelector(text: Binding<String>) -> some View {
+        let provider = providerSlug(for: text.wrappedValue)
+        return Menu {
+            ForEach(settingsOpenCodeProviderChoices, id: \.self) { provider in
+                Button(providerDisplayName(provider)) {
+                    text.wrappedValue = reprovider(text.wrappedValue, provider: provider)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(providerDisplayName(provider))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LD.textSecondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(LD.textTertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: LD.r6).fill(LD.textPrimary.opacity(0.07)))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+    }
+
+    private func settingsOpenCodeModelNameBinding(_ text: Binding<String>) -> Binding<String> {
+        Binding(
+            get: {
+                let trimmed = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let split = OpenCodeModelConfig.splitProviderModel(trimmed) {
+                    return split.modelID
+                }
+                return trimmed
+            },
+            set: { rawValue in
+                let model = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !model.isEmpty else {
+                    text.wrappedValue = ""
+                    return
+                }
+                let provider = providerSlug(for: text.wrappedValue)
+                text.wrappedValue = "\(provider)/\(model)"
+            },
+        )
     }
 
     private var settingsOpenCodeMenu: some View {
@@ -753,13 +801,44 @@ struct SettingsView: View {
                 return [models.plan, models.code, models.review]
             }
         let current = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        let merged = openCodeCatalog + WorkspaceEditorPane.defaultOpenCodeModels + saved + (current.isEmpty ? [] : [current])
+        let merged = openCodeCatalog + OpenCodeModelConfig.defaultSuggestedModels + saved + (current.isEmpty ? [] : [current])
         var seen = Set<String>()
         var ordered: [String] = []
         for model in merged.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !model.isEmpty && seen.insert(model).inserted {
             ordered.append(model)
         }
         return ordered
+    }
+
+    private var settingsOpenCodeProviderChoices: [String] {
+        let models = openCodeCatalog + OpenCodeModelConfig.defaultSuggestedModels
+        let providers = models.compactMap(OpenCodeModelConfig.providerSlug(for:))
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for provider in ["openai"] + providers + ["anthropic", "opencode", "ollama"] where seen.insert(provider).inserted {
+            ordered.append(provider)
+        }
+        return ordered
+    }
+
+    private func providerSlug(for modelID: String) -> String {
+        OpenCodeModelConfig.providerSlug(for: modelID) ?? "openai"
+    }
+
+    private func reprovider(_ modelID: String, provider: String) -> String {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = OpenCodeModelConfig.splitProviderModel(trimmed)?.modelID ?? trimmed
+        return model.isEmpty ? "\(provider)/" : "\(provider)/\(model)"
+    }
+
+    private func providerDisplayName(_ provider: String) -> String {
+        switch provider {
+        case "openai": "OpenAI"
+        case "anthropic": "Anthropic"
+        case "opencode": "OpenCode"
+        case "ollama": "Ollama"
+        default: provider
+        }
     }
 
     private func refreshOpenCodeDefaultsStatus() {

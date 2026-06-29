@@ -36,13 +36,6 @@ struct WorkspaceEditorPane: View {
     @State private var typingCustomKey: Bool = false
     @State private var reseedState: ReseedState = .idle
 
-    static let defaultOpenCodeModels: [String] = [
-        "openai/gpt-5.3-codex",
-        "anthropic/claude-opus-4",
-        "anthropic/claude-sonnet-4",
-        "openai/gpt-4.1-mini",
-    ]
-
     enum ReseedState: Equatable {
         case idle, working
         case success(Int)
@@ -185,7 +178,7 @@ struct WorkspaceEditorPane: View {
                     .padding(.top, 4)
                 }
 
-                engineReadinessBlock
+                compactEngineReadiness
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,7 +221,8 @@ struct WorkspaceEditorPane: View {
                 .kerning(1.2)
                 .foregroundStyle(LD.textTertiary)
             HStack(spacing: 8) {
-                TextField("provider/model", text: text)
+                providerSelector(text: text)
+                TextField("model", text: openCodeModelNameBinding(text))
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
 
@@ -268,6 +262,53 @@ struct WorkspaceEditorPane: View {
                     .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
             )
         }
+    }
+
+    private func providerSelector(text: Binding<String>) -> some View {
+        let provider = providerSlug(for: text.wrappedValue)
+        return Menu {
+            ForEach(openCodeProviderChoices, id: \.self) { provider in
+                Button(providerDisplayName(provider)) {
+                    text.wrappedValue = reprovider(text.wrappedValue, provider: provider)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(providerDisplayName(provider))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LD.textSecondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(LD.textTertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: LD.r6).fill(LD.textPrimary.opacity(0.07)))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+    }
+
+    private func openCodeModelNameBinding(_ text: Binding<String>) -> Binding<String> {
+        Binding(
+            get: {
+                let trimmed = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let split = OpenCodeModelConfig.splitProviderModel(trimmed) {
+                    return split.modelID
+                }
+                return trimmed
+            },
+            set: { rawValue in
+                let model = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !model.isEmpty else {
+                    text.wrappedValue = ""
+                    return
+                }
+                let provider = providerSlug(for: text.wrappedValue)
+                text.wrappedValue = "\(provider)/\(model)"
+            },
+        )
     }
 
     private func labeledField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
@@ -337,6 +378,31 @@ struct WorkspaceEditorPane: View {
         .padding(.top, 1)
     }
 
+    private var compactEngineReadiness: some View {
+        HStack(spacing: 6) {
+            if readinessLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.65)
+            } else if let readiness {
+                Circle()
+                    .fill(readiness.isReady ? LD.statusDone : LD.coral)
+                    .frame(width: 5, height: 5)
+                Text(readiness.isReady ? "Engine ready" : "Finish engine setup in Settings")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(readiness.isReady ? LD.statusDone : LD.coral)
+            } else {
+                Circle()
+                    .fill(LD.textQuaternary)
+                    .frame(width: 5, height: 5)
+                Text("Engine readiness checks run in Settings")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.textQuaternary)
+            }
+        }
+        .padding(.top, 2)
+    }
+
     private var modelCatalogStatusText: String {
         if daemonModelChoicesLoading {
             return "Starting OpenCode daemon and loading model catalog..."
@@ -361,7 +427,7 @@ struct WorkspaceEditorPane: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        let merged = daemonModelChoices + Self.defaultOpenCodeModels + saved
+        let merged = daemonModelChoices + OpenCodeModelConfig.defaultSuggestedModels + saved
         var seen = Set<String>()
         var ordered: [String] = []
         for model in merged where seen.insert(model).inserted {
@@ -407,6 +473,36 @@ struct WorkspaceEditorPane: View {
             return knownOpenCodeModelChoices
         }
         return [trimmedCurrent] + knownOpenCodeModelChoices
+    }
+
+    private var openCodeProviderChoices: [String] {
+        let providers = knownOpenCodeModelChoices.compactMap(OpenCodeModelConfig.providerSlug(for:))
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for provider in ["openai"] + providers + ["anthropic", "opencode", "ollama"] where seen.insert(provider).inserted {
+            ordered.append(provider)
+        }
+        return ordered
+    }
+
+    private func providerSlug(for modelID: String) -> String {
+        OpenCodeModelConfig.providerSlug(for: modelID) ?? "openai"
+    }
+
+    private func reprovider(_ modelID: String, provider: String) -> String {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = OpenCodeModelConfig.splitProviderModel(trimmed)?.modelID ?? trimmed
+        return model.isEmpty ? "\(provider)/" : "\(provider)/\(model)"
+    }
+
+    private func providerDisplayName(_ provider: String) -> String {
+        switch provider {
+        case "openai": "OpenAI"
+        case "anthropic": "Anthropic"
+        case "opencode": "OpenCode"
+        case "ollama": "Ollama"
+        default: provider
+        }
     }
 
     private var engineReadinessBlock: some View {

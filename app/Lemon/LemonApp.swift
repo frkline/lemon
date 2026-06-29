@@ -111,6 +111,7 @@ struct LemonApp: App {
                 // next render. MCP server isn't tied to that, so fire
                 // it here so it comes up alongside the polling loop.
                 guard complete else { return }
+                nav.showList()
                 LemonApp.startMCPServerIfRequested(orchestrator: orchestrator)
             }
         } label: {

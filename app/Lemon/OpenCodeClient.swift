@@ -60,6 +60,18 @@ struct OpenCodePermissionResponse: Codable {
     var decision: String
 }
 
+struct OpenCodeModelCatalogItem: Equatable {
+    var displayID: String
+    var providerID: String
+    var modelID: String
+    var name: String?
+    var family: String?
+    var status: String?
+    var isTextInput: Bool
+    var isTextOutput: Bool
+    var supportsTools: Bool
+}
+
 enum OpenCodeSessionLiveness: Equatable {
     case active
     case terminal
@@ -93,6 +105,9 @@ final class OpenCodeClient: Sendable {
     }
 
     func availableModelIDs() async -> [String] {
+        let curated = await availableCodingModelIDs()
+        if !curated.isEmpty { return curated }
+
         let paths = ["/config/providers", "/provider", "/api/model", "/api/provider", "/doc"]
         var seen = Set<String>()
         var ordered: [String] = []
@@ -106,6 +121,16 @@ final class OpenCodeClient: Sendable {
         }
 
         return ordered
+    }
+
+    func availableCodingModelIDs(limit: Int = 16) async -> [String] {
+        let paths = ["/api/model", "/config/providers", "/provider"]
+        var items: [OpenCodeModelCatalogItem] = []
+        for path in paths {
+            guard let data = try? await request("GET", path: path) else { continue }
+            items.append(contentsOf: Self.extractModelCatalogItems(from: data))
+        }
+        return Self.curatedCodingModelIDs(items, limit: limit)
     }
 
     @discardableResult
@@ -200,6 +225,116 @@ final class OpenCodeClient: Sendable {
 
         guard let text = String(data: data, encoding: .utf8) else { return [] }
         return extractModelIDs(fromText: text)
+    }
+
+    static func extractModelCatalogItems(from data: Data) -> [OpenCodeModelCatalogItem] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        return extractModelCatalogItems(fromJSON: json)
+    }
+
+    static func extractModelCatalogItems(fromJSON json: Any) -> [OpenCodeModelCatalogItem] {
+        var items: [OpenCodeModelCatalogItem] = []
+
+        func appendModel(dict: [String: Any], ownerProvider: String?) {
+            let providerID = (dict["providerID"] as? String)
+                ?? (dict["providerId"] as? String)
+                ?? ownerProvider
+            guard let providerID, let modelID = dict["id"] as? String else { return }
+
+            let capabilities = dict["capabilities"] as? [String: Any]
+            let input = capabilities?["input"]
+            let output = capabilities?["output"]
+            let textInput = supportsText(input) || capabilities == nil
+            let textOutput = supportsText(output) || capabilities == nil
+            let tools = (capabilities?["tools"] as? Bool)
+                ?? (capabilities?["toolcall"] as? Bool)
+                ?? false
+
+            items.append(OpenCodeModelCatalogItem(
+                displayID: "\(providerID)/\(modelID)",
+                providerID: providerID,
+                modelID: modelID,
+                name: dict["name"] as? String,
+                family: dict["family"] as? String,
+                status: dict["status"] as? String,
+                isTextInput: textInput,
+                isTextOutput: textOutput,
+                supportsTools: tools,
+            ))
+        }
+
+        func visit(_ node: Any, ownerProvider: String?) {
+            switch node {
+            case let dict as [String: Any]:
+                let providerID = (dict["providerID"] as? String)
+                    ?? (dict["providerId"] as? String)
+                    ?? (dict["models"] == nil ? ownerProvider : dict["id"] as? String)
+
+                if dict["id"] is String, dict["providerID"] != nil || dict["providerId"] != nil {
+                    appendModel(dict: dict, ownerProvider: ownerProvider)
+                }
+
+                if let models = dict["models"] as? [String: Any] {
+                    let owner = dict["id"] as? String ?? providerID ?? ownerProvider
+                    for value in models.values {
+                        if let model = value as? [String: Any] {
+                            appendModel(dict: model, ownerProvider: owner)
+                        }
+                    }
+                }
+
+                for value in dict.values {
+                    visit(value, ownerProvider: providerID ?? ownerProvider)
+                }
+
+            case let array as [Any]:
+                for value in array {
+                    visit(value, ownerProvider: ownerProvider)
+                }
+
+            default:
+                break
+            }
+        }
+
+        visit(json, ownerProvider: nil)
+        return items
+    }
+
+    static func curatedCodingModelIDs(_ items: [OpenCodeModelCatalogItem], limit: Int = 16) -> [String] {
+        var seen = Set<String>()
+        let usable = items.filter(Self.isUsableCodingModel)
+        var byID: [String: OpenCodeModelCatalogItem] = [:]
+        for item in usable where byID[item.displayID] == nil {
+            byID[item.displayID] = item
+        }
+        let recommended = OpenCodeModelConfig.defaultSuggestedModels.compactMap { byID[$0] }
+        let rest = usable.filter { !OpenCodeModelConfig.defaultSuggestedModels.contains($0.displayID) }
+        let curated = recommended + rest
+        var ordered: [String] = []
+        for item in curated where seen.insert(item.displayID).inserted {
+            ordered.append(item.displayID)
+            if ordered.count >= limit { break }
+        }
+        return ordered
+    }
+
+    private static func supportsText(_ value: Any?) -> Bool {
+        if let dict = value as? [String: Any] {
+            return dict["text"] as? Bool == true
+        }
+        if let list = value as? [String] {
+            return list.contains("text")
+        }
+        return false
+    }
+
+    private static func isUsableCodingModel(_ item: OpenCodeModelCatalogItem) -> Bool {
+        guard item.status == nil || item.status == "active" else { return false }
+        guard item.isTextInput, item.isTextOutput else { return false }
+        let id = item.modelID.lowercased()
+        let blocked = ["embedding", "image", "audio", "tts", "whisper", "moderation", "rerank"]
+        return !blocked.contains(where: { id.contains($0) })
     }
 
     static func extractModelIDs(fromJSON json: Any) -> [String] {

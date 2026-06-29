@@ -40,11 +40,11 @@ Follow-on hardening:
   provider-specific auth check against `~/.local/share/opencode/auth.json` for the
   exact providers referenced by plan/code/review slots. Launch also fails early if
   selected providers are clearly missing credentials.
-- Workspace model dropdowns now merge static fallbacks + saved selections +
-  **daemon-discovered models** by querying OpenCode (`/config/providers`, `/provider`,
-  `/api/model`, then `/doc` as fallback) and extracting likely `provider/model` IDs.
-  This keeps the UI aligned with whichever model catalog the local OpenCode daemon
-  currently exposes.
+- Workspace model dropdowns treat the daemon catalog as raw data, not direct UI.
+  Lemon first queries `/api/model` and builds a short curated coding-model list
+  (active text-in/text-out models; embeddings/image/audio/moderation-style models
+  filtered out), then falls back to explicit suggestions + saved selections. Users
+  can still type any exact model ID.
 - OpenCode config is global-first: `KeychainStore.openCodeDefaults` stores the
   default daemon, model slots, and auto-open threshold. Workspaces inherit those
   defaults when `Workspace.engine.openCode == nil` and only persist an override
@@ -55,6 +55,9 @@ Follow-on hardening:
   `directory` as a query item and `model` as `{providerID,id}`; messages send text
   parts instead of the older flat `content` shape. OpenCode response bodies are not
   logged because provider/catalog responses can contain auth material.
+- Onboarding stays Claude-first. It may mention OpenCode as a later Settings option,
+  but it must not block first-run completion on an advanced engine decision. Re-running
+  setup from Settings resets navigation back to the session list after completion.
 
 **Why:** the workspace is Lemon's execution boundary already (routing + lockdown +
 filesystem mapping). Engine choice and model policy belong at that same boundary,

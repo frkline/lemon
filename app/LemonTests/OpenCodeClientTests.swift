@@ -57,4 +57,17 @@ final class OpenCodeClientTests: XCTestCase {
         let ids = try OpenCodeClient.extractModelIDs(from: XCTUnwrap(json.data(using: .utf8)))
         XCTAssertEqual(ids, ["openai/gpt-4.1-mini"])
     }
+
+    func testCuratedCodingModelIDsFiltersNonCodingModels() {
+        let items = [
+            OpenCodeModelCatalogItem(displayID: "openai/text-embedding-3-small", providerID: "openai", modelID: "text-embedding-3-small", name: nil, family: nil, status: "active", isTextInput: true, isTextOutput: false, supportsTools: false),
+            OpenCodeModelCatalogItem(displayID: "openai/gpt-image-1", providerID: "openai", modelID: "gpt-image-1", name: nil, family: nil, status: "active", isTextInput: true, isTextOutput: false, supportsTools: false),
+            OpenCodeModelCatalogItem(displayID: "openai/gpt-5.3-codex", providerID: "openai", modelID: "gpt-5.3-codex", name: nil, family: nil, status: "active", isTextInput: true, isTextOutput: true, supportsTools: true),
+            OpenCodeModelCatalogItem(displayID: "openai/gpt-4.1", providerID: "openai", modelID: "gpt-4.1", name: nil, family: nil, status: "active", isTextInput: true, isTextOutput: true, supportsTools: true),
+        ]
+        XCTAssertEqual(OpenCodeClient.curatedCodingModelIDs(items), [
+            "openai/gpt-5.3-codex",
+            "openai/gpt-4.1",
+        ])
+    }
 }
