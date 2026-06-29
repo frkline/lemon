@@ -203,8 +203,7 @@ final class WorktreeRunner: @unchecked Sendable {
             mcpConfigPath: mcpConfigPath,
             planMode: planMode,
         )
-        if let failure = await engine.launch(request: launchRequest, runner: self)
-        {
+        if let failure = await engine.launch(request: launchRequest, runner: self) {
             log("[lemon] \(engine.kind.displayName) launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
             try? await client.clearState(ref: ref, state: .inProgress, auth: auth)

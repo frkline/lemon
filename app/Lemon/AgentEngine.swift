@@ -9,9 +9,9 @@ protocol AgentEngine: Sendable {
     func readiness(config: WorkspaceEngineConfig) -> AgentEngineReadiness
 }
 
-struct AgentEngineReadiness: Sendable {
-    struct Check: Identifiable, Sendable {
-        enum Status: Sendable {
+struct AgentEngineReadiness {
+    struct Check: Identifiable {
+        enum Status {
             case pass
             case fail
         }

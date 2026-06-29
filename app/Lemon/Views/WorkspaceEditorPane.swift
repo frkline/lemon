@@ -168,7 +168,7 @@ struct WorkspaceEditorPane: View {
                                     Text("\(openCodePort)")
                                         .font(.system(size: 11, design: .monospaced))
                                         .foregroundStyle(LD.textPrimary)
-                                    Stepper("", value: $openCodePort, in: 1 ... 65_535)
+                                    Stepper("", value: $openCodePort, in: 1 ... 65535)
                                         .labelsHidden()
                                 }
                             }
@@ -231,7 +231,6 @@ struct WorkspaceEditorPane: View {
         }
     }
 
-    @ViewBuilder
     private var engineReadinessBlock: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
@@ -893,7 +892,7 @@ struct WorkspaceEditorPane: View {
                     autoOpenThreshold: openCodeAutoOpenThreshold,
                     daemon: OpenCodeDaemonConfig(
                         host: openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "127.0.0.1" : openCodeHost,
-                        port: max(1, min(openCodePort, 65_535)),
+                        port: max(1, min(openCodePort, 65535)),
                     ),
                 )
                 : nil,
@@ -937,7 +936,7 @@ struct WorkspaceEditorPane: View {
             ),
             autoOpenThreshold: openCodeAutoOpenThreshold,
             daemon: OpenCodeDaemonConfig(host: daemonHost.isEmpty ? "127.0.0.1" : daemonHost,
-                                         port: max(1, min(openCodePort, 65_535))),
+                                         port: max(1, min(openCodePort, 65535))),
         )
         working.engine = WorkspaceEngineConfig(
             kind: engineKind,

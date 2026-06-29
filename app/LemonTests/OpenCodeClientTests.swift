@@ -1,5 +1,5 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class OpenCodeClientTests: XCTestCase {
     func testBaseURLUsesHostAndPort() {

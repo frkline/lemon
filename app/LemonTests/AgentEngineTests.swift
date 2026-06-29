@@ -1,5 +1,5 @@
-import XCTest
 @testable import Lemon
+import XCTest
 
 final class AgentEngineTests: XCTestCase {
     func testOpenCodeModelConfigRequiresAllThreeSlots() {

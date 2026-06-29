@@ -55,7 +55,7 @@ final class WorktreeRunnerTests: XCTestCase {
     func testOpenCodeSessionPathFormat() {
         XCTAssertEqual(
             WorktreeRunner.openCodeSessionPath(slug: "demo-42"),
-            "/tmp/lemon-opencode-session-demo-42"
+            "/tmp/lemon-opencode-session-demo-42",
         )
     }
 

@@ -28,6 +28,14 @@ liveness checks, no pane-log Gemma classify loop, and no plan-gate sentinel wait
 It still uses the shared issue-label polling + completion handler path so Lemon's
 source-side lifecycle stays consistent while OpenCode event integration is pending.
 
+Follow-on hardening:
+- OpenCode sessions persist their OpenCode `session.id` to `/tmp/lemon-opencode-session-{slug}`.
+- Polling now checks both daemon `/doc` reachability and session liveness (`/session/:id`);
+  terminal/not-found responses fail the run instead of lingering in a hung `.executing` state.
+- Gate/chat controls in `Orchestrator` now branch by engine kind: Claude keeps tmux
+  send-keys, while OpenCode routes free-form text (including gate change notes) via
+  daemon `sendMessage` when a session id is available.
+
 **Why:** the workspace is Lemon's execution boundary already (routing + lockdown +
 filesystem mapping). Engine choice and model policy belong at that same boundary,
 and storing it now lets UI and migration land before runtime orchestration changes.
