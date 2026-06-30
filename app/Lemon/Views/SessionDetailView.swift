@@ -34,99 +34,117 @@ struct SessionDetailView: View {
             .padding(.vertical, 10)
             .background(LD.textPrimary.opacity(0.03))
 
-            // Plan gate — Claude proposed a plan; awaiting human approval.
             if session.status == .planReview {
-                planReviewCard(session: session)
-            }
-
-            // Result gate — build done; awaiting human go to open the PR.
-            if session.status == .resultReview {
-                resultReviewCard(session: session)
-            }
-
-            // Ready-for-review card — landed Lemon Report awaiting cleanup.
-            if session.status == .reviewing, let info = session.cleanupInfo {
-                readyForReviewCard(session: session, info: info)
-            }
-
-            // Gemma summary — local-model classification of the session.
-            if let summary = session.aiSummary {
-                HStack(spacing: 5) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 9))
-                        .foregroundStyle(LD.consoleGemma)
-                    Text(summary)
-                        .font(.system(size: 10))
-                        .foregroundStyle(LD.textSecondary)
-                        .lineLimit(1)
-                    Spacer()
+                planReviewPane(session: session)
+            } else {
+                // Result gate — build done; awaiting human go to open the PR.
+                if session.status == .resultReview {
+                    resultReviewCard(session: session)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
-                .background(LD.textPrimary.opacity(0.02))
-            }
 
-            // Gemma idle countdown — when the next classify fires (#50).
-            GemmaIdleIndicator(session: session)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 4)
-
-            // Pending Gemma action — shown for 5 s before keys are sent. Carries
-            // the Gemma teal accent, not the yellow (yellow belongs to the CTA).
-            if let pending = session.pendingAction {
-                HStack(spacing: 6) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 10))
-                        .foregroundStyle(LD.consoleGemma)
-                    Text(pending)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LD.textSecondary)
-                    Spacer()
-                    Button("Cancel") { orchestrator.cancelPendingAction(for: session) }
-                        .font(.system(size: 10))
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(LD.textTertiary)
+                // Ready-for-review card — landed Lemon Report awaiting cleanup.
+                if session.status == .reviewing, let info = session.cleanupInfo {
+                    readyForReviewCard(session: session, info: info)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(LD.textPrimary.opacity(0.05))
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .animation(LD.smooth, value: session.pendingAction)
-            }
 
-            inlineConsole(session)
+                // Gemma summary — local-model classification of the session.
+                if let summary = session.aiSummary {
+                    HStack(spacing: 5) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 9))
+                            .foregroundStyle(LD.consoleGemma)
+                        Text(summary)
+                            .font(.system(size: 10))
+                            .foregroundStyle(LD.textSecondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(LD.textPrimary.opacity(0.02))
+                }
+
+                // Gemma idle countdown — when the next classify fires (#50).
+                GemmaIdleIndicator(session: session)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4)
+
+                // Pending Gemma action — shown for 5 s before keys are sent. Carries
+                // the Gemma teal accent, not the yellow (yellow belongs to the CTA).
+                if let pending = session.pendingAction {
+                    HStack(spacing: 6) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 10))
+                            .foregroundStyle(LD.consoleGemma)
+                        Text(pending)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(LD.textSecondary)
+                        Spacer()
+                        Button("Cancel") { orchestrator.cancelPendingAction(for: session) }
+                            .font(.system(size: 10))
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(LD.textTertiary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(LD.textPrimary.opacity(0.05))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .animation(LD.smooth, value: session.pendingAction)
+                }
+
+                inlineConsole(session)
+            }
             detailFooter(session)
         }
+        .frame(maxHeight: .infinity)
     }
 
     // MARK: - Plan gate (the human approval before any code is written)
 
-    private func planReviewCard(session: Session) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func planReviewPane(session: Session) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(LD.statusWaiting)
                     .frame(width: 6, height: 6)
-                Text("PLAN — AWAITING APPROVAL")
+                Text("PLAN REVIEW")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.4)
                     .foregroundStyle(LD.statusWaiting)
                 Spacer()
             }
-            // The proposed plan, read from the plan sentinel claude writes.
-            // Scrolls inside a short window so the card stays compact.
-            ScrollView(showsIndicators: true) {
-                Text(session.planMarkdown ?? "Drafting plan…")
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(LD.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Claude has proposed a plan. Review it before any code changes run.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(LD.textSecondary)
+
+            VStack(spacing: 0) {
+                ScrollView(showsIndicators: true) {
+                    Text(session.planMarkdown ?? "Drafting plan…")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(LD.consoleText)
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 260, maxHeight: .infinity)
+                .background(LD.consoleBackground)
+
+                gateActions(session: session, approveLabel: "Approve")
+                    .padding(10)
+                    .background(LD.textPrimary.opacity(0.04))
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(LD.hairlineOpaque).frame(height: LD.hairlineWidth)
+                    }
             }
-            .frame(maxHeight: 132)
-            gateActions(session: session, approveLabel: "Approve & run")
+            .clipShape(RoundedRectangle(cornerRadius: LD.r6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: LD.r6, style: .continuous)
+                    .strokeBorder(LD.hairlineOpaque, lineWidth: LD.hairlineWidth),
+            )
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
+        .frame(maxHeight: .infinity)
         .background(LD.statusWaiting.opacity(0.06))
         .overlay(alignment: .top) {
             Rectangle().fill(LD.hairlineDivider).frame(height: LD.hairlineWidth)
