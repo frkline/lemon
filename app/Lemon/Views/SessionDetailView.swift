@@ -113,7 +113,7 @@ struct SessionDetailView: View {
               let sessionID = openCodeSessionID
         else { return nil }
         let openCode = workspace.engine.openCode ?? KeychainStore.shared.openCodeDefaults
-        return URL(string: "http://\(openCode.daemon.host):\(openCode.daemon.port)/session/\(sessionID)")
+        return URL(string: "http://\(openCode.daemon.host):\(openCode.daemon.port)/sessions/\(sessionID)")
     }
 
     private var openCodeSessionID: String? {

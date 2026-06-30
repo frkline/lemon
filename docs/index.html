@@ -73,6 +73,8 @@ body{
   font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase}
 .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--lemon);flex:none;
   box-shadow:0 0 0 3px color-mix(in srgb,var(--lemon) 20%,transparent)}
+.eyebrow .tag{letter-spacing:.8px;font-size:10px;color:var(--lemon);padding:2px 7px;
+  border-radius:999px;background:rgba(247,200,66,.10);box-shadow:inset 0 0 0 .5px rgba(247,200,66,.24)}
 
 h1{font-size:58px;line-height:1.02;letter-spacing:-1.7px;font-weight:700}
 h2{font-size:36px;line-height:1.06;letter-spacing:-.9px;font-weight:700}
@@ -568,14 +570,14 @@ em{font-style:italic;color:var(--ink)}
   <section class="hero">
     <div class="hero-copy">
       <span class="eyebrow"><i></i>macOS menu bar · Apple silicon</span>
-      <h1><span class="sr-only">Claude Code, no cruft.</span><span class="hero-rotor" aria-hidden="true"><span class="word claude">Claude</span><span class="word open">Open</span></span> Code,<br>no cruft.</h1>
+      <h1>Claude Code,<br>no cruft.</h1>
       <p class="herokick">Built for the Mac&nbsp;mini on your desk.</p>
       <p class="lead">The quiet machine in the corner of your desk becomes an orchestrator in the corner of your screen — facilitating your coding engine across Linear and GitHub issues, watched by <b>Gemma running locally</b>, one click off the menu bar.</p>
       <div class="cta">
         <a class="btn primary" href="https://github.com/frkline/lemon/releases" target="_blank" rel="noopener">Download for Apple silicon</a>
         <a class="btn ghost" href="https://github.com/frkline/lemon" target="_blank" rel="noopener">View source</a>
       </div>
-      <p class="fineprint mono">macOS 26 · built for Claude Code · supports OpenCode · Gemma 4 on-device</p>
+      <p class="fineprint mono">macOS 26 · built for Claude Code · OpenCode preview · Gemma 4 on-device</p>
     </div>
     <div class="hero-visual">
       <div class="macscene">
@@ -932,7 +934,7 @@ em{font-style:italic;color:var(--ink)}
   <!-- SETUP -->
   <section class="band setup" id="setup">
     <div class="copycol">
-      <span class="eyebrow"><i></i>Engines</span>
+      <span class="eyebrow"><i></i>Engines <span class="tag">Preview</span></span>
       <h2>Open Code, now open.</h2>
       <p class="sub">Lemon is Claude Code-biased by default because Claude Code is excellent. But when you hit a session cap, a weekly limit, or just want your own OpenAI, Anthropic, Ollama, or Models.dev provider, flip a workspace to OpenCode and keep shipping.</p>
     </div>

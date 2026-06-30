@@ -8,7 +8,8 @@ import os
 // (strict concurrency won't let [String: Any] dictionaries traverse actors).
 //
 // Tools are organized by capability:
-//   read-only:  list_sessions, get_session, get_pane_log, get_swiftlm_log
+//   read-only:  list_sessions, get_session, get_pane_log, get_opencode_session,
+//               get_engine_config, get_swiftlm_log
 //   control:    force_classify, send_keys, set_label, stop_session
 //   dev-only:   seed_test_session (gated behind LEMON_DEV_MODE)
 @MainActor
@@ -61,7 +62,7 @@ enum LemonMCPTools {
                 "required": ["id"],
                 "additionalProperties": false,
             ],
-            handler: { args in
+            handler: { (args: [String: Any]) async throws -> String in
                 guard let idArg = args["id"] as? String, !idArg.isEmpty else {
                     throw MCPError(code: -32602, message: "missing 'id' argument")
                 }
@@ -72,6 +73,9 @@ enum LemonMCPTools {
                     }
                     var detail = sessionSummary(session)
                     detail["log_tail"] = readPaneLogTail(slug: session.issue.pathSlug, lines: lines)
+                    if let openCode = openCodeSessionMetadata(session) {
+                        detail["opencode"] = openCode
+                    }
                     if let summary = session.aiSummary { detail["last_ai_summary"] = summary }
                     if let pending = session.pendingAction { detail["pending_action"] = pending }
                     if let pr = session.prUrl { detail["pr_url"] = pr }
@@ -83,7 +87,7 @@ enum LemonMCPTools {
         // ── get_pane_log ───────────────────────────────────────────────────
         server.register(LemonMCPServer.Tool(
             name: "get_pane_log",
-            description: "Read the tmux pane log of a session — the raw terminal output Claude has produced. ANSI escape codes are preserved. Pass the issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#n') or session UUID.",
+            description: "Read the tmux pane log of a Claude Code session. For OpenCode sessions, returns engine metadata and points callers to get_opencode_session instead of returning an empty tmux log.",
             inputSchema: [
                 "type": "object",
                 "properties": [
@@ -102,11 +106,107 @@ enum LemonMCPTools {
                     guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg) else {
                         throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
                     }
+                    if engineKind(for: session) == .openCode {
+                        var payload: [String: Any] = [
+                            "identifier": session.issue.identifier,
+                            "engine": AgentEngineKind.openCode.rawValue,
+                            "message": "OpenCode sessions are daemon/API-backed and do not have a tmux pane log. Use get_opencode_session.",
+                        ]
+                        if let metadata = openCodeSessionMetadata(session) {
+                            payload["opencode"] = metadata
+                        }
+                        return LemonMCPServer.encode(payload)
+                    }
                     let payload: [String: Any] = [
                         "identifier": session.issue.identifier,
                         "log_path": "/tmp/lemon-log-\(session.issue.pathSlug).txt",
                         "tail": readPaneLogTail(slug: session.issue.pathSlug, lines: lines),
                     ]
+                    return LemonMCPServer.encode(payload)
+                }
+            },
+        ))
+
+        // ── get_opencode_session ───────────────────────────────────────────
+        server.register(LemonMCPServer.Tool(
+            name: "get_opencode_session",
+            description: "Read OpenCode daemon metadata and recent message parts for an OpenCode-backed Lemon session. Pass the Lemon issue/session id; returns the OpenCode session id, URL, model, cost/tokens, and compact recent messages.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Session UUID or issue identifier (Linear 'HRP-37' or GitHub 'owner/repo#7')"],
+                    "messages": ["type": "integer", "description": "Recent OpenCode messages to return (default 8, max 30)", "default": 8],
+                ],
+                "required": ["id"],
+                "additionalProperties": false,
+            ],
+            handler: { args in
+                guard let idArg = args["id"] as? String, !idArg.isEmpty else {
+                    throw MCPError(code: -32602, message: "missing 'id' argument")
+                }
+                let messageLimit = min(max((args["messages"] as? Int) ?? 8, 1), 30)
+                let resolved = try await MainActor.run { () throws -> (String, OpenCodeWorkspaceConfig, String) in
+                    guard let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg) else {
+                        throw MCPError(code: -32004, message: "no session matching '\(idArg)'")
+                    }
+                    guard engineKind(for: session) == .openCode else {
+                        throw MCPError(code: -32006, message: "session '\(idArg)' is not an OpenCode session")
+                    }
+                    guard let config = openCodeConfig(for: session),
+                          let sessionID = openCodeSessionID(for: session)
+                    else {
+                        throw MCPError(code: -32007, message: "OpenCode session metadata missing for '\(idArg)'")
+                    }
+                    return (session.issue.identifier, config, sessionID)
+                }
+
+                let (identifier, config, sessionID) = resolved
+                let base = "http://\(config.daemon.host):\(config.daemon.port)"
+                let infoURL = URL(string: "\(base)/session/\(sessionID)")!
+                let messagesURL = URL(string: "\(base)/api/session/\(sessionID)/message?limit=\(messageLimit)&order=desc")!
+                let info = await (try? fetchJSON(url: infoURL))
+                let messages = await (try? fetchJSON(url: messagesURL))
+                let payload: [String: Any] = [
+                    "identifier": identifier,
+                    "engine": AgentEngineKind.openCode.rawValue,
+                    "session_id": sessionID,
+                    "url": "\(base)/sessions/\(sessionID)",
+                    "daemon": ["host": config.daemon.host, "port": config.daemon.port],
+                    "session": compactOpenCodeSessionInfo(info),
+                    "messages": compactOpenCodeMessages(messages),
+                ]
+                return LemonMCPServer.encode(payload)
+            },
+        ))
+
+        // ── get_engine_config ──────────────────────────────────────────────
+        server.register(LemonMCPServer.Tool(
+            name: "get_engine_config",
+            description: "Read Lemon engine configuration: global OpenCode defaults and, optionally, the resolved engine config for one Lemon session/workspace. Secrets are never returned.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "Optional session UUID or issue identifier to include resolved workspace engine config"],
+                ],
+                "additionalProperties": false,
+            ],
+            handler: { args in
+                let requestedID = args["id"] as? String
+                return await MainActor.run {
+                    var payload: [String: Any] = [
+                        "global_opencode_defaults": openCodeConfigPayload(KeychainStore.shared.openCodeDefaults),
+                    ]
+                    if let idArg = requestedID, !idArg.isEmpty,
+                       let session = findSession(orchestrator: orchestrator, idOrIdentifier: idArg)
+                    {
+                        var sessionPayload = sessionSummary(session)
+                        sessionPayload["engine"] = engineKind(for: session).rawValue
+                        if let config = openCodeConfig(for: session) {
+                            sessionPayload["opencode_config"] = openCodeConfigPayload(config)
+                            sessionPayload["uses_global_opencode_defaults"] = workspaceOpenCodeOverride(for: session) == nil
+                        }
+                        payload["session"] = sessionPayload
+                    }
                     return LemonMCPServer.encode(payload)
                 }
             },
@@ -398,10 +498,72 @@ enum LemonMCPTools {
             "labels": s.issue.labelNames,
             "started_at": ISO8601DateFormatter().string(from: s.startedAt),
             "log_line_count": s.logLines.count,
+            "engine": engineKind(for: s).rawValue,
         ]
         if let end = s.endedAt { d["ended_at"] = ISO8601DateFormatter().string(from: end) }
         if let wt = s.worktreePath { d["worktree_path"] = wt }
+        if let openCode = openCodeSessionMetadata(s) {
+            d["opencode"] = openCode
+        }
         return d
+    }
+
+    @MainActor
+    private static func engineKind(for session: Session) -> AgentEngineKind {
+        guard let workspaceId = session.workspaceId,
+              let workspace = KeychainStore.shared.workspaces.first(where: { $0.id == workspaceId })
+        else { return .claudeCode }
+        return workspace.engine.kind
+    }
+
+    @MainActor
+    private static func workspaceOpenCodeOverride(for session: Session) -> OpenCodeWorkspaceConfig? {
+        guard let workspaceId = session.workspaceId,
+              let workspace = KeychainStore.shared.workspaces.first(where: { $0.id == workspaceId })
+        else { return nil }
+        return workspace.engine.openCode
+    }
+
+    @MainActor
+    private static func openCodeConfig(for session: Session) -> OpenCodeWorkspaceConfig? {
+        guard engineKind(for: session) == .openCode else { return nil }
+        return workspaceOpenCodeOverride(for: session) ?? KeychainStore.shared.openCodeDefaults
+    }
+
+    private static func openCodeSessionID(for session: Session) -> String? {
+        let path = WorktreeRunner.openCodeSessionPath(slug: session.issue.pathSlug)
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    @MainActor
+    private static func openCodeSessionMetadata(_ session: Session) -> [String: Any]? {
+        guard let config = openCodeConfig(for: session),
+              let sessionID = openCodeSessionID(for: session)
+        else { return nil }
+        return [
+            "session_id": sessionID,
+            "url": "http://\(config.daemon.host):\(config.daemon.port)/sessions/\(sessionID)",
+            "daemon": ["host": config.daemon.host, "port": config.daemon.port],
+            "models": [
+                "plan": config.models.plan,
+                "code": config.models.code,
+                "review": config.models.review,
+            ],
+        ]
+    }
+
+    private static func openCodeConfigPayload(_ config: OpenCodeWorkspaceConfig) -> [String: Any] {
+        [
+            "models": [
+                "plan": config.models.plan,
+                "code": config.models.code,
+                "review": config.models.review,
+            ],
+            "auto_open_threshold": config.autoOpenThreshold.rawValue,
+            "daemon": ["host": config.daemon.host, "port": config.daemon.port],
+        ]
     }
 
     @MainActor
@@ -430,6 +592,63 @@ enum LemonMCPTools {
         case .ready: "ready"
         case let .failed(m): "failed: \(m)"
         case .idle: "idle"
+        }
+    }
+
+    private nonisolated static func fetchJSON(url: URL) async throws -> Any {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
+            throw MCPError(code: -32008, message: "HTTP request failed for \(url.absoluteString)")
+        }
+        return try JSONSerialization.jsonObject(with: data)
+    }
+
+    private nonisolated static func compactOpenCodeSessionInfo(_ object: Any?) -> [String: Any] {
+        guard let dict = object as? [String: Any] else { return [:] }
+        var output: [String: Any] = [:]
+        for key in ["id", "slug", "title", "agent", "version", "cost", "tokens", "summary", "time"] {
+            if let value = dict[key] { output[key] = value }
+        }
+        if let model = dict["model"] { output["model"] = model }
+        return output
+    }
+
+    private nonisolated static func compactOpenCodeMessages(_ object: Any?) -> [[String: Any]] {
+        let items: [[String: Any]]
+        if let dict = object as? [String: Any], let data = dict["data"] as? [[String: Any]] {
+            items = data
+        } else if let array = object as? [[String: Any]] {
+            items = array
+        } else {
+            return []
+        }
+
+        return items.map { item in
+            let info = (item["info"] as? [String: Any]) ?? item
+            let parts = (item["parts"] as? [[String: Any]]) ?? []
+            let textParts = parts.compactMap { part -> [String: Any]? in
+                let type = part["type"] as? String ?? "unknown"
+                if let text = part["text"] as? String, ["text", "reasoning"].contains(type) {
+                    return ["type": type, "text": String(text.prefix(1000))]
+                }
+                if type == "tool" {
+                    return [
+                        "type": "tool",
+                        "tool": part["tool"] as? String ?? "unknown",
+                        "status": (part["state"] as? [String: Any])?["status"] as? String ?? "unknown",
+                    ]
+                }
+                return nil
+            }
+            return [
+                "id": info["id"] as? String ?? "",
+                "role": info["role"] as? String ?? info["type"] as? String ?? "unknown",
+                "finish": info["finish"] as? String ?? NSNull(),
+                "model": info["modelID"] as? String ?? NSNull(),
+                "provider": info["providerID"] as? String ?? NSNull(),
+                "time": info["time"] as? [String: Any] ?? [:],
+                "parts": textParts,
+            ]
         }
     }
 
