@@ -7,7 +7,7 @@
     "test:scripts": "node scripts/get-field.js config.example.yaml model"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^5.2.1"
   },
   "engines": {
     "node": ">=20"
