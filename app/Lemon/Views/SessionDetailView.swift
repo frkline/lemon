@@ -99,6 +99,30 @@ struct SessionDetailView: View {
         }
     }
 
+    private var isOpenCodeSession: Bool {
+        guard let workspaceId = session.workspaceId,
+              let workspace = KeychainStore.shared.workspaces.first(where: { $0.id == workspaceId })
+        else { return false }
+        return workspace.engine.kind == .openCode
+    }
+
+    private var openCodeSessionURL: URL? {
+        guard isOpenCodeSession,
+              let workspaceId = session.workspaceId,
+              let workspace = KeychainStore.shared.workspaces.first(where: { $0.id == workspaceId }),
+              let sessionID = openCodeSessionID
+        else { return nil }
+        let openCode = workspace.engine.openCode ?? KeychainStore.shared.openCodeDefaults
+        return URL(string: "http://\(openCode.daemon.host):\(openCode.daemon.port)/sessions/\(sessionID)")
+    }
+
+    private var openCodeSessionID: String? {
+        let path = WorktreeRunner.openCodeSessionPath(slug: session.issue.pathSlug)
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     // MARK: - Plan gate (the human approval before any code is written)
 
     private func planReviewCard(session: Session) -> some View {
@@ -191,7 +215,7 @@ struct SessionDetailView: View {
                 }
                 .buttonStyle(GhostButtonStyle())
                 // #67: attach to the live session from the gate.
-                Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
+                Button(joinActionLabel) { joinSession(session) }
                     .buttonStyle(GhostButtonStyle())
                 Spacer()
             }
@@ -334,7 +358,7 @@ struct SessionDetailView: View {
                 // earned moment rather than a loud block. At a gate the gate card
                 // owns Join (#67), so the footer drops it to avoid a duplicate.
                 if !session.status.isGate {
-                    Button(joinCopied ? "Copied cmd" : "Join") { joinSession(session) }
+                    Button(joinActionLabel) { joinSession(session) }
                         .buttonStyle(DetailPrimaryButtonStyle())
                 }
 
@@ -392,9 +416,28 @@ struct SessionDetailView: View {
         }
     }
 
-    // MARK: - Join (attach to the tmux session)
+    private var joinActionLabel: String {
+        if joinCopied { return isOpenCodeSession ? "Copied ID" : "Copied cmd" }
+        return isOpenCodeSession ? "Open" : "Join"
+    }
+
+    // MARK: - Join / Open live session
 
     private func joinSession(_ session: Session) {
+        if isOpenCodeSession {
+            if let url = openCodeSessionURL {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            if let sessionID = openCodeSessionID {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(sessionID, forType: .string)
+                joinCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { joinCopied = false }
+            }
+            return
+        }
+
         let name = "lemon-\(session.issue.pathSlug)"
         // Open a real terminal attached to the tmux session. We write a small
         // `.command` launcher and `open` it: this goes through LaunchServices, so

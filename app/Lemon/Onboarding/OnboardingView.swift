@@ -1801,6 +1801,8 @@ private struct ReadyStep: View {
 
     @State private var claudeAccount: String? = nil
     @State private var claudeChecked = false
+    @State private var openCodeReadiness: AgentEngineReadiness? = nil
+    @State private var openCodeChecked = false
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var terminalAutomation: TerminalAutomationState = .checking
 
@@ -1859,6 +1861,8 @@ private struct ReadyStep: View {
                     warningDetail: "Run `claude login` in Terminal, then come back.",
                 )
 
+                openCodeHintRow
+
                 // Linear labels + workflow education
                 linearLabelsRow
 
@@ -1881,11 +1885,39 @@ private struct ReadyStep: View {
         }
         .onAppear {
             detectClaudeAuth()
+            detectOpenCodeReadiness()
             createLabels()
             // NB: Terminal-automation pre-auth is deliberately NOT here — it
             // fires on the "Start Lemon" action so the TCC prompt lands after
             // onboarding finishes, not mid-step.
         }
+    }
+
+    private var openCodeHintRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: openCodeReadiness?.isReady == true ? "switch.2" : "info.circle.fill")
+                .foregroundStyle(openCodeReadiness?.isReady == true ? LD.statusDone : LD.textSecondary)
+                .font(.system(size: 13, weight: .semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(openCodeReadiness?.isReady == true ? "OpenCode is ready too" : "OpenCode can be added later")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(openCodeHintDetail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(LD.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background((openCodeReadiness?.isReady == true ? LD.statusDone : LD.textPrimary).opacity(0.06), in: RoundedRectangle(cornerRadius: LD.r10))
+    }
+
+    private var openCodeHintDetail: String {
+        guard openCodeChecked else { return "Checking whether `opencode` is configured..." }
+        if openCodeReadiness?.isReady == true {
+            return "Switch any workspace to OpenCode in Settings when Claude limits bite."
+        }
+        return "Start with Claude Code now; configure OpenCode defaults in Settings if you want BYO provider fallback."
     }
 
     /// Trigger the macOS Apple Events authorization dialog for Terminal.app
@@ -2275,6 +2307,18 @@ private struct ReadyStep: View {
             await MainActor.run {
                 claudeAccount = account
                 claudeChecked = true
+            }
+        }
+    }
+
+    private func detectOpenCodeReadiness() {
+        Task.detached(priority: .utility) {
+            let defaults = KeychainStore.shared.openCodeDefaults
+            let config = WorkspaceEngineConfig(kind: .openCode, openCode: defaults)
+            let readiness = AgentEngineFactory.make(kind: .openCode).readiness(config: config)
+            await MainActor.run {
+                openCodeReadiness = readiness
+                openCodeChecked = true
             }
         }
     }

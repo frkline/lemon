@@ -13,6 +13,20 @@ struct WorkspaceEditorPane: View {
     @State private var allReposInFolder: Bool = false
     @State private var homeRepo: String = ""
     @State private var lockdown: Bool = false
+    @State private var engineKind: AgentEngineKind = .claudeCode
+    @State private var openCodePlanModel: String = ""
+    @State private var openCodeCodeModel: String = ""
+    @State private var openCodeReviewModel: String = ""
+    @State private var openCodeAutoOpenThreshold: OpenCodeAutoOpenThreshold = .highConfidenceOnly
+    @State private var openCodeHost: String = "127.0.0.1"
+    @State private var openCodePort: Int = 4096
+    @State private var readiness: AgentEngineReadiness?
+    @State private var readinessLoading = false
+    @State private var readinessTask: Task<Void, Never>?
+    @State private var modelChoicesTask: Task<Void, Never>?
+    @State private var daemonModelChoices: [String] = []
+    @State private var daemonModelChoicesLoading = false
+    @State private var daemonModelChoicesChecked = false
     @State private var identityId: UUID? = nil
     @State private var surfaceId: String = ""
     @State private var deleteArmed = false
@@ -72,6 +86,7 @@ struct WorkspaceEditorPane: View {
                     pathSection
                     identitySection
                     surfaceSection
+                    engineSection
                     folderOptions
                 }
                 actionsRow
@@ -85,7 +100,457 @@ struct WorkspaceEditorPane: View {
         // The "second room": a faint lemon glaze over the inherited window
         // glass, r14. Interior surfaces are resting thin glass.
         .lemonGlass(.thick, tint: LD.tintLemon, cornerRadius: LD.r14)
-        .onAppear { hydrate() }
+        .onAppear {
+            hydrate()
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
+        .onChange(of: engineKind) { _, _ in
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
+        .onChange(of: openCodePlanModel) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeCodeModel) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeReviewModel) { _, _ in refreshReadiness() }
+        .onChange(of: openCodeHost) { _, _ in
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
+        .onChange(of: openCodePort) { _, _ in
+            refreshReadiness()
+            refreshDaemonModelChoices()
+        }
+    }
+
+    // MARK: - Engine
+
+    private var engineSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ENGINE")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.4)
+                .foregroundStyle(LD.textTertiary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(AgentEngineKind.allCases, id: \.self) { kind in
+                        engineChoice(kind)
+                    }
+                }
+
+                if engineKind == .openCode {
+                    VStack(alignment: .leading, spacing: 8) {
+                        openCodeModelField("Plan model", text: $openCodePlanModel)
+                        openCodeModelField("Code model", text: $openCodeCodeModel)
+                        openCodeModelField("Review model", text: $openCodeReviewModel)
+                        modelCatalogStatus
+
+                        HStack(spacing: 8) {
+                            Text("Auto-open")
+                                .font(.system(size: 10))
+                                .foregroundStyle(LD.textSecondary)
+                            Spacer()
+                            Menu {
+                                ForEach(OpenCodeAutoOpenThreshold.allCases, id: \.self) { threshold in
+                                    Button(threshold.displayName) {
+                                        openCodeAutoOpenThreshold = threshold
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(openCodeAutoOpenThreshold.displayName)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(LD.textPrimary)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(LD.textTertiary)
+                                }
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                        }
+
+                        HStack(spacing: 8) {
+                            labeledField("Host", text: $openCodeHost, placeholder: "127.0.0.1")
+                            portField
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+
+                compactEngineReadiness
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lemonGlass(.thin, cornerRadius: LD.r10)
+        }
+    }
+
+    private func engineChoice(_ kind: AgentEngineKind) -> some View {
+        let selected = engineKind == kind
+        return Button {
+            withAnimation(LD.snappy) {
+                engineKind = kind
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(kind.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(selected ? LD.textPrimary : LD.textSecondary)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LD.statusDone)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .lemonGlass(selected ? .regular : .thin,
+                        tint: selected ? LD.tintLemon : nil,
+                        cornerRadius: LD.r10,
+                        ring: selected ? LD.lemon.opacity(0.30) : nil)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openCodeModelField(_ title: String, text: Binding<String>) -> some View {
+        let choices = modelChoices(current: text.wrappedValue)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            HStack(spacing: 8) {
+                providerSelector(text: text)
+                TextField("model", text: openCodeModelNameBinding(text))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+
+                Menu {
+                    if choices.isEmpty {
+                        Button("No model suggestions yet") {}
+                            .disabled(true)
+                    } else {
+                        ForEach(choices, id: \.self) { choice in
+                            Button(choice) {
+                                text.wrappedValue = choice
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Clear") {
+                        text.wrappedValue = ""
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(LD.textSecondary)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: LD.r6)
+                                .fill(LD.textPrimary.opacity(0.08)),
+                        )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .help("Pick from recent or suggested model IDs")
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 9)
+            .background(
+                RoundedRectangle(cornerRadius: LD.r6)
+                    .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+            )
+        }
+    }
+
+    private func providerSelector(text: Binding<String>) -> some View {
+        let provider = providerSlug(for: text.wrappedValue)
+        return Menu {
+            ForEach(openCodeProviderChoices, id: \.self) { provider in
+                Button(providerDisplayName(provider)) {
+                    text.wrappedValue = reprovider(text.wrappedValue, provider: provider)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(providerDisplayName(provider))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LD.textSecondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(LD.textTertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: LD.r6).fill(LD.textPrimary.opacity(0.07)))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+    }
+
+    private func openCodeModelNameBinding(_ text: Binding<String>) -> Binding<String> {
+        Binding(
+            get: {
+                let trimmed = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let split = OpenCodeModelConfig.splitProviderModel(trimmed) {
+                    return split.modelID
+                }
+                return trimmed
+            },
+            set: { rawValue in
+                let model = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !model.isEmpty else {
+                    text.wrappedValue = ""
+                    return
+                }
+                let provider = providerSlug(for: text.wrappedValue)
+                text.wrappedValue = "\(provider)/\(model)"
+            },
+        )
+    }
+
+    private func labeledField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: LD.r6)
+                        .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+                )
+        }
+    }
+
+    private var portField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PORT")
+                .font(.system(size: 8, weight: .bold))
+                .kerning(1.2)
+                .foregroundStyle(LD.textTertiary)
+            TextField("4096", text: openCodePortBinding)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: LD.r6)
+                        .strokeBorder(LD.textPrimary.opacity(0.12), lineWidth: LD.hairlineWidth),
+                )
+        }
+        .frame(width: 96, alignment: .leading)
+    }
+
+    private var openCodePortBinding: Binding<String> {
+        Binding(
+            get: { String(openCodePort) },
+            set: { rawValue in
+                let digits = rawValue.filter(\.isNumber)
+                guard let parsed = Int(digits) else { return }
+                openCodePort = max(1, min(parsed, 65535))
+            },
+        )
+    }
+
+    private var modelCatalogStatus: some View {
+        HStack(spacing: 5) {
+            if daemonModelChoicesLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.65)
+            } else {
+                Circle()
+                    .fill(daemonModelChoices.isEmpty ? LD.textQuaternary : LD.statusDone)
+                    .frame(width: 5, height: 5)
+            }
+
+            Text(modelCatalogStatusText)
+                .font(.system(size: 9))
+                .foregroundStyle(daemonModelChoices.isEmpty ? LD.textQuaternary : LD.statusDone)
+        }
+        .padding(.top, 1)
+    }
+
+    private var compactEngineReadiness: some View {
+        HStack(spacing: 6) {
+            if readinessLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.65)
+            } else if let readiness {
+                Circle()
+                    .fill(readiness.isReady ? LD.statusDone : LD.coral)
+                    .frame(width: 5, height: 5)
+                Text(readiness.isReady ? "Engine ready" : "Finish engine setup in Settings")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(readiness.isReady ? LD.statusDone : LD.coral)
+            } else {
+                Circle()
+                    .fill(LD.textQuaternary)
+                    .frame(width: 5, height: 5)
+                Text("Engine readiness checks run in Settings")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LD.textQuaternary)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var modelCatalogStatusText: String {
+        if daemonModelChoicesLoading {
+            return "Starting OpenCode daemon and loading model catalog..."
+        }
+        if !daemonModelChoices.isEmpty {
+            return "Daemon catalog loaded: \(daemonModelChoices.count) model\(daemonModelChoices.count == 1 ? "" : "s")."
+        }
+        if daemonModelChoicesChecked {
+            return "Using saved/default suggestions; daemon catalog unavailable at \(resolvedOpenCodeHost):\(openCodePort)."
+        }
+        return "Model catalog will load from the configured daemon."
+    }
+
+    private var knownOpenCodeModelChoices: [String] {
+        let saved: [String] = KeychainStore.shared.workspaces
+            .flatMap { (workspace: Workspace) -> [String] in
+                guard workspace.engine.kind == .openCode,
+                      let models = workspace.engine.openCode?.models
+                else { return [] }
+                return [models.plan, models.code, models.review]
+            }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let merged = daemonModelChoices + OpenCodeModelConfig.defaultSuggestedModels + saved
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for model in merged where seen.insert(model).inserted {
+            ordered.append(model)
+        }
+        return ordered
+    }
+
+    private func refreshDaemonModelChoices() {
+        modelChoicesTask?.cancel()
+        guard engineKind == .openCode else {
+            daemonModelChoices = []
+            daemonModelChoicesLoading = false
+            daemonModelChoicesChecked = false
+            return
+        }
+
+        let resolvedHost = resolvedOpenCodeHost
+        let resolvedPort = max(1, min(openCodePort, 65535))
+        daemonModelChoicesLoading = true
+
+        modelChoicesTask = Task {
+            let config = OpenCodeDaemonConfig(host: resolvedHost, port: resolvedPort)
+            _ = await OpenCodeDaemonManager.shared.ensureRunning(config: config)
+            let discovered = await OpenCodeClient(host: resolvedHost, port: resolvedPort).availableModelIDs()
+            guard !Task.isCancelled else { return }
+            daemonModelChoices = discovered
+            daemonModelChoicesLoading = false
+            daemonModelChoicesChecked = true
+            refreshReadiness()
+        }
+    }
+
+    private var resolvedOpenCodeHost: String {
+        let host = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        return host.isEmpty ? "127.0.0.1" : host
+    }
+
+    private func modelChoices(current: String) -> [String] {
+        let trimmedCurrent = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCurrent.isEmpty else { return knownOpenCodeModelChoices }
+        if knownOpenCodeModelChoices.contains(trimmedCurrent) {
+            return knownOpenCodeModelChoices
+        }
+        return [trimmedCurrent] + knownOpenCodeModelChoices
+    }
+
+    private var openCodeProviderChoices: [String] {
+        let providers = knownOpenCodeModelChoices.compactMap(OpenCodeModelConfig.providerSlug(for:))
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for provider in ["openai"] + providers + ["anthropic", "opencode", "ollama"] where seen.insert(provider).inserted {
+            ordered.append(provider)
+        }
+        return ordered
+    }
+
+    private func providerSlug(for modelID: String) -> String {
+        OpenCodeModelConfig.providerSlug(for: modelID) ?? "openai"
+    }
+
+    private func reprovider(_ modelID: String, provider: String) -> String {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = OpenCodeModelConfig.splitProviderModel(trimmed)?.modelID ?? trimmed
+        return model.isEmpty ? "\(provider)/" : "\(provider)/\(model)"
+    }
+
+    private func providerDisplayName(_ provider: String) -> String {
+        switch provider {
+        case "openai": "OpenAI"
+        case "anthropic": "Anthropic"
+        case "opencode": "OpenCode"
+        case "ollama": "Ollama"
+        default: provider
+        }
+    }
+
+    private var engineReadinessBlock: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Text("READINESS")
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(1.2)
+                    .foregroundStyle(LD.textTertiary)
+                if readinessLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let readiness {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(readiness.isReady ? LD.statusDone : LD.coral)
+                            .frame(width: 5, height: 5)
+                        Text(readiness.isReady ? "ready" : "setup needed")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(readiness.isReady ? LD.statusDone : LD.coral)
+                    }
+                }
+            }
+
+            if let readiness {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(readiness.checks) { check in
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: check.status == .pass ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(check.status == .pass ? LD.statusDone : LD.coral)
+                                .padding(.top, 1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(check.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(LD.textPrimary)
+                                Text(check.detail)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(LD.textTertiary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.top, 4)
     }
 
     // MARK: - Header
@@ -632,6 +1097,7 @@ struct WorkspaceEditorPane: View {
     private func hydrate() {
         switch target {
         case .new:
+            applyOpenCodeConfig(KeychainStore.shared.openCodeDefaults)
             if let firstIdentity = identities.first {
                 identityId = firstIdentity.id
                 // Default lockdown ON for GitHub (often public/community repos);
@@ -647,8 +1113,19 @@ struct WorkspaceEditorPane: View {
                 identityId = ws.routing.identityId
                 surfaceId = ws.routing.surfaceId
                 lockdown = ws.lockdown
+                engineKind = ws.engine.kind
+                applyOpenCodeConfig(ws.engine.openCode ?? KeychainStore.shared.openCodeDefaults)
             }
         }
+    }
+
+    private func applyOpenCodeConfig(_ config: OpenCodeWorkspaceConfig) {
+        openCodePlanModel = config.models.plan
+        openCodeCodeModel = config.models.code
+        openCodeReviewModel = config.models.review
+        openCodeAutoOpenThreshold = config.autoOpenThreshold
+        openCodeHost = config.daemon.host
+        openCodePort = config.daemon.port
     }
 
     private func pickFolder() {
@@ -679,6 +1156,37 @@ struct WorkspaceEditorPane: View {
         )
     }
 
+    private func refreshReadiness() {
+        readinessTask?.cancel()
+        let engineConfig = WorkspaceEngineConfig(
+            kind: engineKind,
+            openCode: engineKind == .openCode
+                ? OpenCodeWorkspaceConfig(
+                    models: OpenCodeModelConfig(
+                        plan: openCodePlanModel,
+                        code: openCodeCodeModel,
+                        review: openCodeReviewModel,
+                    ),
+                    autoOpenThreshold: openCodeAutoOpenThreshold,
+                    daemon: OpenCodeDaemonConfig(
+                        host: openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "127.0.0.1" : openCodeHost,
+                        port: max(1, min(openCodePort, 65535)),
+                    ),
+                )
+                : nil,
+        )
+
+        readinessLoading = true
+        readinessTask = Task {
+            let snapshot = await Task.detached(priority: .utility) {
+                AgentEngineFactory.make(kind: engineConfig.kind).readiness(config: engineConfig)
+            }.value
+            guard !Task.isCancelled else { return }
+            readiness = snapshot
+            readinessLoading = false
+        }
+    }
+
     private func save() {
         let keychain = KeychainStore.shared
         guard let identityId else { return }
@@ -697,6 +1205,23 @@ struct WorkspaceEditorPane: View {
         working.homeRepo = homeRepo.trimmingCharacters(in: .whitespaces)
         working.routing = Routing(identityId: identityId, surfaceId: trimmedSurface)
         working.lockdown = lockdown
+        let daemonHost = openCodeHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let openCodeConfig = OpenCodeWorkspaceConfig(
+            models: OpenCodeModelConfig(
+                plan: openCodePlanModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                code: openCodeCodeModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                review: openCodeReviewModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            ),
+            autoOpenThreshold: openCodeAutoOpenThreshold,
+            daemon: OpenCodeDaemonConfig(host: daemonHost.isEmpty ? "127.0.0.1" : daemonHost,
+                                         port: max(1, min(openCodePort, 65535))),
+        )
+        working.engine = WorkspaceEngineConfig(
+            kind: engineKind,
+            openCode: engineKind == .openCode && openCodeConfig != KeychainStore.shared.openCodeDefaults
+                ? openCodeConfig
+                : nil,
+        )
 
         var all = keychain.workspaces
         if let idx = all.firstIndex(where: { $0.id == working.id }) {

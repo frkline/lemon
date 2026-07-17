@@ -546,6 +546,49 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertNil(s.surface(for: workspace), "surface deleted upstream → nil")
     }
 
+    func testWorkspaceDecodesLegacyWithoutEngineField() throws {
+        let raw = """
+        {
+          "id": "8F6D70B9-93F7-4922-AC03-A8A9D5E0C419",
+          "path": "/tmp/repo",
+          "allReposInFolder": false,
+          "homeRepo": "",
+          "routing": {
+            "identityId": "0FE0A8A9-D520-4F90-9197-2A4E5C661011",
+            "surfaceId": "frkline/lemon"
+          },
+          "lockdown": false
+        }
+        """
+        let data = try XCTUnwrap(raw.data(using: .utf8))
+        let workspace = try JSONDecoder().decode(Workspace.self, from: data)
+        XCTAssertEqual(workspace.engine.kind, .claudeCode)
+        XCTAssertNil(workspace.engine.openCode)
+    }
+
+    func testWorkspaceOpenCodeEngineRoundTrips() throws {
+        let workspace = Workspace(
+            path: "/tmp/repo",
+            routing: Routing(identityId: UUID(), surfaceId: "frkline/lemon"),
+            engine: WorkspaceEngineConfig(
+                kind: .openCode,
+                openCode: OpenCodeWorkspaceConfig(
+                    models: OpenCodeModelConfig(plan: "anthropic/claude-opus-4",
+                                                code: "openai/gpt-4.1-mini",
+                                                review: "anthropic/claude-sonnet-4"),
+                    autoOpenThreshold: .anyApprove,
+                    daemon: OpenCodeDaemonConfig(host: "127.0.0.1", port: 4097),
+                ),
+            ),
+        )
+        let encoded = try JSONEncoder().encode(workspace)
+        let decoded = try JSONDecoder().decode(Workspace.self, from: encoded)
+        XCTAssertEqual(decoded.engine.kind, .openCode)
+        XCTAssertEqual(decoded.engine.openCode?.models.code, "openai/gpt-4.1-mini")
+        XCTAssertEqual(decoded.engine.openCode?.autoOpenThreshold, .anyApprove)
+        XCTAssertEqual(decoded.engine.openCode?.daemon.port, 4097)
+    }
+
     // MARK: - Session index (issue #35)
 
     func testSessionIndexEmptyByDefault() {

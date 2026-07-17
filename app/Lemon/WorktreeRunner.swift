@@ -5,9 +5,23 @@ import os
 /// issue (Linear or GitHub). Supports single-repo and multi-repo (all git
 /// repos in a folder) modes.
 final class WorktreeRunner: @unchecked Sendable {
+    struct EngineLaunchRequest {
+        let sessionPath: String
+        let slug: String
+        let sessionLabel: String
+        let sentinelPath: String
+        let mcpConfigPath: String?
+        let planMode: Bool
+    }
+
     private var pollTask: Task<Void, Never>?
     private var stopped = false
     private var pendingActionTask: Task<Void, Never>?
+    private let engine: any AgentEngine
+
+    init(engine: any AgentEngine = ClaudeCodeEngine()) {
+        self.engine = engine
+    }
 
     var onStatusChange: ((SessionStatus) -> Void)?
     var onLogLine: ((String) -> Void)?
@@ -136,7 +150,8 @@ final class WorktreeRunner: @unchecked Sendable {
         // Retriggers revise an already-open PR; autopilot is the explicit opt-out.
         let autopilot = TrustPolicy.isAutopilot(labels: ref.labelNames)
         if autopilot { log("[lemon] autopilot (🍋 auto) — skipping the plan + result gates") }
-        let gated = retrigger == nil && !autopilot
+        let supportsPlanGate = engine.kind == .claudeCode
+        let gated = retrigger == nil && !autopilot && supportsPlanGate
 
         writeContext(
             to: sessionPath,
@@ -163,6 +178,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // Remove any leftover sentinel and log from a prior run.
         try? FileManager.default.removeItem(atPath: sentinelPath)
         try? FileManager.default.removeItem(atPath: logPath(slug: slug))
+        try? FileManager.default.removeItem(atPath: Self.openCodeSessionPath(slug: slug))
 
         // Pre-merge .mcp.json files so Claude skips the interactive MCP discovery prompt.
         let mcpConfigPath = prepareMcpConfig(sessionPath: sessionPath, repos: repos,
@@ -179,26 +195,35 @@ final class WorktreeRunner: @unchecked Sendable {
         let sessionLabel = WorktreeRunner.remoteControlName(
             identifier: identifier, title: ref.title,
         )
-        if let failure = launchTmux(sessionPath: launchPath, slug: slug, sessionLabel: sessionLabel,
-                                    sentinelPath: sentinelPath, mcpConfigPath: mcpConfigPath,
-                                    planMode: planMode)
-        {
-            log("[lemon] tmux launch failed — session aborted", level: .error)
+        let launchRequest = EngineLaunchRequest(
+            sessionPath: launchPath,
+            slug: slug,
+            sessionLabel: sessionLabel,
+            sentinelPath: sentinelPath,
+            mcpConfigPath: mcpConfigPath,
+            planMode: planMode,
+        )
+        if let failure = await engine.launch(request: launchRequest, runner: self) {
+            log("[lemon] \(engine.kind.displayName) launch failed — session aborted", level: .error)
             try? await client.clearState(ref: ref, state: .trigger, auth: auth)
             try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
             let body = switch failure {
             case .tmuxMissing:
                 "🍋 Failed to launch tmux session. Ensure tmux is installed (`brew install tmux`) and re-add the 🍋 label to retry."
-            case let .claudeMissing(bin):
-                "🍋 Couldn't find the `\(bin)` binary on PATH. Install the Claude CLI (or fix your PATH) and re-add the 🍋 label to retry."
+            case let .binaryMissing(bin):
+                "🍋 Couldn't find the `\(bin)` binary on PATH. Install it (or fix your PATH) and re-add the 🍋 label to retry."
             case let .launchError(detail):
-                "🍋 Failed to launch tmux session: \(detail). Re-add the 🍋 label to retry."
+                "🍋 Failed to launch \(engine.kind.displayName) session: \(detail). Re-add the 🍋 label to retry."
             }
             _ = try? await client.postComment(ref: ref, body: body, auth: auth)
             onStatusChange?(.failed)
             return
         }
-        log("[lemon] tmux session started — join: \(Self.tmuxBase) attach -t \(tmuxSessionName(slug: slug))")
+        if engine.kind == .claudeCode {
+            log("[lemon] tmux session started — join: \(Self.tmuxBase) attach -t \(tmuxSessionName(slug: slug))")
+        } else {
+            log("[lemon] \(engine.kind.displayName) session started")
+        }
 
         // Plan gate: surface the plan, wait for human approval, then continue
         // into the build in the SAME session. Returns false if abandoned/failed.
@@ -222,6 +247,7 @@ final class WorktreeRunner: @unchecked Sendable {
             retrigger: retrigger,
             workspacePath: workspace.path,
             sentinelPath: sentinelPath,
+            monitorTmux: engine.kind == .claudeCode,
         )
     }
 
@@ -261,6 +287,7 @@ final class WorktreeRunner: @unchecked Sendable {
                 isMultiRepo: workspace.allReposInFolder, branch: branch,
                 retrigger: persisted.retrigger, workspacePath: workspace.path,
                 sentinelPath: sentinelPath,
+                monitorTmux: engine.kind == .claudeCode,
             )
         }
 
@@ -474,6 +501,7 @@ final class WorktreeRunner: @unchecked Sendable {
             planReadyPath(slug: slug),
             gateSentinelPath(slug: slug),
             resultReadyPath(slug: slug),
+            Self.openCodeSessionPath(slug: slug),
             "/tmp/lemon-pr-\(slug)", // sandbox PR sentinel (#53/#54 completion path)
         ]
         for path in leftovers {
@@ -819,6 +847,10 @@ final class WorktreeRunner: @unchecked Sendable {
         "/tmp/lemon-log-\(slug).txt"
     }
 
+    static func openCodeSessionPath(slug: String) -> String {
+        "/tmp/lemon-opencode-session-\(slug)"
+    }
+
     // MARK: - Plan-gate paths (the contract between the claude side and Lemon)
 
     /// Written by claude (real or fake-claude in the sandbox) when a plan is
@@ -1106,7 +1138,7 @@ final class WorktreeRunner: @unchecked Sendable {
     /// exit-127 pane death, #40).
     enum LaunchFailure {
         case tmuxMissing
-        case claudeMissing(String)
+        case binaryMissing(String)
         case launchError(String)
     }
 
@@ -1124,9 +1156,9 @@ final class WorktreeRunner: @unchecked Sendable {
         return "Read LEMON_CONTEXT.md in this directory. \(echoFirst)complete the task described there. Follow the completion checklist. Use /loop for iterative work."
     }
 
-    private func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
-                            sentinelPath: String, mcpConfigPath: String? = nil,
-                            planMode: Bool = false) -> LaunchFailure?
+    func launchTmux(sessionPath: String, slug: String, sessionLabel: String,
+                    sentinelPath: String, mcpConfigPath: String? = nil,
+                    planMode: Bool = false) -> LaunchFailure?
     {
         // Verify tmux is installed.
         guard runSync("which tmux > /dev/null 2>&1") else {
@@ -1187,7 +1219,7 @@ final class WorktreeRunner: @unchecked Sendable {
         // comment instead of a tmux pane that boots and instantly exits 127.
         guard runSync("command -v '\(claudeBin)' >/dev/null 2>&1") else {
             log("[lemon] claude binary '\(claudeBin)' not found on PATH", level: .error)
-            return .claudeMissing(claudeBin)
+            return .binaryMissing(claudeBin)
         }
 
         // Source common shell profiles so PATH includes Homebrew, npm-global,
@@ -1511,6 +1543,7 @@ final class WorktreeRunner: @unchecked Sendable {
         retrigger: LemonMarker?,
         workspacePath: String,
         sentinelPath: String,
+        monitorTmux: Bool,
     ) async {
         let deadline = Date().addingTimeInterval(8 * 3600) // 8h max; prevents forever-stuck icon
         let slug = ref.pathSlug
@@ -1519,6 +1552,7 @@ final class WorktreeRunner: @unchecked Sendable {
         var lastGemmaAt: Date? = nil
         var resultGateActive = false
         var resumeAt: Date? = nil // set when parked on a Max session-limit wall (#39)
+        var engineHealthMisses = 0
 
         while !stopped, Date() < deadline {
             try? await Task.sleep(for: .seconds(10))
@@ -1617,12 +1651,12 @@ final class WorktreeRunner: @unchecked Sendable {
             // The previous code only handled (a). Without (b) the orchestrator
             // would happily poll for hours after the user closed the window,
             // showing "Executing" forever.
-            let sentinelExists = FileManager.default.fileExists(atPath: sentinelPath)
+            let sentinelExists = monitorTmux && FileManager.default.fileExists(atPath: sentinelPath)
             // Only pay for the debounced death probe when the sentinel is absent —
             // a sentinel is already proof claude exited, and the debounce guards
             // against a lone has-session false-positive killing a live session.
             var tmuxGone = false
-            if !sentinelExists { tmuxGone = await tmuxSessionDead(slug: slug) }
+            if monitorTmux, !sentinelExists { tmuxGone = await tmuxSessionDead(slug: slug) }
             if sentinelExists || tmuxGone {
                 let exitCode: String
                 let cause: String
@@ -1648,41 +1682,63 @@ final class WorktreeRunner: @unchecked Sendable {
                 return
             }
 
+            if !monitorTmux {
+                if await engine.executionHealthy(slug: slug) {
+                    engineHealthMisses = 0
+                } else {
+                    engineHealthMisses += 1
+                    if engineHealthMisses >= 3 {
+                        log("[lemon] \(engine.kind.displayName) runtime became unreachable", level: .error)
+                        _ = try? await client.postComment(
+                            ref: ref,
+                            body: "🍋 Session ended without completing — \(engine.kind.displayName) runtime became unreachable. Re-add the 🍋 label to retry.",
+                            auth: auth,
+                        )
+                        try? await client.clearState(ref: ref, state: .inProgress, auth: auth)
+                        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                        onStatusChange?(.failed)
+                        return
+                    }
+                }
+            }
+
             // Silence detection: track LINE-count growth, not byte count.
             // tmux pipe-pane streams ANSI cursor-redraw sequences continuously
             // even when Claude is wedged on an interactive prompt — byte count
             // keeps inflating and the silence timer never trips. Line count
             // only grows when actual output arrives.
-            let currentLines = countLogLines(at: logPath(slug: slug))
-            if currentLines > lastLineCount {
-                lastLineCount = currentLines
-                lastActivityAt = Date()
-            }
-            // Publish the silence-detector timing for the idle countdown UI (#50).
-            onGemmaTiming?(lastActivityAt, lastGemmaAt)
-            // Quota wall (#39): if parked on a Max session-limit, don't classify
-            // (it would re-fire on a frozen pane). Auto-resume once the reset time
-            // passes — a continuation nudge + a separate Enter — then resume normal
-            // monitoring. The user reset the limit; we just un-park the session.
-            if let resume = resumeAt {
-                if Date() >= resume {
-                    log("[lemon] session limit reset reached — auto-resuming \(ref.identifier)")
-                    sendResumeKeys(slug: slug)
-                    resumeAt = nil
-                    lastClassifySig = nil
+            if monitorTmux {
+                let currentLines = countLogLines(at: logPath(slug: slug))
+                if currentLines > lastLineCount {
+                    lastLineCount = currentLines
                     lastActivityAt = Date()
-                    lastGemmaAt = Date()
-                    onStatusChange?(.executing)
-                    try? await client.clearState(ref: ref, state: .waiting, auth: auth)
-                    try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
                 }
-            } else if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
-                lastGemmaAt = Date()
-                if let reset = await invokeGemma(ref: ref) {
-                    // Park on the quota wall: surface 🍋 Waiting + wait for reset.
-                    resumeAt = reset
-                    onStatusChange?(.waiting)
-                    try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                // Publish the silence-detector timing for the idle countdown UI (#50).
+                onGemmaTiming?(lastActivityAt, lastGemmaAt)
+                // Quota wall (#39): if parked on a Max session-limit, don't classify
+                // (it would re-fire on a frozen pane). Auto-resume once the reset time
+                // passes — a continuation nudge + a separate Enter — then resume normal
+                // monitoring. The user reset the limit; we just un-park the session.
+                if let resume = resumeAt {
+                    if Date() >= resume {
+                        log("[lemon] session limit reset reached — auto-resuming \(ref.identifier)")
+                        sendResumeKeys(slug: slug)
+                        resumeAt = nil
+                        lastClassifySig = nil
+                        lastActivityAt = Date()
+                        lastGemmaAt = Date()
+                        onStatusChange?(.executing)
+                        try? await client.clearState(ref: ref, state: .waiting, auth: auth)
+                        try? await client.applyState(ref: ref, state: .inProgress, auth: auth)
+                    }
+                } else if WorktreeRunner.shouldInvokeGemma(lastActivityAt: lastActivityAt, lastGemmaAt: lastGemmaAt) {
+                    lastGemmaAt = Date()
+                    if let reset = await invokeGemma(ref: ref) {
+                        // Park on the quota wall: surface 🍋 Waiting + wait for reset.
+                        resumeAt = reset
+                        onStatusChange?(.waiting)
+                        try? await client.applyState(ref: ref, state: .waiting, auth: auth)
+                    }
                 }
             }
         }

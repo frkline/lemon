@@ -654,6 +654,32 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - OpenCode defaults (UserDefaults, non-sensitive)
+
+    var openCodeDefaults: OpenCodeWorkspaceConfig {
+        get {
+            if let raw = memory?["openCodeDefaults"],
+               let data = raw.data(using: .utf8),
+               let decoded = try? JSONDecoder().decode(OpenCodeWorkspaceConfig.self, from: data)
+            {
+                return decoded
+            }
+            guard memory == nil,
+                  let data = UserDefaults.standard.data(forKey: "lemon-opencode-defaults"),
+                  let decoded = try? JSONDecoder().decode(OpenCodeWorkspaceConfig.self, from: data)
+            else { return OpenCodeWorkspaceConfig() }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            if memory != nil {
+                memory?["openCodeDefaults"] = String(data: data, encoding: .utf8) ?? ""
+                return
+            }
+            UserDefaults.standard.set(data, forKey: "lemon-opencode-defaults")
+        }
+    }
+
     // MARK: - Legacy write shim (called from onboarding finish())
 
     @discardableResult
@@ -686,6 +712,7 @@ final class KeychainStore: @unchecked Sendable {
         UserDefaults.standard.removeObject(forKey: "lemon-swiftlm-path")
         UserDefaults.standard.removeObject(forKey: "lemon-gemma-model-path")
         UserDefaults.standard.removeObject(forKey: "lemon-ai-enabled")
+        UserDefaults.standard.removeObject(forKey: "lemon-opencode-defaults")
     }
 
     private func readKeychain(_ service: String) -> String? {

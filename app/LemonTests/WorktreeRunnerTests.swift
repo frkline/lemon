@@ -52,6 +52,13 @@ final class WorktreeRunnerTests: XCTestCase {
         XCTAssertEqual(runner.logPath(slug: "demo-42"), "/tmp/lemon-log-demo-42.txt")
     }
 
+    func testOpenCodeSessionPathFormat() {
+        XCTAssertEqual(
+            WorktreeRunner.openCodeSessionPath(slug: "demo-42"),
+            "/tmp/lemon-opencode-session-demo-42",
+        )
+    }
+
     // MARK: - IssueRef.pathSlug end-to-end
 
     func testIssueRefPathSlugForLinear() {
